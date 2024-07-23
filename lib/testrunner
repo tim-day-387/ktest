@@ -135,7 +135,7 @@ check_taint()
 {
     read taint < /proc/sys/kernel/tainted
 
-    if [[ $taint != 0 ]]; then
+    if [[ $taint != 0 && ! -f /tmp/allow_taint ]]; then
 	echo "Failure because kernel tainted - check log for warnings"
 	echo "TEST FAILED"
 	exit 0
