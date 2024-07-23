@@ -101,6 +101,10 @@ done
 # Allow restricted rw access to kernel directory
 mount -t 9p -o trans=virtio,rw kernel "$(dirname "$ktest_out")"
 
+# Update hosts file
+local_ip=$(ip address show eth0 | awk -F' ' '$1 == "inet" { print $2 }' | awk -F'/' '{ print $1 }')
+echo "$local_ip" "$(hostname)" >> /etc/hosts
+
 get_stratch_devs()
 {
     echo
