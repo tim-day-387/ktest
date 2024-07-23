@@ -104,3 +104,8 @@ call_base_test()
 
     . $(dirname $(readlink -e ${BASH_SOURCE[2]}))/$fname
 }
+
+allow_taint()
+{
+    touch /tmp/allow_taint
+}
