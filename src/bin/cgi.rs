@@ -16,6 +16,7 @@ const COMMIT_CSS_JS:       &str =
 .toplevel-container {
         margin-left: 10px;
         height: 100%;
+        display: flex;
 }
 .header {
         position: absolute;
@@ -25,8 +26,11 @@ const COMMIT_CSS_JS:       &str =
         flex-direction: row;
 }
 .horizontal {
-        margin-right: 10px;
+        margin-left: 10px;
         overflow-y: scroll
+}
+.table.tests {
+        white-space: nowrap;
 }
 </style>
 <script>
@@ -309,7 +313,7 @@ fn ci_commit(ci: &Ci) -> cgi::Response {
     writeln!(&mut out, "<div class=\"horizontal-container\">").unwrap();
 
     writeln!(&mut out, "<div class=\"horizontal\">").unwrap();
-    writeln!(&mut out, "<table class=\"table\">").unwrap();
+    writeln!(&mut out, "<table class=\"table tests\">").unwrap();
     for (name, result) in &first_commit.tests {
         writeln!(&mut out, "<tr class={}>", result.status.table_class()).unwrap();
         log_link(&mut out, &format!("c/{}/{}/log.br", &first_commit.id, name), name);
