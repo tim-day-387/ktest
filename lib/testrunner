@@ -98,6 +98,9 @@ for i in "${ktest_make_install[@]}"; do
     popd > /dev/null
 done
 
+# Allow restricted rw access to kernel directory
+mount -t 9p -o trans=virtio,rw kernel "$(dirname "$ktest_out")"
+
 get_stratch_devs()
 {
     echo

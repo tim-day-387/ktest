@@ -337,6 +337,7 @@ start_vm()
 	-gdb		"unix:$ktest_out/vm/gdb,server,nowait"		\
 	-device		virtio-rng-pci					\
 	-virtfs		local,path=/,mount_tag=host,security_model=none,multidevs=remap	\
+	-virtfs		local,path="$(pwd)",mount_tag=kernel,security_model=none,multidevs=remap \
     )
 
     if [[ -f $ktest_kernel_binary/initramfs ]]; then
