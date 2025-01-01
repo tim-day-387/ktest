@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Run ktest in parallel.
+#
+# TODO:
+# - Better error handling
+# - A lot of code is duplicated
+# - We should be able to specify a list of files
+# - Rebuild between executions
+# - Better documentation
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+import os
+import argparse
+import subprocess
+import shutil
+import logging
+import threading
+import signal
+from concurrent.futures import ThreadPoolExecutor
+
+logger = logging.getLogger(__name__)
+
+
+def setup_output_dir(output_dir):
+    if output_dir in ("/", os.path.expanduser("~")):
+        raise ValueError("Refusing to rmtree system directories like '/' or '~'")
+
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+
+    os.makedirs(output_dir, exist_ok=True)
+
+
+def setup_logging(output_dir, verbose):
+    log_file = os.path.join(output_dir, "pktest.log")
+
+    logger.setLevel(logging.DEBUG)
+
+    # File handler
+    file_handler = logging.FileHandler(log_file)
+    file_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    file_handler.setFormatter(file_formatter)
+
+    file_handler.setLevel(logging.DEBUG)
+
+    logger.addHandler(file_handler)
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_formatter = logging.Formatter("%(message)s")
+    console_handler.setFormatter(console_formatter)
+
+    if verbose:
+        console_handler.setLevel(logging.DEBUG)
+    else:
+        console_handler.setLevel(logging.INFO)
+
+    logger.addHandler(console_handler)
+
+
+def run_build(test_dir, kernel_dir, output_dir):
+    test_output_dir = os.path.join(output_dir, "build_dir")
+
+    # Create the output directory if it doesn't exist
+    os.makedirs(test_output_dir, exist_ok=True)
+
+    # Locate the boot.ktest file in the same directory as test_file
+    boot_file = os.path.join(test_dir, "boot.ktest")
+
+    # Run the ktest command
+    command = [
+        "build-test-kernel",
+        "run",
+        "-k",
+        kernel_dir,
+        "-o",
+        test_output_dir,
+        boot_file,
+    ]
+    try:
+        logger.info(f"Running: {' '.join(command)}")
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=os.environ,
+        )
+
+        # Print stdout and stderr as the command runs
+        for raw_line in process.stdout:
+            line = raw_line.decode("utf-8", errors="ignore")
+            logger.debug(line.strip())
+            if "TEST SUCCESS" in line:
+                process.terminate()
+                return ("BUILD", "SUCCESS")
+            elif "TEST FAIL" in line:
+                process.terminate()
+                return ("BUILD", "FAIL")
+
+        for raw_line in process.stderr:
+            line = raw_line.decode("utf-8", errors="ignore")
+            logger.debug(line.strip())
+
+        # Wait for the process to complete
+        process.wait()
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, command)
+
+        # If no result found, return UNKNOWN
+        return ("BUILD", "UNKNOWN")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error running BUILD")
+        return ("BUILD", "FAIL")
+
+
+def run_ktest(test_file, kernel_dir, output_dir, timeout):
+    test_name = os.path.basename(test_file)
+    test_output_dir = os.path.join(output_dir, os.path.splitext(test_name)[0])
+    build_dir = os.path.join(output_dir, "build_dir")
+    test_kernel_dir = os.path.join(test_output_dir, "kernel.x86_64")
+    test_kernel = os.path.join(test_output_dir, "kernel.x86_64", "vmlinuz")
+    build_kernel = os.path.join(build_dir, "kernel.x86_64", "vmlinuz")
+
+    # Create the output directory if it doesn't exist
+    os.makedirs(test_kernel_dir, exist_ok=True)
+    shutil.copyfile(build_kernel, test_kernel)
+
+    # Run the ktest command
+    command = ["ktest", "run", "-o", test_output_dir, test_file]
+
+    def terminate_after_timeout():
+        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        logger.error(f"Timeout reached for {test_name}")
+
+    try:
+        logger.info(f"Running: {' '.join(command)}")
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=os.environ,
+            preexec_fn=os.setsid,
+        )
+
+        timer = threading.Timer(timeout, terminate_after_timeout)
+        timer.start()
+
+        # Print stdout and stderr as the command runs
+        for raw_line in process.stdout:
+            line = raw_line.decode("utf-8", errors="ignore")
+            logger.debug(line.strip())
+            if "TEST SUCCESS" in line:
+                timer.cancel()
+                process.terminate()
+                return (test_name, "SUCCESS")
+            elif "TEST FAIL" in line:
+                timer.cancel()
+                process.terminate()
+                return (test_name, "FAIL")
+
+        for raw_line in process.stderr:
+            line = raw_line.decode("utf-8", errors="ignore")
+            logger.debug(line.strip())
+
+        # Wait for the process to complete
+        process.wait()
+        timer.cancel()
+
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, command)
+
+        # If no result found, return UNKNOWN
+        return (test_name, "UNKNOWN")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error running {test_name}: {e}")
+        return (test_name, "FAIL")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run ktest in parallel.")
+    parser.add_argument("tests_dir", help="Directory containing ktest files.")
+    parser.add_argument(
+        "-k", "--kernel_dir", required=True, help="Kernel source directory."
+    )
+    parser.add_argument("-o", "--output_dir", required=True, help="Output directory.")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose output."
+    )
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=os.cpu_count(),
+        help="Number of parallel jobs (default: number of CPUs).",
+    )
+    parser.add_argument(
+        "-t",
+        "--timeout",
+        type=int,
+        default=600,
+        help="Timeout for each test in seconds (default: 600 seconds).",
+    )
+
+    args = parser.parse_args()
+
+    setup_output_dir(args.output_dir)
+    setup_logging(args.output_dir, args.verbose)
+
+    # Validate inputs
+    if not os.path.isdir(args.tests_dir):
+        logger.error(f"Error: tests_dir {args.tests_dir} is not a valid directory.")
+        return
+
+    if not os.path.isdir(args.kernel_dir):
+        logger.error(f"Error: kernel_dir {args.kernel_dir} is not a valid directory.")
+        return
+
+    # Gather all test files
+    test_files = [
+        os.path.join(args.tests_dir, f)
+        for f in os.listdir(args.tests_dir)
+        if f.endswith(".ktest")
+    ]
+
+    if not test_files:
+        logger.error(f"No .ktest files found in {args.tests_dir}.")
+        return
+
+    results = []
+
+    # Run the build
+    run_build(args.tests_dir, args.kernel_dir, args.output_dir)
+
+    # Run tests in parallel
+    with ThreadPoolExecutor(max_workers=args.jobs) as executor:
+        futures = {
+            executor.submit(
+                run_ktest, test_file, args.kernel_dir, args.output_dir, args.timeout
+            ): test_file
+            for test_file in test_files
+        }
+
+        for future in futures:
+            test_name, result = future.result()  # Wait for the task to complete
+            results.append((test_name, result))
+
+    # Pretty print results
+    logger.info("\nTest Results:")
+    for test_name, result in results:
+        logger.info(f"{test_name}: {result}")
+
+
+if __name__ == "__main__":
+    main()
