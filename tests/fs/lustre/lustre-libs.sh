@@ -32,6 +32,7 @@ fi
 export LUSTRE="$lustre_pkg_path/lustre"
 export LCTL="$LUSTRE/utils/lctl"
 export LNETCTL="$LUSTRE/../lnet/utils/lnetctl"
+export LNETDUMP="/host/home/timothy/Programming/lustre-release/utils/lnetdump/lnetdump"
 export RUNAS_ID="1000"
 
 # Update paths
@@ -180,6 +181,15 @@ function require-lustre-kernel-config()
 {
     require-lustre-base-kernel-config
     require-lustre-modules-kernel-config
+}
+
+function require-lustre-ebpf-config()
+{
+    # More tracing support!
+    require-kernel-config BPF_SYSCALL=y
+    require-kernel-config DEBUG_INFO_BTF=y
+    require-kernel-config DEBUG_INFO_BTF_MODULES=y
+    require-kernel-config BPF_JIT=y
 }
 
 function require-lustre-debug-kernel-config()
@@ -336,6 +346,12 @@ function __setup_lustrefs()
     load_lustre_modules
 
     FSTYPE="$FSTYPE" "$lustre_pkg_path/lustre/tests/llmount.sh"
+
+    sleep 1
+
+    # TODO: Make this tunable...
+    # valgrind --leak-check=full "$LNETDUMP" &
+    # "$LNETDUMP" &
 
     # Disable identity upcall (for OSD wbcfs)
     "$LCTL" set_param mdt.*.identity_upcall=NONE

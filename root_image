@@ -167,6 +167,7 @@ PACKAGES+=(erofs-utils squashfs-tools-ng)
 # Lustre support
 PACKAGES+=(libyaml-0-2 libyaml-dev)
 PACKAGES+=(podman fuse-overlayfs)
+PACKAGES+=(bpftool pahole bpftrace)
 
 # suspend testing:
 # [[ $KERNEL_ARCH = x86 ]] && PACKAGES+=(uswsusp)
