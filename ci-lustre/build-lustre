@@ -1,0 +1,28 @@
+#!/bin/bash
+
+ktest_dir="$(dirname "$(readlink -f "$0")")/../"
+
+. "$ktest_dir/lib/libktest.sh"
+
+kernel_src_dir="/home/timothy/git/linux/"
+kernel_build_dir="/tmp/ktest-out/"
+ktest="../ktest/tests/fs/lustre/llmount.ktest"
+lustre_src_dir="/home/timothy/git/lustre-release/"
+
+echo "KERNEL BUILD:"
+CC=clang-20 FSTYPE=wbcfs build-test-kernel build -k "$kernel_src_dir" -o "$kernel_build_dir" "$ktest"
+
+build_lustre() {
+    cd "$lustre_src_dir"
+    git clean -xdf > /dev/null
+
+    echo "PATCH:"
+    git log -1 --pretty=%B
+
+    echo "BUILD:"
+    ./autogen.sh
+    ./configure LLVM=-20 CFLAGS="-Wno-error=attribute-warning" CONFIG_SITE="./contrib/config.site.ktest"
+    make -j$(nproc)
+}
+
+build_lustre
