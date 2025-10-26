@@ -129,6 +129,7 @@ ktest_usage_cmds()
 {
     echo "  boot                Boot a VM without running anything"
     echo "  run <test>          Run a kernel test"
+    echo "  build <test>        Build kernel for a test configuration"
     echo "  ssh                 Login as root"
     echo "  gdb                 Connect to qemu's gdb interface"
     echo "  kgdb                Connect to kgdb"
