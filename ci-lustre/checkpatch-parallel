@@ -1,0 +1,93 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# Parallel version of git-checkpatch that processes files concurrently.
+# Check the progress of checkpatch.pl fixes in the Lustre tree.
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+export CHECKPATCH=${CHECKPATCH:-"/home/timothy/git/linux/scripts/checkpatch.pl"}
+
+# Get number of processors, default to 4 if nproc not available
+NPROC=${NPROC:-$(nproc 2>/dev/null || echo 4)}
+
+DIRS="$*"
+[ -z "$DIRS" ] && DIRS="ls -d */"
+
+# Create temporary directory for results
+TMPDIR=$(mktemp -d)
+trap "rm -rf $TMPDIR" EXIT
+
+# Function to process a single file and record results
+process_file() {
+	local FILE="$1"
+	local DIR="$2"
+
+	# Count lines in this file
+	local LINES=$(wc -l < "$FILE")
+
+	# Run checkpatch and capture output
+	local OUTPUT=$($CHECKPATCH --show-types --terse -f "$FILE" 2>/dev/null | grep -v "total:")
+
+	# Count total errors/warnings
+	local ERRORS=$(echo "$OUTPUT" | grep -c ":")
+
+	# Write line count and error count to temp file
+	echo "$LINES $ERRORS" >> "$TMPDIR/$(echo "$DIR" | sed 's/\//_/g').lines"
+
+	# Extract and count issue types (format: WARNING:TYPE: or ERROR:TYPE:)
+	echo "$OUTPUT" | sed -n 's/.*\(WARNING\|ERROR\):\([^:]*\):.*/\2/p' | while read -r TYPE; do
+		echo "$TYPE" >> "$TMPDIR/$(echo "$DIR" | sed 's/\//_/g').types"
+	done
+}
+
+export -f process_file
+export CHECKPATCH
+export TMPDIR
+
+# Build list of all files with their directory
+for D in $DIRS; do
+	[ ! -d "$D" ] && continue
+	FILES=$(find "$D" -name "*.[ch]")
+	[ -z "$FILES" ] && continue
+
+	# Process all files in this directory in parallel
+	echo "$FILES" | while read -r F; do
+		echo "$F" "$D"
+	done
+done | if command -v parallel >/dev/null 2>&1; then
+	# Use GNU parallel if available
+	parallel --colsep ' ' -j"$NPROC" process_file {1} {2}
+else
+	# Fall back to xargs
+	xargs -n2 -P"$NPROC" bash -c 'process_file "$1" "$2"' _
+fi
+
+# Aggregate and display results
+for D in $DIRS; do
+	[ ! -d "$D" ] && continue
+
+	DIR_PREFIX=$(echo "$D" | sed 's/\//_/g')
+	LINES_FILE="$TMPDIR/${DIR_PREFIX}.lines"
+	TYPES_FILE="$TMPDIR/${DIR_PREFIX}.types"
+
+	[ ! -f "$LINES_FILE" ] && continue
+
+	# Sum up lines and errors from all files in this directory
+	TOT=$(awk '{sum+=$1} END {print sum}' "$LINES_FILE")
+	CNT=$(awk '{sum+=$2} END {print sum}' "$LINES_FILE")
+
+	D=$(basename "$D")
+	printf "%-16s %-10s %-11s\n" \
+	       "$D:" "loc=$TOT" "errors/warnings=$CNT"
+
+	# Display breakdown by type if there are any issues
+	if [ -f "$TYPES_FILE" ] && [ "$CNT" -gt 0 ]; then
+		sort "$TYPES_FILE" | uniq -c | sort -rn | while read -r count type; do
+			printf "  %-50s %s\n" "$type" "$count"
+		done
+		echo
+	fi
+done
