@@ -318,6 +318,28 @@ cmd_run()
     start_vm
 }
 
+cmd_build()
+{
+    if [[ $# = 0 ]]; then
+	echo "build-test-kernel: missing test"
+	usage
+	exit 1
+    fi
+
+    ktest_test=$(realpath "$1")
+    shift
+    ktest_testargs="$@"
+
+    echo Running test $(basename "$ktest_test") on $(uname -n) at $(pwd)
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    run_quiet "building kernel" build_kernel
+}
+
 cmd_boot()
 {
     cmd_run "$ktest_dir/boot.ktest"
