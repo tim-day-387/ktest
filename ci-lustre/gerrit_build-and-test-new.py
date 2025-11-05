@@ -871,28 +871,6 @@ def make_change_from_hash(githash, subject, branch):
     return change
 
 
-def isJobListStatic():
-    if testing_queue.qsize():
-        return False  # Don't shutdown anything if we have jobs waiting in the
-        # wings
-    if not WorkList:
-        return True  # No jobs at all - sleep everybody
-
-    for item in WorkList:  # let's see if we have anything in the list that
-        # might need mode nodes soon
-        if item.Aborted:
-            continue  # Whatever is in there does not really matter.
-        if not item.BuildDone and not item.BuildError and item.initial_tests:
-            return False  # new build job with actual tests
-        if not item.InitialTestingDone and not item.InitialTestingError and item.tests:
-            return (
-                False  # In initial testing, not failed and about to start full testing.
-            )
-
-    # Did not find anything in the testlist, so no new jobs expected.
-    return True
-
-
 class Reviewer(object):
     """
     * Poll gerrit instance for updates to changes matching project and branch.
@@ -1071,12 +1049,49 @@ class Reviewer(object):
         # Gerrit uses " )]}'" to guard against XSSI.
         return json.loads(res.content[5:])
 
+    def generate_log_page(self, output, page_path, logs, name, home_path, rc):
+        template = """\
+<html lang="en">
+<body>
+<pre>
+{text}
+</pre>
+</body>
+</html>
+"""
+        html = template.format(text=logs)
+
+        with open(os.path.join(output, page_path), "w") as outfile:
+            outfile.write(html)
+
+        os.setxattr(home_path, "user.result" + name, str(rc).encode())
+
+        # Choose color and status text based on return code
+        if rc == 0:
+            color = "green"
+            status = "PASS"
+        else:
+            color = "red"
+            status = "FAIL"
+
+        # Two columns: link and status
+        return f'<tr><td><a href="{page_path}">{name}</a></td><td style="color:{color}">{status}</td></tr>'
+
+    def run_script(self, command):
+        pipe = subprocess.Popen(
+            command,
+            shell=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        out, _ = pipe.communicate("")
+        returncode = pipe.returncode
+        return out, returncode
+
     def get_patch(self, change):
-        """
-        GET and decode the (current) patch for change.
-        """
         revision = change.get("current_revision")
-        args = (
+        command = (
             "cd /home/timothy/git/lustre-release ; git fetch https://"
             + GERRIT_HOST
             + "/"
@@ -1085,19 +1100,11 @@ class Reviewer(object):
             + change["revisions"][revision]["ref"]
             + "&& git format-patch -1 -n --stdout FETCH_HEAD | head -n -3"
         )
-        pipe = subprocess.Popen(
-            args,
-            shell=True,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        out, err = pipe.communicate("")
-        return out
+        return self.run_script(command)
 
-    def build_patch(self, change):
+    def checkout_patch(self, change):
         revision = change.get("current_revision")
-        args = (
+        command = (
             "cd /home/timothy/git/lustre-release ; git fetch https://"
             + GERRIT_HOST
             + "/"
@@ -1106,24 +1113,11 @@ class Reviewer(object):
             + change["revisions"][revision]["ref"]
             + "&& git checkout FETCH_HEAD"
         )
-        pipe = subprocess.Popen(
-            args,
-            shell=True,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        out, err = pipe.communicate("")
-        args = "cd /home/timothy/Programming/ktest ; ./ci-lustre/build-lustre"
-        pipe = subprocess.Popen(
-            args,
-            shell=True,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
-        out, _ = pipe.communicate("")
-        return out
+        return self.run_script(command)
+
+    def build_patch(self, change):
+        command = "cd /home/timothy/Programming/ktest ; ./ci-lustre/build-lustre"
+        return self.run_script(command)
 
     def analyze_patch(self, change):
         template = """\
@@ -1158,7 +1152,7 @@ class Reviewer(object):
 <h1>{title}</h1>
 <table>
 <thead>
-<tr><th>Tests</th></tr>
+<tr><th>Test</th><th>Status</th></tr>
 </thead>
 <tbody>
 {rows}
@@ -1167,62 +1161,51 @@ class Reviewer(object):
 </body>
 </html>
 """
-
-        raw_template = """\
-<html lang="en">
-<body>
-<pre>
-{text}
-</pre>
-</body>
-</html>
-"""
-
-        raw_template_2 = """\
-<html lang="en">
-<body>
-<pre>
-{text}
-</pre>
-</body>
-</html>
-"""
-
         """ Extract useful info from a patch. Things like new tests added,
             tests modified, is it a comment-only change and so on. """
-        patch = self.get_patch(change)
+        patch, rc = self.get_patch(change)
         if not patch:
             return
 
         revision = change.get("current_revision")
         raw_change_id = change["id"].split("~", 1)[1]
         change_id = raw_change_id + "_" + revision
-        patch_path = OUTPUT_DIR + "/" + change_id + "_patch.html"
-        build_path = OUTPUT_DIR + "/" + change_id + "_build.html"
         home_path = OUTPUT_DIR + "/" + change_id + "_home.html"
         subject = change.get("subject", "")
+        rows = ""
 
         try:
             commit_message = change["revisions"][str(revision)]["commit"]["message"]
         except:
             commit_message = ""
 
-        html = raw_template.format(text=commit_message)
+        open(home_path, "wb").close()
 
-        with open(patch_path, "w") as outfile:
-            outfile.write(html)
+        rows = rows + self.generate_log_page(
+            OUTPUT_DIR, change_id + "_patch.html", commit_message, "Patch", home_path, 0
+        )
 
-        build_log = self.build_patch(change)
+        self.checkout_patch(change)
+
+        build_log, rc = self.build_patch(change)
         if not build_log:
             return
 
         build_log_str = build_log.decode("utf-8")
-        html = raw_template_2.format(text=build_log_str)
 
-        with open(build_path, "w") as outfile:
-            outfile.write(html)
+        rows = rows + self.generate_log_page(
+            OUTPUT_DIR, change_id + "_build.html", build_log_str, "Build", home_path, rc
+        )
 
-        rows = f'<tr><td><a href="{change_id}_patch.html">Patch</a></td></tr><tr><td><a href="{change_id}_build.html">Build</a></td></tr>'
+        rows = rows + self.generate_log_page(
+            OUTPUT_DIR,
+            change_id + "_fail.html",
+            "This will always fail...",
+            "Failure",
+            home_path,
+            -1,
+        )
+
         html = template.format(title=subject, rows=rows)
 
         with open(home_path, "w") as outfile:
@@ -1846,102 +1829,6 @@ class Reviewer(object):
             time.sleep(self.update_interval)
 
             print_WorkList_to_HTML()
-
-
-def save_WorkItem(workitem):
-    print_WorkList_to_HTML()
-    if workitem not in WorkList:  # already removed?
-        return
-    workitem.save(SAVEDSTATE_DIR)
-
-
-def print_garbage():
-    snapshot = tracemalloc.take_snapshot()
-    top_stats = snapshot.statistics("lineno")
-    print("MEMORY:")
-    try:
-        for stat in top_stats[:20]:
-            print(stat)
-        try:
-            sys.stdout.flush()
-        except:
-            pass
-    except BlockingIOError:
-        print("Overflow of printing queue")
-
-
-def donewith_WorkItem(workitem):
-    print_WorkList_to_HTML()
-    print("Trying to be done with buildid " + str(workitem.buildnr))
-    workitem.save(DONEWITH_DIR)
-    try:
-        WorkList.remove(workitem)
-    except ValueError:
-        pass  # We are not in the list, e.g. because this is a duplicate hit for like a crash processing
-    else:
-        item = {}
-        link = ""
-        if workitem.artifactsdir:
-            link = (
-                '<a href="'
-                + workitem.artifactsdir.replace(fsconfig["root_path_offset"], "")
-                + "/"
-                + workitem.get_results_filename()
-                + '">'
-            )
-        item["build"] = link + str(workitem.buildnr)
-        if workitem.retestiteration:
-            item["build"] += " retest %d" % (workitem.retestiteration)
-        item["build"] += "</a>"
-        item["subject"] = link + workitem.change["subject"] + "</a>"
-        item["status"] = workitem.get_current_text_status()
-        DoneList.append(item)
-        # Make sure it does not grow too big
-        if len(DoneList) >= 101:
-            DoneList.pop(0)
-
-        if workitem.change.get("completion-cb") or fsconfig.get(
-            "testsetdone-cb"
-        ):  # Need to deliver the results
-            if workitem.Aborted:
-                status = "ABORTED"
-            elif (
-                workitem.BuildError
-                or workitem.InitialTestingError
-                or workitem.TestingError
-            ):
-                status = "FAIL"
-            else:
-                status = "GOOD"
-            if workitem.change.get("completion-cb"):
-                args = [
-                    workitem.change["completion-cb"],
-                    workitem.change["subject"],
-                    status,
-                    str(workitem.buildnr),
-                    str(workitem.retestiteration),
-                ]
-                try:
-                    subprocess.call(args)
-                except OSError as e:
-                    print("Error running custom callback for " + str(args))
-            if fsconfig.get("testsetdone-cb"):
-                args = [
-                    fsconfig["testsetdone-cb"],
-                    workitem.change["subject"],
-                    status,
-                    str(workitem.buildnr),
-                    str(workitem.retestiteration),
-                ]
-                try:
-                    subprocess.call(args)
-                except OSError as e:
-                    print("Error running custom callback for " + str(args))
-
-    try:
-        os.unlink(SAVEDSTATE_DIR + "/" + workitem.get_saved_name())
-    except OSError:
-        pass
 
 
 def print_WorkList_to_HTML():
