@@ -1050,7 +1050,7 @@ class Reviewer(object):
         # Gerrit uses " )]}'" to guard against XSSI.
         return json.loads(res.content[5:])
 
-    def generate_log_page(self, output, page_path, logs, name, home_path, rc, enforced):
+    def generate_log_page(self, output, page_path, logs, name, home_path, rc, enforced, time):
         template = """\
 <html lang="en">
 <body>
@@ -1080,9 +1080,11 @@ class Reviewer(object):
         else:
             test_type = "Optional"
 
-        return f'<tr><td><a href="{page_path}">{name}</a></td><td>{test_type}</td><td style="color:{color}">{status}</td></tr>'
+        return f'<tr><td><a href="{page_path}">{name}</a></td><td>{test_type}</td><td>{time}</td><td style="color:{color}">{status}</td></tr>'
 
     def run_script(self, command):
+        start_time = time.time()
+
         pipe = subprocess.Popen(
             command,
             shell=True,
@@ -1092,7 +1094,10 @@ class Reviewer(object):
         )
         out, _ = pipe.communicate("")
         returncode = pipe.returncode
-        return out, returncode
+
+        elapsed_time = int(time.time() - start_time)
+
+        return out, returncode, elapsed_time
 
     def get_patch(self, change):
         revision = change.get("current_revision")
@@ -1157,7 +1162,7 @@ class Reviewer(object):
 <h1>{title}</h1>
 <table>
 <thead>
-<tr><th>Test</th><th>Type</th><th>Status</th></tr>
+<tr><th>Test</th><th>Type</th><th>Runtime</th><th>Status</th></tr>
 </thead>
 <tbody>
 {rows}
@@ -1168,7 +1173,7 @@ class Reviewer(object):
 """
         """ Extract useful info from a patch. Things like new tests added,
             tests modified, is it a comment-only change and so on. """
-        patch, rc = self.get_patch(change)
+        patch, rc, runtime = self.get_patch(change)
         if not patch:
             return
 
@@ -1187,19 +1192,19 @@ class Reviewer(object):
         open(home_path, "wb").close()
 
         rows = rows + self.generate_log_page(
-            OUTPUT_DIR, change_id + "_patch.html", commit_message, "Patch", home_path, 0, True
+            OUTPUT_DIR, change_id + "_patch.html", commit_message, "Patch", home_path, 0, True, runtime
         )
 
         self.checkout_patch(change)
 
-        build_log, rc = self.build_patch(change)
+        build_log, rc, runtime = self.build_patch(change)
         if not build_log:
             return
 
         build_log_str = build_log.decode("utf-8")
 
         rows = rows + self.generate_log_page(
-            OUTPUT_DIR, change_id + "_build.html", build_log_str, "Build", home_path, rc, True
+            OUTPUT_DIR, change_id + "_build.html", build_log_str, "Build", home_path, rc, True, runtime
         )
 
         rows = rows + self.generate_log_page(
@@ -1209,7 +1214,8 @@ class Reviewer(object):
             "Failure",
             home_path,
             -1,
-            False
+            False,
+            0
         )
 
         html = template.format(title=subject, rows=rows)
