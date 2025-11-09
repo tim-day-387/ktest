@@ -5,6 +5,7 @@
 # Copyright (c) 2014, Intel Corporation.
 #
 # Author: John L. Hammond <john.hammond@intel.com>
+# Modified for ktest: Timothy Day <timday@amazon.com>
 #
 
 """
@@ -1049,7 +1050,7 @@ class Reviewer(object):
         # Gerrit uses " )]}'" to guard against XSSI.
         return json.loads(res.content[5:])
 
-    def generate_log_page(self, output, page_path, logs, name, home_path, rc):
+    def generate_log_page(self, output, page_path, logs, name, home_path, rc, enforced):
         template = """\
 <html lang="en">
 <body>
@@ -1065,8 +1066,8 @@ class Reviewer(object):
             outfile.write(html)
 
         os.setxattr(home_path, "user.result" + name, str(rc).encode())
+        os.setxattr(home_path, "user.enforced" + name, str(enforced).encode())
 
-        # Choose color and status text based on return code
         if rc == 0:
             color = "green"
             status = "PASS"
@@ -1074,8 +1075,12 @@ class Reviewer(object):
             color = "red"
             status = "FAIL"
 
-        # Two columns: link and status
-        return f'<tr><td><a href="{page_path}">{name}</a></td><td style="color:{color}">{status}</td></tr>'
+        if enforced:
+            test_type = "Enforced"
+        else:
+            test_type = "Optional"
+
+        return f'<tr><td><a href="{page_path}">{name}</a></td><td>{test_type}</td><td style="color:{color}">{status}</td></tr>'
 
     def run_script(self, command):
         pipe = subprocess.Popen(
@@ -1152,7 +1157,7 @@ class Reviewer(object):
 <h1>{title}</h1>
 <table>
 <thead>
-<tr><th>Test</th><th>Status</th></tr>
+<tr><th>Test</th><th>Type</th><th>Status</th></tr>
 </thead>
 <tbody>
 {rows}
@@ -1182,7 +1187,7 @@ class Reviewer(object):
         open(home_path, "wb").close()
 
         rows = rows + self.generate_log_page(
-            OUTPUT_DIR, change_id + "_patch.html", commit_message, "Patch", home_path, 0
+            OUTPUT_DIR, change_id + "_patch.html", commit_message, "Patch", home_path, 0, True
         )
 
         self.checkout_patch(change)
@@ -1194,7 +1199,7 @@ class Reviewer(object):
         build_log_str = build_log.decode("utf-8")
 
         rows = rows + self.generate_log_page(
-            OUTPUT_DIR, change_id + "_build.html", build_log_str, "Build", home_path, rc
+            OUTPUT_DIR, change_id + "_build.html", build_log_str, "Build", home_path, rc, True
         )
 
         rows = rows + self.generate_log_page(
@@ -1204,6 +1209,7 @@ class Reviewer(object):
             "Failure",
             home_path,
             -1,
+            False
         )
 
         html = template.format(title=subject, rows=rows)
@@ -1871,7 +1877,7 @@ def print_WorkList_to_HTML():
     <col style="width: 20%">
 </colgroup>
 <thead>
-<tr><th>Tests</th><th>Subject</th><th>Hash</th><th>Change ID</th><th>Time</th></tr>
+<tr><th>Tests</th><th>Subject</th><th>Hash</th><th>Change ID</th><th>Time</th><th>Enforced</th><th>Optional</th></tr>
 </thead>
 <tbody>
 {rows}
@@ -1880,6 +1886,8 @@ def print_WorkList_to_HTML():
 </body>
 </html>
 """
+
+    shutil.copy("/home/timothy/ws/ktest/ci-lustre/style/styles.css", OUTPUT_DIR)
 
     files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith("_home.html")]
     files.sort()
@@ -1907,7 +1915,46 @@ def print_WorkList_to_HTML():
             timestamp = 0
             readable = "Invalid"
 
-        attrs.extend([subject, patch_revision, change_id, readable])
+        # --- Collect all result/enforced xattrs ---
+        result_attrs = []
+        for attr in os.listxattr(path):
+            if attr.startswith("user.result"):
+                name = attr[len("user.result") :]
+                try:
+                    rc = int(os.getxattr(path, attr).decode(errors="replace"))
+                except Exception:
+                    rc = -1
+                enforced_attr = f"user.enforced{name}"
+                try:
+                    enforced_val = os.getxattr(path, enforced_attr).decode(errors="replace")
+                    enforced = enforced_val.strip().lower() == "true"
+                except OSError:
+                    enforced = False
+                result_attrs.append((name, rc, enforced))
+
+        # --- Compute PASS/FAIL for enforced and optional ---
+        enforced_results = [rc for _, rc, enforced in result_attrs if enforced]
+        optional_results = [rc for _, rc, enforced in result_attrs if not enforced]
+
+        def summarize(results):
+            if not results:
+                return "N/A", "gray"
+            if all(rc == 0 for rc in results):
+                return "PASS", "green"
+            return "FAIL", "red"
+
+        enforced_summary, enforced_color = summarize(enforced_results)
+        optional_summary, optional_color = summarize(optional_results)
+
+        # --- Build attribute columns ---
+        attrs.extend([
+            subject,
+            f'<a href="https://review.whamcloud.com/plugins/gitiles/fs/lustre-release/+/{patch_revision}">{patch_revision}</a>',
+            f'<a href="https://review.whamcloud.com/c/fs/lustre-release/+/{change_id}">{change_id}</a>',
+            readable,
+            f'<span style="color:{enforced_color};">{enforced_summary}</span>',
+            f'<span style="color:{optional_color};">{optional_summary}</span>',
+        ])
 
         file_data.append((f, timestamp, attrs))
 
@@ -1916,10 +1963,8 @@ def print_WorkList_to_HTML():
 
     # Build HTML rows
     for f, timestamp, attrs in file_data:
-        attr_html = "".join(f"<td>{pyhtml.escape(v)}</td>" for v in attrs)
-        rows.append(
-            f'<tr><td><a href="{pyhtml.escape(f)}">Link</a></td>{attr_html}</tr>'
-        )
+        attr_html = "".join(f"<td>{v}</td>" for v in attrs)
+        rows.append(f'<tr><td><a href="{pyhtml.escape(f)}">Link</a></td>{attr_html}</tr>')
 
     # Combine into final HTML
     rows = "\n".join(rows)
