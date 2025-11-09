@@ -1116,7 +1116,7 @@ class Reviewer(object):
         return self.run_script(command)
 
     def build_patch(self, change):
-        command = "cd /home/timothy/Programming/ktest ; ./ci-lustre/build-lustre"
+        command = "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre"
         return self.run_script(command)
 
     def analyze_patch(self, change):

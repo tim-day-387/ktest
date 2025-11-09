@@ -10,7 +10,7 @@ ktest="../ktest/tests/fs/lustre/llmount.ktest"
 lustre_src_dir="/home/timothy/git/lustre-release/"
 
 echo "KERNEL BUILD:"
-CC=clang-20 FSTYPE=wbcfs build-test-kernel build -k "$kernel_src_dir" -o "$kernel_build_dir" "$ktest"
+CC=clang-20 FSTYPE=wbcfs /home/timothy/ws/ktest/build-test-kernel build -k "$kernel_src_dir" -o "$kernel_build_dir" "$ktest"
 
 build_lustre() {
     cd "$lustre_src_dir"
