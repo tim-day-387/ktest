@@ -1100,6 +1100,17 @@ class Reviewer(object):
 
         return out, returncode, elapsed_time
 
+    def run_test(self, command, change_id, name, home_path, enforced):
+        log, rc, runtime = self.run_script(command)
+        if not log:
+            return
+
+        log_str = log.decode("utf-8")
+
+        return self.generate_log_page(
+            OUTPUT_DIR, change_id + "_" + name.replace(" ", "_") + ".html", log_str, name, home_path, rc, enforced, runtime
+        )
+
     def get_patch(self, change):
         revision = change.get("current_revision")
         command = (
@@ -1124,10 +1135,6 @@ class Reviewer(object):
             + change["revisions"][revision]["ref"]
             + "&& git checkout FETCH_HEAD"
         )
-        return self.run_script(command)
-
-    def build_patch(self, change):
-        command = "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre"
         return self.run_script(command)
 
     def analyze_patch(self, change):
@@ -1198,25 +1205,28 @@ class Reviewer(object):
 
         self.checkout_patch(change)
 
-        build_log, rc, runtime = self.build_patch(change)
-        if not build_log:
-            return
-
-        build_log_str = build_log.decode("utf-8")
-
-        rows = rows + self.generate_log_page(
-            OUTPUT_DIR, change_id + "_build.html", build_log_str, "Build", home_path, rc, True, runtime
+        rows = rows + self.run_test(
+            "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -k",
+            change_id,
+            "Kernel Build",
+            home_path,
+            True,
         )
 
-        rows = rows + self.generate_log_page(
-            OUTPUT_DIR,
-            change_id + "_fail.html",
-            "This will always fail...",
-            "Failure",
+        rows = rows + self.run_test(
+            "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -l",
+            change_id,
+            "Lustre Build",
             home_path,
-            -1,
+            True,
+        )
+
+        rows = rows + self.run_test(
+            "cd /home/timothy/git/lustre-release ; git diff HEAD~1 | ~/git/linux/scripts/checkpatch.pl",
+            change_id,
+            "Checkpatch",
+            home_path,
             False,
-            0
         )
 
         html = template.format(title=subject, rows=rows, style=STYLESHEET)

@@ -6,11 +6,41 @@ ktest_dir="$(dirname "$(readlink -f "$0")")/../"
 
 kernel_src_dir="/home/timothy/git/linux/"
 kernel_build_dir="/tmp/ktest-out/"
-ktest="../ktest/tests/fs/lustre/llmount.ktest"
+ktest="/home/timothy/ws/ktest/tests/fs/lustre/llmount.ktest"
 lustre_src_dir="/home/timothy/git/lustre-release/"
 
-echo "KERNEL BUILD:"
-CC=clang-20 FSTYPE=wbcfs /home/timothy/ws/ktest/build-test-kernel build -k "$kernel_src_dir" -o "$kernel_build_dir" "$ktest"
+safe_delete_dir() {
+    local dir="$1"
+
+    # Check that an argument was provided
+    if [ -z "$dir" ]; then
+        echo "Error: no directory provided" >&2
+        return 1
+    fi
+
+    # Check that it exists and is a directory
+    if [ ! -d "$dir" ]; then
+        echo "Warning: '$dir' does not exist or is not a directory" >&2
+        return 0
+    fi
+
+    # Safety check: only allow deletion inside /tmp
+    case "$dir" in
+        /tmp/*)
+            if [ "$dir" = "/tmp" ]; then
+                echo "Refusing to delete /tmp itself" >&2
+                return 1
+            fi
+            echo "Deleting directory: $dir"
+            rm -rf -- "$dir"
+            ;;
+        *)
+            echo "Refusing to delete: '$dir' (not under /tmp)" >&2
+            return 1
+            ;;
+    esac
+}
+
 
 build_lustre() {
     cd "$lustre_src_dir"
@@ -25,4 +55,31 @@ build_lustre() {
     make -j$(nproc)
 }
 
-build_lustre
+build_kernel() {
+    cd "$kernel_src_dir"
+    git clean -xdf > /dev/null
+    safe_delete_dir "$kernel_build_dir"
+
+    echo "PATCH:"
+    git log -1 --pretty=%B
+
+    cd "$lustre_src_dir"
+
+    echo "KERNEL BUILD:"
+    CC=clang-20 FSTYPE=wbcfs /home/timothy/ws/ktest/build-test-kernel build -k "$kernel_src_dir" -o "$kernel_build_dir" "$ktest"
+}
+
+while getopts "kl" arg; do
+    case $arg in
+	k)
+	    build_kernel
+	    exit 0
+	    ;;
+	l)
+	    build_lustre
+	    exit 0
+	    ;;
+    esac
+done
+
+exit -1
