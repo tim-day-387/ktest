@@ -74,6 +74,7 @@ DONEWITH_DIR = "donewith"
 FAILED_POSTS_DIR = "failed_posts"
 OUTPUT_DIR = "/home/timothy/git/upstream-patch-review"
 LAST_BUILD_ID = "LASTBUILD_ID"
+STYLESHEET = "styles.css"
 
 StopMachine = False
 StopOnIdle = False
@@ -1136,7 +1137,7 @@ class Reviewer(object):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/upstream-patch-review/{style}">
     <style>
         table {{
             width: 100%%;
@@ -1218,7 +1219,7 @@ class Reviewer(object):
             0
         )
 
-        html = template.format(title=subject, rows=rows)
+        html = template.format(title=subject, rows=rows, style=STYLESHEET)
 
         with open(home_path, "w") as outfile:
             outfile.write(html)
@@ -1850,7 +1851,7 @@ def print_WorkList_to_HTML():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Testing Status</title>
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/upstream-patch-review/{style}">
     <style>
         table {{
             width: 100%%;
@@ -1893,7 +1894,10 @@ def print_WorkList_to_HTML():
 </html>
 """
 
-    shutil.copy("/home/timothy/ws/ktest/ci-lustre/style/styles.css", OUTPUT_DIR)
+    shutil.copy(
+        "/home/timothy/ws/ktest/ci-lustre/style/styles.css",
+        os.path.join(OUTPUT_DIR, STYLESHEET)
+    )
 
     files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith("_home.html")]
     files.sort()
@@ -1974,7 +1978,7 @@ def print_WorkList_to_HTML():
 
     # Combine into final HTML
     rows = "\n".join(rows)
-    html = template.format(rows=rows)
+    html = template.format(rows=rows, style=STYLESHEET)
     index_path = os.path.join(OUTPUT_DIR, "index.html")
 
     with open(index_path, "w", encoding="utf-8") as f:
