@@ -1189,9 +1189,9 @@ class Reviewer(object):
     def run_test(self, command, change_id, name, home_path, enforced):
         log, rc, runtime = Reviewer.run_script(command)
         if not log:
-            return
-
-        log_str = log.decode("utf-8")
+            log_str = ""
+        else:
+            log_str = log.decode("utf-8")
 
         return self.generate_log_page(
             OUTPUT_DIR, change_id + "_" + name.replace(" ", "_") + ".html", log_str, name, home_path, rc, enforced, runtime
