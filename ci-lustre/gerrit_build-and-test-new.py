@@ -44,6 +44,91 @@ import tracemalloc
 
 tracemalloc.start()
 
+page_template = """\
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+    <link rel="icon" href="/favicon.ico">
+    <link rel="stylesheet" href="/upstream-patch-review/{style}">
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 0;
+        }}
+        header {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background-color: #333;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 1em;
+            padding: 0 1em;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1000;
+        }}
+        header img {{
+            height: 32px;
+            width: 32px;
+        }}
+        header h1 {{
+            font-size: 1.5em;
+            margin: 0;
+        }}
+        header a {{
+            color: #fff;
+            text-decoration: none;
+            margin-left: 1em;
+            font-weight: 500;
+        }}
+        header a:hover {{
+            text-decoration: underline;
+        }}
+        main {{
+            margin-top: 80px;
+            padding: 0 1em 3em;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1em;
+        }}
+        th, td {{
+            border: 1px solid #ccc;
+            padding: 0.5em;
+            text-align: left;
+            vertical-align: top;
+        }}
+        th {{
+            background-color: #f2f2f2;
+        }}
+        tr:nth-child(even) {{
+            background-color: #fafafa;
+        }}
+    </style>
+</head>
+
+<body>
+<header>
+    <img src="/favicon.ico" alt="Site icon">
+    <h1>KTEST</h1>
+    <a href="/upstream-patch-review/">Home</a>
+    <a href="/upstream-patch-review/status.html">Status</a>
+    <a href="/">Who am I?</a>
+</header>
+
+<main>
+{html}
+</main>
+</body>
+</html>
+"""
 
 def _getenv_list(key, default=None, sep=":"):
     """
@@ -1083,7 +1168,8 @@ class Reviewer(object):
 
         return f'<tr><td><a href="{page_path}">{name}</a></td><td>{test_type}</td><td>{time}</td><td style="color:{color}">{status}</td></tr>'
 
-    def run_script(self, command):
+    @staticmethod
+    def run_script(command):
         start_time = time.time()
 
         pipe = subprocess.Popen(
@@ -1101,7 +1187,7 @@ class Reviewer(object):
         return out, returncode, elapsed_time
 
     def run_test(self, command, change_id, name, home_path, enforced):
-        log, rc, runtime = self.run_script(command)
+        log, rc, runtime = Reviewer.run_script(command)
         if not log:
             return
 
@@ -1122,7 +1208,7 @@ class Reviewer(object):
             + change["revisions"][revision]["ref"]
             + "&& git format-patch -1 -n --stdout FETCH_HEAD | head -n -3"
         )
-        return self.run_script(command)
+        return Reviewer.run_script(command)
 
     def checkout_patch(self, change):
         revision = change.get("current_revision")
@@ -1135,38 +1221,10 @@ class Reviewer(object):
             + change["revisions"][revision]["ref"]
             + "&& git checkout FETCH_HEAD"
         )
-        return self.run_script(command)
+        return Reviewer.run_script(command)
 
     def analyze_patch(self, change):
         template = """\
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title}</title>
-    <link rel="stylesheet" href="/upstream-patch-review/{style}">
-    <style>
-        table {{
-            width: 100%%;
-            border-collapse: collapse;
-            margin-top: 1em;
-        }}
-        th, td {{
-            border: 1px solid #ccc;
-            padding: 0.5em;
-            text-align: left;
-            vertical-align: top;
-        }}
-        th {{
-            background-color: #f2f2f2;
-        }}
-        tr:nth-child(even) {{
-            background-color: #fafafa;
-        }}
-    </style>
-</head>
-
-<body>
 <h1>{title}</h1>
 <table>
 <thead>
@@ -1176,8 +1234,6 @@ class Reviewer(object):
 {rows}
 </tbody>
 </table>
-</body>
-</html>
 """
         """ Extract useful info from a patch. Things like new tests added,
             tests modified, is it a comment-only change and so on. """
@@ -1229,7 +1285,8 @@ class Reviewer(object):
             False,
         )
 
-        html = template.format(title=subject, rows=rows, style=STYLESHEET)
+        html_tmp = template.format(title=subject, rows=rows)
+        html = page_template.format(title=subject, style=STYLESHEET, html=html_tmp)
 
         with open(home_path, "w") as outfile:
             outfile.write(html)
@@ -1854,54 +1911,56 @@ class Reviewer(object):
             print_WorkList_to_HTML()
 
 
+def print_Status_to_HTML():
+    template = """\
+<pre>
+{text}
+</pre>
+"""
+    command = "cd /home/timothy/ws/ktest ; ./ci-lustre/generate-status"
+
+    log, rc, runtime = Reviewer.run_script(command)
+    if not log:
+        return
+
+    log_str = log.decode("utf-8")
+
+    html_tmp = template.format(text=log_str)
+    html = page_template.format(title="Status", style=STYLESHEET, html=html_tmp)
+    status_path = os.path.join(OUTPUT_DIR, "status.html")
+
+    with open(status_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    print(f"Wrote {status_path}")
+
+            
 def print_WorkList_to_HTML():
     template = """\
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Testing Status</title>
-    <link rel="stylesheet" href="/upstream-patch-review/{style}">
-    <style>
-        table {{
-            width: 100%%;
-            border-collapse: collapse;
-            margin-top: 1em;
-        }}
-        th, td {{
-            border: 1px solid #ccc;
-            padding: 0.5em;
-            text-align: left;
-            vertical-align: top;
-        }}
-        th {{
-            background-color: #f2f2f2;
-        }}
-        tr:nth-child(even) {{
-            background-color: #fafafa;
-        }}
-    </style>
-</head>
-
-<body>
 <h1>Testing Status</h1>
 <table>
-<colgroup>
-    <col style="width: 10%">
-    <col style="width: 40%">
-    <col style="width: 20%">
-    <col style="width: 10%">
-    <col style="width: 20%">
-</colgroup>
-<thead>
-<tr><th>Tests</th><th>Subject</th><th>Hash</th><th>Change ID</th><th>Time</th><th>Enforced</th><th>Optional</th></tr>
-</thead>
-<tbody>
-{rows}
-</tbody>
+    <colgroup>
+        <col style="width: 10%">
+        <col style="width: 40%">
+        <col style="width: 20%">
+        <col style="width: 10%">
+        <col style="width: 20%">
+    </colgroup>
+    <thead>
+       <tr>
+            <th>Tests</th>
+            <th>Subject</th>
+            <th>Hash</th>
+            <th>Change ID</th>
+            <th>Time</th>
+            <th>Enforced</th>
+            <th>Optional</th>
+       </tr>
+    </thead>
+    <tbody>
+        {rows}
+    </tbody>
 </table>
-</body>
-</html>
 """
 
     shutil.copy(
@@ -1988,13 +2047,16 @@ def print_WorkList_to_HTML():
 
     # Combine into final HTML
     rows = "\n".join(rows)
-    html = template.format(rows=rows, style=STYLESHEET)
+    html_tmp = template.format(rows=rows)
+    html = page_template.format(title="Testing Status", style=STYLESHEET, html=html_tmp)
     index_path = os.path.join(OUTPUT_DIR, "index.html")
 
     with open(index_path, "w", encoding="utf-8") as f:
         f.write(html)
 
     print(f"Wrote {index_path}")
+
+    print_Status_to_HTML()
 
 
 if __name__ == "__main__":

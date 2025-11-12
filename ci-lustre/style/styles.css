@@ -8,8 +8,7 @@ body {
 }
 
 h1 {
-    color: #2c3e50;
-    border-bottom: 2px solid #3498db;
+    border-bottom: 2px solid #ae0c00;
     padding-bottom: 0.5rem;
 }
 
@@ -18,7 +17,7 @@ h1 {
 }
 
 a {
-    color: #3498db;
+    color: #ae0c00;
     text-decoration: none;
 }
 
