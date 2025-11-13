@@ -41,6 +41,22 @@ safe_delete_dir() {
     esac
 }
 
+check_file() {
+    local file="$1"
+
+    if [[ ! -f "$file" ]]; then
+	echo "$file not found!"
+	exit 1
+    fi
+
+    return 0
+}
+
+validate_lustre_build() {
+    check_file "$lustre_src_dir/lnet/lnet/lnet.ko"
+    check_file "$lustre_src_dir/lustre/llite/lustre.ko"
+    check_file "$lustre_src_dir/lustre/osd-wbcfs/osd_wbcfs.ko"
+}
 
 build_lustre() {
     cd "$lustre_src_dir"
@@ -51,8 +67,42 @@ build_lustre() {
 
     echo "BUILD:"
     ./autogen.sh
-    ./configure LLVM=-20 CFLAGS="-Wno-error=attribute-warning" CONFIG_SITE="./contrib/config.site.ktest"
+    ./configure LLVM="-20" CFLAGS="-Wno-error=attribute-warning" CONFIG_SITE="$ktest_dir/ci-lustre/config.site.ktest"
     make -j$(nproc)
+
+    validate_lustre_build
+}
+
+build_lustre_strict() {
+    cd "$lustre_src_dir"
+    git clean -xdf > /dev/null
+
+    echo "PATCH:"
+    git log -1 --pretty=%B
+
+    echo "BUILD:"
+    ./autogen.sh
+    ./configure LLVM="-20" CONFIG_SITE="$ktest_dir/ci-lustre/config.site.ktest.strict"
+    make -j$(nproc)
+
+    validate_lustre_build
+}
+
+run_xunused() {
+    cd "$lustre_src_dir"
+    git clean -xdf > /dev/null
+
+    echo "PATCH:"
+    git log -1 --pretty=%B
+
+    echo "BUILD:"
+    ./autogen.sh
+    ./configure LLVM="-20" CFLAGS="-Wno-error=attribute-warning" CONFIG_SITE="$ktest_dir/ci-lustre/config.site.ktest" --silent
+    bear -- make -s -j$(nproc)
+
+    ~/ws/xunused/build/xunused ~/git/lustre-release/compile_commands.json
+
+    validate_lustre_build
 }
 
 build_kernel() {
@@ -69,7 +119,7 @@ build_kernel() {
     CC=clang-20 FSTYPE=wbcfs /home/timothy/ws/ktest/build-test-kernel build -k "$kernel_src_dir" -o "$kernel_build_dir" "$ktest"
 }
 
-while getopts "kl" arg; do
+while getopts "klsx" arg; do
     case $arg in
 	k)
 	    build_kernel
@@ -77,6 +127,14 @@ while getopts "kl" arg; do
 	    ;;
 	l)
 	    build_lustre
+	    exit 0
+	    ;;
+	s)
+	    build_lustre_strict
+	    exit 0
+	    ;;
+	x)
+	    run_xunused
 	    exit 0
 	    ;;
     esac

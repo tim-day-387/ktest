@@ -958,6 +958,41 @@ def make_change_from_hash(githash, subject, branch):
     return change
 
 
+# Define globally (outside the class)
+TESTS = [
+    {
+        "Command": "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -k",
+        "Title": "Kernel Build",
+        "Description": "Build a custom mainline kernel",
+        "Enforced": True,
+    },
+    {
+        "Command": "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -l",
+        "Title": "Lustre Build",
+        "Description": "Build Lustre (LLVM)",
+        "Enforced": True,
+    },
+    {
+        "Command": "cd /home/timothy/git/lustre-release ; git diff HEAD~1 | ~/git/linux/scripts/checkpatch.pl",
+        "Title": "Checkpatch",
+        "Description": "Run checkpatch.pl from the given mainline kernel",
+        "Enforced": False,
+    },
+    {
+        "Command": "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -s",
+        "Title": "Lustre Build Strict",
+        "Description": "Build Lustre (LLVM/NoWarnings)",
+        "Enforced": False,
+    },
+    {
+        "Command": "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -x",
+        "Title": "Compiler Plugin",
+        "Description": "Run Lustre LLVM Compiler Plugin",
+        "Enforced": False,
+    },
+]
+
+
 class Reviewer(object):
     """
     * Poll gerrit instance for updates to changes matching project and branch.
@@ -1136,7 +1171,7 @@ class Reviewer(object):
         # Gerrit uses " )]}'" to guard against XSSI.
         return json.loads(res.content[5:])
 
-    def generate_log_page(self, output, page_path, logs, name, home_path, rc, enforced, time):
+    def generate_log_page(self, output, page_path, logs, name, home_path, rc, enforced, time, description):
         template = """\
 <html lang="en">
 <body>
@@ -1166,7 +1201,7 @@ class Reviewer(object):
         else:
             test_type = "Optional"
 
-        return f'<tr><td><a href="{page_path}">{name}</a></td><td>{test_type}</td><td>{time}</td><td style="color:{color}">{status}</td></tr>'
+        return f'<tr><td><a href="{page_path}">{name}</a></td><td>{description}</td><td>{test_type}</td><td>{time}</td><td style="color:{color}">{status}</td></tr>'
 
     @staticmethod
     def run_script(command):
@@ -1186,7 +1221,7 @@ class Reviewer(object):
 
         return out, returncode, elapsed_time
 
-    def run_test(self, command, change_id, name, home_path, enforced):
+    def run_test(self, command, change_id, name, home_path, enforced, description):
         log, rc, runtime = Reviewer.run_script(command)
         if not log:
             log_str = ""
@@ -1194,8 +1229,21 @@ class Reviewer(object):
             log_str = log.decode("utf-8")
 
         return self.generate_log_page(
-            OUTPUT_DIR, change_id + "_" + name.replace(" ", "_") + ".html", log_str, name, home_path, rc, enforced, runtime
+            OUTPUT_DIR, change_id + "_" + name.replace(" ", "_") + ".html", log_str, name, home_path, rc, enforced, runtime, description
         )
+
+    def run_tests(self, change_id, home_path):
+        rows = ""
+        for test in TESTS:
+            rows += self.run_test(
+                test["Command"],
+                change_id,
+                test["Title"],
+                home_path,
+                test["Enforced"],
+                test["Description"]
+            )
+        return rows
 
     def get_patch(self, change):
         revision = change.get("current_revision")
@@ -1228,7 +1276,7 @@ class Reviewer(object):
 <h1>{title}</h1>
 <table>
 <thead>
-<tr><th>Test</th><th>Type</th><th>Runtime</th><th>Status</th></tr>
+<tr><th>Test</th><th>Type</th><th>Description</th><th>Runtime</th><th>Status</th></tr>
 </thead>
 <tbody>
 {rows}
@@ -1256,34 +1304,12 @@ class Reviewer(object):
         open(home_path, "wb").close()
 
         rows = rows + self.generate_log_page(
-            OUTPUT_DIR, change_id + "_patch.html", commit_message, "Patch", home_path, 0, True, runtime
+            OUTPUT_DIR, change_id + "_patch.html", commit_message, "Patch", home_path, 0, True, runtime, "Fetch patch commit message"
         )
 
         self.checkout_patch(change)
 
-        rows = rows + self.run_test(
-            "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -k",
-            change_id,
-            "Kernel Build",
-            home_path,
-            True,
-        )
-
-        rows = rows + self.run_test(
-            "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -l",
-            change_id,
-            "Lustre Build",
-            home_path,
-            True,
-        )
-
-        rows = rows + self.run_test(
-            "cd /home/timothy/git/lustre-release ; git diff HEAD~1 | ~/git/linux/scripts/checkpatch.pl",
-            change_id,
-            "Checkpatch",
-            home_path,
-            False,
-        )
+        rows = rows + self.run_tests(change_id, home_path)
 
         html_tmp = template.format(title=subject, rows=rows)
         html = page_template.format(title=subject, style=STYLESHEET, html=html_tmp)
