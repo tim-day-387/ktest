@@ -1,0 +1,419 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Modified for Lustre: Timothy Day <timday@amazon.com>
+#
+
+set -o nounset
+set -o errexit
+set -o errtrace
+
+ktest_dir=$(dirname "$(readlink -f "$0")")
+
+. "$ktest_dir/lib/libktest.sh"
+
+checkdep clang
+checkdep bison
+checkdep bear
+checkdep flex
+checkdep make
+checkdep gcc
+checkdep bc
+
+# Lustre parameters
+export CC="${CC:-clang-20}"
+export FSTYPE="wbcfs"
+
+# Ktest parameters
+ktest_kernel_source="$(realpath ~/git/linux/ 2>/dev/null || true)"
+ktest_lustre_source="$ktest_kernel_source/../lustre-release/"
+ktest_boot_test="$ktest_dir/tests/fs/lustre/boot.ktest"
+ktest_ccplugin="$ktest_dir/../xunused/build/xunused"
+ktest_compiler="${CC:-clang-20}"
+ktest_skip_kernel_config=false
+ktest_lustre_allow_warnings=0
+ktest_lustre_build_enable=1
+ktest_kernel_build_enable=1
+ktest_out="/tmp/ktest-out/"
+ktest_root_image="$ktest_out/root.amd64.new"
+ktest_lustre_clean_git=0
+ktest_lustre_purge=0
+ktest_njobs=$(nproc)
+ktest_precise=false
+ktest_loop=false
+DEPMOD=depmod
+MAKEARGS=()
+COVERAGE=""
+
+if ! which depmod > /dev/null; then
+    DEPMOD=/sbin/depmod
+fi
+
+function usage()
+{
+    echo "qlkbuild: Quick Lustre Kernel Build"
+    echo "Usage: qlkbuild cmd [options]"
+    ktest_usage_cmds
+    echo "  build <test>        Build kernel for a test configuration"
+    echo "  ccplugin <test>     Build and run CC plugin"
+    echo "  oldconfig           Run make oldconfig"
+    echo "  config              Run make nconfig"
+    echo
+    echo "  options:"
+    ktest_usage_opts
+    echo
+    echo "  options for qlkbuild run/build:"
+    ktest_usage_run_opts
+    echo "      -k <dir>        kernel source dir"
+    echo "      -c <dir>        enable coverage for this dir (only valid without -K)"
+    echo "      -C, --clean-git <bool> clean git repos before doing a build"
+    echo "      -D, --purge-ktest-out <bool> delete previous ktest results"
+    echo "      -w, --allow-warnings <bool>  allow C warnings"
+    echo "      -R, --build-kernel <bool>    build the kernel"
+    echo "      -Z, --build-lustre <bool>    build Lustre"
+    echo "      -M <arg>        extra arguments to be passed to make when building the kernel"
+    echo "      -K              keep existing kernel .config"
+    echo
+    ktest_usage_post
+}
+
+if [[ $# = 0 ]]; then
+    usage
+    exit 1
+fi
+
+# Parse command and shift for rest of arg parsing
+CMD="$1"
+shift
+
+# Replace long option with corresponding short option
+for arg in "$@"; do
+	shift
+	case "$arg" in
+		--clean-git) set -- "$@" '-C';;
+		--purge-ktest-out) set -- "$@" '-D';;
+		--allow-warnings) set -- "$@" '-w';;
+		--build-kernel) set -- "$@" '-R';;
+		--build-lustre) set -- "$@" '-Z';;
+		*) set -- "$@" "$arg";;
+	esac
+done
+
+while getopts "k:Pc:C:D:M:w:Z:R:Kh${ktest_args}" arg; do
+    case $arg in
+	k)
+	    ktest_kernel_source="$OPTARG"
+	    ;;
+	P)
+	    ktest_precise=true
+	    ;;
+	c)
+	    if [[ ! -d $OPTARG ]]; then
+		echo "$OPTARG must be a directory"
+		exit 1
+	    fi
+
+	    checkdep lcov
+
+	    # Strip trailing / from directory name, substitute _ for /
+	    OPTARG=$(echo "${OPTARG%/}"|tr / _)
+	    MAKEARGS+=("GCOV_PROFILE_$OPTARG=y")
+	    COVERAGE=1
+	    ;;
+	C)
+	    ktest_lustre_clean_git="$OPTARG"
+	    ;;
+	D)
+	    ktest_lustre_purge="$OPTARG"
+	    ;;
+	w)
+	    ktest_lustre_allow_warnings="$OPTARG"
+	    ;;
+	R)
+	    ktest_kernel_build_enable="$OPTARG"
+	    ;;
+	Z)
+	    ktest_lustre_build_enable="$OPTARG"
+	    ;;
+	M)
+	    MAKEARGS+=("$OPTARG")
+	    ;;
+	K)
+	    ktest_skip_kernel_config=true
+	    ;;
+	h)
+	    usage
+	    exit 0
+	    ;;
+    esac
+    parse_ktest_arg $arg
+done
+shift $(( OPTIND - 1 ))
+
+parse_args_post
+
+# default parameters
+[[ -z $ktest_kernel_source ]]	&& ktest_kernel_source="."
+
+if [[ ! -d $ktest_kernel_source ]]; then
+    echo "kernel source directory $ktest_kernel_source does not exist"
+    exit 1
+fi
+
+ktest_kernel_source=$(readlink -e "$ktest_kernel_source")
+
+ktest_kernel_build="$ktest_out/kernel_build.$ktest_arch"
+ktest_lustre_build="$ktest_out/lustre_build.$ktest_arch"
+mkdir -p "$ktest_kernel_build"
+mkdir -p "$ktest_lustre_build"
+
+if [[ -n $CROSS_COMPILE ]]; then
+    checkdep "$ARCH_TRIPLE-gcc" "gcc-$ARCH_TRIPLE"
+fi
+
+function safe_delete_dir() {
+    local dir="$1"
+
+    # Check that an argument was provided
+    if [ -z "$dir" ]; then
+        echo "Error: no directory provided" >&2
+        return 1
+    fi
+
+    # Check that it exists and is a directory
+    if [ ! -d "$dir" ]; then
+        echo "Warning: '$dir' does not exist or is not a directory" >&2
+        return 0
+    fi
+
+    # Safety check: only allow deletion inside /tmp
+    case "$dir" in
+        /tmp/*)
+            if [ "$dir" = "/tmp" ]; then
+                echo "Refusing to delete /tmp itself" >&2
+                return 1
+            fi
+            echo "Deleting directory: $dir"
+            rm -rf -- "$dir"
+            ;;
+        *)
+            echo "Refusing to delete: '$dir' (not under /tmp)" >&2
+            return 1
+            ;;
+    esac
+}
+
+function check_file() {
+    local file="$1"
+
+    if [[ ! -f "$file" ]]; then
+	echo "$file not found!"
+	exit 1
+    fi
+
+    return 0
+}
+
+function validate_lustre_build() {
+    check_file "$ktest_lustre_build/lnet/lnet/lnet.ko"
+    check_file "$ktest_lustre_build/lustre/llite/lustre.ko"
+    check_file "$ktest_lustre_build/lustre/osd-wbcfs/osd_wbcfs.ko"
+}
+
+function sync_root_image() {
+    "$ktest_dir/root_image" sync
+}
+
+function create_root_image() {
+    local old="$PWD"
+
+    cd "$ktest_lustre_build"
+    run_quiet_with_status "UPDATE ROOT IMAGE" "DONE" sync_root_image
+    cd "$old"
+}
+
+function cmd_run()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    purge_previous_results
+
+    if [[ "${ktest_kernel_build_enable}" == "1" ]]; then
+	prepare_linux_source
+	run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    fi
+
+    if [[ "${ktest_lustre_build_enable}" == "1" ]]; then
+	prepare_lustre_source
+	run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
+	create_root_image
+    fi
+
+    start_vm
+}
+
+function build_lustre()
+{
+    local old="$PWD"
+    local LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
+    local SUBARCH="x86"
+
+    cd "$ktest_lustre_build"
+
+    rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
+
+    # No strict errors
+    if [[ "${ktest_lustre_allow_warnings}" == "1" ]]; then
+	export CFLAGS="-Wno-error=attribute-warning -Wno-error=unused-but-set-variable -Wno-error=single-bit-bitfield-constant-conversion -Wno-error=format-security -Wno-error=cast-function-type-strict"
+    else
+	export CFLAGS="-Werror"
+    fi
+
+    # Find headers
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated/uapi"
+    export KCFLAGS="-I$LINUX_OBJ/include"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated/uapi"
+
+    # Disable persistent OSDs
+    export with_ldiskfs="no"
+    export with_zfs="no"
+
+    # Disable optional features
+    export with_o2ib="no"
+    export enable_gss="no"
+
+    # Always build the server
+    export enable_server="yes"
+
+    # ktest uses statically linked tools
+    export enable_shared="no"
+
+    # Assume that Linux is in the same directory as Lustre
+    export with_linux="$ktest_kernel_source"
+
+    # Build the kernel via ktest into tmp
+    export ARCH="$(uname -m)"
+    export with_linux_obj="/tmp/ktest-out/kernel_build.$ARCH/"
+
+    # Misc
+    export LLVM="-20"
+
+    ./autogen.sh
+    ./configure
+    bear -- make -j$ktest_njobs
+
+    # Newer kernels have these lines that the plugin hates
+    sed -i '/-Wp,-MMD,.*\.d/d' "$ktest_lustre_build/compile_commands.json"
+
+    validate_lustre_build
+
+    cd "$old"
+}
+
+function purge_previous_results()
+{
+    if [[ "${ktest_lustre_purge}" == "1" ]]; then
+	run_quiet_with_status "CLEANUP" "DONE" safe_delete_dir "$ktest_out"
+    fi
+
+    mkdir -p "$ktest_kernel_build"
+    mkdir -p "$ktest_lustre_build"
+}
+
+function get_commit_subject()
+{
+    local str="$(git log -1 --pretty=%s)"
+
+    str="${str:0:90}"
+
+    echo "$str"
+}
+
+function prepare_lustre_source()
+{
+    local old="$PWD"
+
+    cd "$ktest_lustre_source"
+    if [[ "${ktest_lustre_clean_git}" == "1" ]]; then
+	run_quiet_with_status "CLEAN LUSTRE [$(get_commit_subject)]" "DONE" git clean -xdf
+    fi
+    cd "$old"
+}
+
+function prepare_linux_source()
+{
+    local old="$PWD"
+
+    cd "$ktest_kernel_source"
+    if [[ "${ktest_lustre_clean_git}" == "1" ]]; then
+	run_quiet_with_status "CLEAN LINUX [$(get_commit_subject)]" "DONE" git clean -xdf
+    fi
+    cd "$old"
+}
+
+function cmd_build()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    purge_previous_results
+
+    if [[ "${ktest_kernel_build_enable}" == "1" ]]; then
+	prepare_linux_source
+	run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    fi
+
+    if [[ "${ktest_lustre_build_enable}" == "1" ]]; then
+	prepare_lustre_source
+	run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
+	create_root_image
+    fi
+}
+
+cmd_help()
+{
+    usage
+}
+
+if [[ $(type -t "cmd_$CMD") == function ]]; then
+    CMD="cmd_$CMD"
+elif [[ $(type -t "ktest_$CMD") == function ]]; then
+    CMD="ktest_$CMD"
+else
+    usage
+    exit 1
+fi
+
+$CMD "$@"
