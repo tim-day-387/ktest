@@ -464,33 +464,33 @@ def make_change_from_hash(githash, subject, branch):
 # Define globally (outside the class)
 TESTS = [
     {
-        "Command": "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -k",
-        "Title": "Kernel Build",
-        "Description": "Build a custom mainline kernel",
-        "Enforced": True,
-    },
-    {
-        "Command": "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -l",
-        "Title": "Lustre Build",
-        "Description": "Build Lustre (LLVM)",
-        "Enforced": True,
-    },
-    {
         "Command": "cd /home/timothy/git/lustre-release ; git diff HEAD~1 | ~/git/linux/scripts/checkpatch.pl",
         "Title": "Checkpatch",
         "Description": "Run checkpatch.pl from the given mainline kernel",
         "Enforced": False,
     },
     {
-        "Command": "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -s",
-        "Title": "Lustre Build Strict",
-        "Description": "Build Lustre (LLVM/NoWarnings)",
+        "Command": "cd /home/timothy/ws/ktest ; ./qlkbuild build --purge-ktest-out 1 --clean-git 1 --allow-warnings 1 --build-lustre 0",
+        "Title": "Kernel Build",
+        "Description": "Build a custom mainline kernel",
+        "Enforced": True,
+    },
+    {
+        "Command": "cd /home/timothy/ws/ktest ; ./qlkbuild build --purge-ktest-out 0 --clean-git 1 --allow-warnings 1 --build-lustre 1",
+        "Title": "Lustre Build",
+        "Description": "Build Lustre (LLVM)",
+        "Enforced": True,
+    },
+    {
+        "Command": "cd /home/timothy/ws/ktest ; ./qlkbuild ccplugin --purge-ktest-out 0 --clean-git 0 --allow-warnings 1 --build-lustre 1",
+        "Title": "Compiler Plugin",
+        "Description": "Run Lustre LLVM Compiler Plugin",
         "Enforced": False,
     },
     {
-        "Command": "cd /home/timothy/ws/ktest ; ./ci-lustre/build-lustre -x",
-        "Title": "Compiler Plugin",
-        "Description": "Run Lustre LLVM Compiler Plugin",
+        "Command": "cd /home/timothy/ws/ktest ; ./qlkbuild build --purge-ktest-out 1 --clean-git 1 --allow-warnings 0 --build-lustre 1",
+        "Title": "Lustre Build Strict",
+        "Description": "Build Lustre (LLVM/NoWarnings)",
         "Enforced": False,
     },
 ]
@@ -807,6 +807,7 @@ class Reviewer(object):
         change_id = raw_change_id + "_" + revision
         home_path = OUTPUT_DIR + "/" + change_id + "_home.html"
         subject = change.get("subject", "")
+        subject = subject[:90]
         rows = ""
 
         try:
