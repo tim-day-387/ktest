@@ -4,9 +4,6 @@ version = "0.1.0"
 edition = "2021"
 build = "src/build.rs"
 
-#[workspace]
-#members = ["get-test-job", "ci-cgi"]
-
 [dependencies]
 cgi = "0.6"
 git2 = "0.16"
@@ -28,6 +25,9 @@ chrono = "0.4.26"
 memmap = "0.7.0"
 serde_json = "1.0.132"
 reqwest = { version = "0.12.9", features = ["blocking"] }
+syscalls = "0.7"
+colored = "3.0.0"
+rand = "0.8"
 
 [build-dependencies]
 capnpc = "0.21.*"
