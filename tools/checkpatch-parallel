@@ -1,0 +1,98 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Parallel version of git-checkpatch that processes files concurrently.
+# Check the progress of checkpatch.pl fixes.
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+export CHECKPATCH=${CHECKPATCH:-"/home/ktest/git/linux/scripts/checkpatch.pl"}
+export NPROC=${NPROC:-$(nproc)}
+
+DIRS="$*"
+[ -z "$DIRS" ] && DIRS="ls -d */"
+
+# Create temporary directory for results
+TMPDIR=$(mktemp -d)
+trap "rm -rf $TMPDIR" EXIT
+
+function process_file() {
+	local FILE="$1"
+	local DIR_PATH=$(dirname "$FILE")
+	local LINES=$(wc -l < "$FILE")
+	local OUTPUT=$($CHECKPATCH --show-types --terse -f "$FILE" 2>/dev/null | grep -v "total:")
+	local ERRORS=$(echo "$OUTPUT" | grep -c ":")
+
+	# Write line count and error count to temp file
+	echo "$LINES $ERRORS" >> "$TMPDIR/$(echo "$DIR_PATH" | sed 's/\//@@/g').lines"
+
+	# Extract and count issue types (format: WARNING:TYPE: or ERROR:TYPE:)
+	echo "$OUTPUT" | sed -n 's/.*\(WARNING\|ERROR\):\([^:]*\):.*/\2/p' | while read -r TYPE; do
+		echo "$TYPE" >> "$TMPDIR/$(echo "$DIR_PATH" | sed 's/\//@@/g').types"
+	done
+}
+
+export -f process_file
+export CHECKPATCH
+export TMPDIR
+
+# Build list of all files
+for D in $DIRS; do
+	[ ! -d "$D" ] && continue
+	find "$D" -name "*.[ch]"
+done | if command -v parallel >/dev/null 2>&1; then
+	# Use GNU parallel if available
+	parallel -j"$NPROC" process_file
+else
+	# Fall back to xargs
+	xargs -n1 -P"$NPROC" bash -c 'process_file "$1"' _
+fi
+
+# Aggregate and display results by directory
+# First, collect all results into a sortable format
+RESULTS_FILE="$TMPDIR/results.txt"
+> "$RESULTS_FILE"
+
+for LINES_FILE in "$TMPDIR"/*.lines; do
+	[ ! -f "$LINES_FILE" ] && continue
+
+	# Extract directory path from filename
+	DIR_PREFIX=$(basename "$LINES_FILE" .lines)
+	DIR_PATH=$(echo "$DIR_PREFIX" | sed 's/@@/\//g')
+	TYPES_FILE="$TMPDIR/${DIR_PREFIX}.types"
+
+	# Sum up lines and errors from all files in this directory
+	TOT=$(awk '{sum+=$1} END {print sum}' "$LINES_FILE")
+	CNT=$(awk '{sum+=$2} END {print sum}' "$LINES_FILE")
+
+	# Calculate errors/warnings per thousand lines of code
+	if [ "$TOT" -gt 0 ]; then
+		PER_KLOC=$(awk "BEGIN {printf \"%.2f\", ($CNT / $TOT) * 1000}")
+	else
+		PER_KLOC="0.00"
+	fi
+
+	# Store results with per_kloc as first field for sorting
+	echo "$PER_KLOC|$DIR_PATH|$TOT|$CNT|$DIR_PREFIX" >> "$RESULTS_FILE"
+done
+
+# Sort by per_kloc (descending) and display
+sort -t'|' -k1 -rn "$RESULTS_FILE" | while IFS='|' read -r PER_KLOC DIR_PATH TOT CNT DIR_PREFIX; do
+	printf "%-16s %-10s %-11s %-15s\n" \
+	       "$DIR_PATH:" "loc=$TOT" "errors/warnings=$CNT" "per_kloc=$PER_KLOC"
+
+	# Display breakdown by type if there are any issues
+	TYPES_FILE="$TMPDIR/${DIR_PREFIX}.types"
+	if [ -f "$TYPES_FILE" ] && [ "$CNT" -gt 0 ]; then
+		sort "$TYPES_FILE" | uniq -c | sort -rn | while read -r count type; do
+			printf "  %-50s %s\n" "$type" "$count"
+		done
+		echo
+	fi
+done
