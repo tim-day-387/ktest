@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+set -euo pipefail
+
+# Ensure we are inside a git repo
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Error: not inside a git repository." >&2
+  exit 1
+fi
+
+LABELS=(
+  "Last month"
+  "Last 3 months"
+  "Last year"
+  "Last 3 years"
+)
+
+SINCE=(
+  "1 month ago"
+  "3 months ago"
+  "1 year ago"
+  "3 years ago"
+)
+
+TOP_N=10
+
+echo "Repository: $(git rev-parse --show-toplevel)"
+echo
+
+
+###############################################################################
+# Helper: Extract Reviewed-by tags
+# Outputs one "Name <email>" per line for the commit range.
+###############################################################################
+extract_reviewed_by() {
+    local since="$1"
+
+    # Capture commit messages, extract Reviewed-by tags, normalize spacing
+    git log --since="$since" --pretty=format:%B 2>/dev/null \
+        | grep -E '^Reviewed-by:' \
+        | sed -E 's/^Reviewed-by:[[:space:]]*//'
+}
+
+
+
+###############################################################################
+# SECTION 1 — Top contributors (by author name)
+###############################################################################
+echo "============================================================"
+echo "                 Top Contributors (Names)"
+echo "============================================================"
+echo
+
+for i in "${!LABELS[@]}"; do
+  label="${LABELS[i]}"
+  since="${SINCE[i]}"
+
+  echo "=== ${label} (since ${since}) ==="
+
+  out=$(git log --since="$since" --format='%aN' 2>/dev/null \
+        | sort | uniq -c | sort -rn | head -n "$TOP_N" || true)
+
+  [[ -z "${out//[$'\t\r\n ']}" ]] && echo "(no commits)" || echo "$out"
+  echo
+done
+
+
+###############################################################################
+# SECTION 2 — Top contributors (by email domain)
+###############################################################################
+echo
+echo "============================================================"
+echo "          Top Contributors by Email Domain"
+echo "============================================================"
+echo
+
+for i in "${!LABELS[@]}"; do
+  label="${LABELS[i]}"
+  since="${SINCE[i]}"
+
+  echo "=== ${label} (since ${since}) ==="
+
+  out=$(git log --since="$since" --format='%aE' 2>/dev/null \
+        | awk -F'@' '/@/ {print $2}' \
+        | sort | uniq -c | sort -rn | head -n "$TOP_N" || true)
+
+  [[ -z "${out//[$'\t\r\n ']}" ]] && echo "(no commits)" || echo "$out"
+  echo
+done
+
+
+
+###############################################################################
+# SECTION 3 — Top reviewers (from Reviewed-by tags, by reviewer name)
+###############################################################################
+echo
+echo "============================================================"
+echo "                 Top Reviewers (Names)"
+echo "============================================================"
+echo
+
+for i in "${!LABELS[@]}"; do
+  label="${LABELS[i]}"
+  since="${SINCE[i]}"
+
+  echo "=== ${label} (since ${since}) ==="
+
+  out=$(extract_reviewed_by "$since" \
+        | sed -E 's/ <.*>//' \
+        | sort | uniq -c | sort -rn | head -n "$TOP_N" || true)
+
+  [[ -z "${out//[$'\t\r\n ']}" ]] && echo "(no Reviewed-by tags)" || echo "$out"
+  echo
+done
+
+
+
+###############################################################################
+# SECTION 4 — Top reviewers (by email domain)
+###############################################################################
+echo
+echo "============================================================"
+echo "           Top Reviewers by Email Domain"
+echo "============================================================"
+echo
+
+for i in "${!LABELS[@]}"; do
+  label="${LABELS[i]}"
+  since="${SINCE[i]}"
+
+  echo "=== ${label} (since ${since}) ==="
+
+  out=$(extract_reviewed_by "$since" \
+        | sed -E 's/.*<([^>]+)>.*/\1/' \
+        | awk -F'@' '/@/ {print $2}' \
+        | sort | uniq -c | sort -rn | head -n "$TOP_N" || true)
+
+  [[ -z "${out//[$'\t\r\n ']}" ]] && echo "(no Reviewed-by tags)" || echo "$out"
+  echo
+done

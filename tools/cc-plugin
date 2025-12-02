@@ -1,0 +1,22 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+ktest_dir="$(dirname "$(readlink -f "$0")")/../"
+ktest_kernel_source="$(realpath ~/git/linux/ 2>/dev/null || true)"
+ktest_lustre_source="$ktest_kernel_source/../lustre-release/"
+ktest_ccplugin="$ktest_dir/../xunused/build/xunused"
+ktest_out="/tmp/ktest-out/"
+ktest_arch="x86_64"
+ktest_kernel_build="$ktest_out/kernel_build.$ktest_arch"
+ktest_lustre_build="$ktest_out/lustre_build.$ktest_arch"
+
+echo "PLUGIN"
+"$ktest_ccplugin" "$ktest_lustre_build/compile_commands.json"
