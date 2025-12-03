@@ -1,0 +1,251 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# This file is part of Lustre, http://www.lustre.org/
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+set -ef
+
+function add_after() {
+	FILE="$1"
+	MARKER="$2"
+	NEW="$3"
+
+	while IFS='' read -r LINE
+	do
+		printf "%s\n" "$LINE"
+
+		if [[ -n "$MARKER" ]] && [[ "$LINE" = "$MARKER" ]]
+		then
+			printf "%s\n" "$NEW"
+			MARKER=''
+			if IFS='' read -r LINE
+			then
+				[[ "$LINE" != "$NEW" ]] && printf "%s\n" "$LINE"
+			fi
+		fi
+	done < "$FILE" > "$FILE.tmp"
+
+	mv "$FILE.tmp" "$FILE"
+}
+
+function rules_setup() {
+	local path="$1"
+	local config="$2"
+
+	for file in $(find "$path" -name Makefile); do
+		sed -i "s/.*include.*Rules//g" "$file"
+		echo "include $path/Rules" >> "$file"
+		sed -i "s/obj-m/obj-\$($config)/g" "$file"
+	done
+
+	cat > "$path/Rules" <<EOF
+EXTRA_CFLAGS := \$(EXTRA_PRE_CFLAGS)
+#EXTRA_CFLAGS += -include $KPATH/include/lustre/undef.h
+EXTRA_CFLAGS += -include $KPATH/include/lustre/config.h
+EXTRA_CFLAGS += -I$KPATH/include/libcfs/
+EXTRA_CFLAGS += -I$KPATH/include/libcfs/libcfs/
+EXTRA_CFLAGS += -I$KPATH/include/libcfs/uapi/
+EXTRA_CFLAGS += -I$KPATH/include/lustre/
+EXTRA_CFLAGS += -I$KPATH/include/lustre/lustre/
+EXTRA_CFLAGS += -I$KPATH/include/lustre/uapi/
+EXTRA_CFLAGS += -I$KPATH/include/lnet/
+EXTRA_CFLAGS += -I$KPATH/include/lnet/lnet/
+EXTRA_CFLAGS += -I$KPATH/include/lnet/uapi/
+EXTRA_CFLAGS += -I$KPATH/include/lustre_compat/
+EXTRA_CFLAGS += -Wno-format-truncation
+EXTRA_CFLAGS += -g -O2 -Wall -Wno-error
+EXTRA_CFLAGS += \$(EXTRA_POST_CFLAGS)
+
+obj-\$($config) += \$(patsubst %,%.o,\$(MODULES))
+EOF
+}
+
+function compat_clone() {
+	# TODO: This should be optional... and not in net/
+	cp -R include/libcfs "$KERNEL_DIR/include/libcfs"
+	cp -R include/uapi/linux/llcrypt.h "$KERNEL_DIR/include/uapi/linux/"
+	cp -R include/lustre_compat "$KERNEL_DIR/include/lustre_compat"
+	cp -R lustre_compat "$KERNEL_DIR/net/"
+}
+
+function lnet_copy_tree() {
+	cp -R lnet/include "$KERNEL_DIR/include/lnet"
+	mkdir -p "$KERNEL_DIR/net/lnet/lnet"
+	cp -R lnet/lnet "$KERNEL_DIR/net/lnet/"
+	cp -R lnet/klnds "$KERNEL_DIR/net/lnet/"
+	cp -R lnet/selftest "$KERNEL_DIR/net/lnet/"
+	cp lnet/Makefile "$KERNEL_DIR/net/lnet/Makefile"
+}
+
+function lnet_clone() {
+	lnet_copy_tree
+
+	rules_setup "$KERNEL_DIR/net/lnet/" CONFIG_LNET
+
+	cat > "$KERNEL_DIR/net/lnet/Kconfig" <<EOF
+config LNET
+	tristate "LNET support"
+	help
+	  This is LNET.
+
+	  To compile this LNET support as a module, choose M here.
+
+	  If unsure, say N.
+EOF
+
+	add_after "$KERNEL_DIR/net/Kconfig" 'if NET' 'source "net/lnet/Kconfig"'
+	add_after "$KERNEL_DIR/net/Makefile" 'endif' 'obj-$(CONFIG_LNET) += lnet/'
+}
+
+function find_kernel_dirs() {
+	find lustre/ -mindepth 1 -maxdepth 1 -type d |
+	    grep -v utils |
+	    grep -v scripts |
+	    grep -v kernel_patches |
+	    grep -v conf |
+	    grep -v include |
+	    grep -v tests |
+	    grep -v doc
+}
+
+function setup_lustre_config() {
+	cp config.h "$KERNEL_DIR/include/lustre/"
+	cp undef.h "$KERNEL_DIR/include/lustre/" || true
+	sed -i 's/.*LUSTRE_VERSION_STRING.*/#define LUSTRE_VERSION_STRING "in-kernel"/g' "$KERNEL_DIR/include/lustre/config.h"
+}
+
+function lustre_copy_tree() {
+	cp -R lustre/include "$KERNEL_DIR/include/lustre"
+
+	for dir in $(find_kernel_dirs); do
+		mkdir -p "$KERNEL_DIR/fs/$dir"
+		cp -R "$dir" "$KERNEL_DIR/fs/lustre/"
+	done
+
+	cp lustre/Makefile "$KERNEL_DIR/fs/lustre/Makefile"
+}
+
+function lustre_clone() {
+	lustre_copy_tree
+	setup_lustre_config
+
+	# TODO: Why?
+	sed -i 's/..\/..\//..\//g' "$KERNEL_DIR/fs/lustre/kunit/ldlm_extent.c"
+
+	rules_setup "$KERNEL_DIR/fs/lustre/" CONFIG_LUSTRE
+
+	cat > "$KERNEL_DIR/fs/lustre/Kconfig" <<EOF
+config LUSTRE
+	tristate "Lustre filesystem support"
+	help
+	  This is the Lustre filesystem.
+
+	  To compile this file system support as a module, choose M here.
+
+	  If unsure, say N.
+EOF
+
+	add_after "$KERNEL_DIR/fs/Kconfig" 'if BLOCK' 'source "fs/lustre/Kconfig"'
+	echo 'obj-$(CONFIG_LUSTRE) += lustre/' >> "$KERNEL_DIR/fs/Makefile"
+}
+
+function clean_lustre() {
+	# TODO: Should we clean first?
+	# make clean ||: 1> /dev/null
+	return
+}
+
+function clean_linux() {
+	local old="$PWD"
+
+	rm -rf "$KERNEL_DIR/include/lustre" "$KERNEL_DIR/fs/lustre"
+	rm -rf "$KERNEL_DIR/include/lnet" "$KERNEL_DIR/net/lnet"
+	rm -rf "$KERNEL_DIR/include/lustre_compat" "$KERNEL_DIR/net/lustre_compat"
+
+	cd "$KERNEL_DIR"
+	git checkout ./*
+	git clean -xdf
+	make mrproper
+	cd "$old"
+}
+
+function cbi_clean() {
+	[[ "$#" -eq 2 ]] || cbi_usage
+	stat "$2" 1> /dev/null 2> /dev/null || cbi_usage
+
+	KERNEL_DIR="$2"
+	KPATH="$(readlink -e "$KERNEL_DIR")"
+
+	clean_linux
+}
+
+function cbi_usage() {
+	less -F <<EOF
+Usage: ${0##*/} <linux source tree>
+
+Port Lustre to the native Linux build system
+	clean         Clean the kernel tree.
+	help          List all possible commands.
+EOF
+	exit
+}
+
+function swap_symbols() {
+    local old_sym="$1"
+    local new_sym="$2"
+    echo "SWAP $1 $2 in $KERNEL_DIR"
+
+    find "$KERNEL_DIR/net/lnet" -type f -exec sed -i "s/$old_sym/$new_sym/g" {} +
+    find "$KERNEL_DIR/fs/lustre" -type f -exec sed -i "s/$old_sym/$new_sym/g" {} +
+    find "$KERNEL_DIR/include" -type f -exec sed -i "s/$old_sym/$new_sym/g" {} +
+}
+
+function swap_all_symbols() {
+    swap_symbols libcfs_vfree_atomic vfree_atomic
+    swap_symbols cfs_kernel_write kernel_write
+    swap_symbols cfs_kernel_read kernel_read
+    swap_symbols cfs_totalram_pages totalram_pages
+    swap_symbols ll_shrinker_alloc shrinker_alloc
+    swap_symbols ll_shrinker_register shrinker_register
+    swap_symbols ll_shrinker_free shrinker_free
+    swap_symbols cfs_apply_workqueue_attrs apply_workqueue_attrs
+}
+
+function cbi_copy_builtin() {
+	[[ "$#" -eq 1 ]] || cbi_usage
+	stat "$1" 1> /dev/null 2> /dev/null || cbi_usage
+
+	KERNEL_DIR="$1"
+	KPATH="$(readlink -e "$KERNEL_DIR")"
+
+	if ! [[ -e 'config.h' ]]; then
+		echo "$0: you did not run configure, or you're not in the Lustre source directory."
+		exit 1
+	fi >&2
+
+	clean_lustre
+	clean_linux
+	compat_clone
+	lnet_clone
+	lustre_clone
+	swap_all_symbols
+
+	echo "$0: done. now you can build the kernel with Lustre support." >&2
+}
+
+# Process options
+for arg in "$@"; do
+	shift
+	case "$arg" in
+		clean) cbi_clean "$arg" "$@";;
+		help) cbi_usage;;
+		*) cbi_copy_builtin "$arg" "$@";;
+	esac
+	exit
+done
+
+cbi_usage
