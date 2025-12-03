@@ -20,6 +20,7 @@ import logging
 import json
 import os
 import sys
+import signal
 import requests
 import time
 import getpass
@@ -805,6 +806,7 @@ class Reviewer(object):
     @staticmethod
     def run_script(command):
         start_time = time.time()
+        timeout_seconds = 5 * 60
 
         pipe = subprocess.Popen(
             command,
@@ -812,9 +814,17 @@ class Reviewer(object):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            preexec_fn=os.setsid
         )
-        out, _ = pipe.communicate("")
-        returncode = pipe.returncode
+
+        try:
+            out, _ = pipe.communicate(b"", timeout=timeout_seconds)
+            returncode = pipe.returncode
+        except subprocess.TimeoutExpired:
+            pgrp = os.getpgid(pipe.pid)
+            os.killpg(pgrp, signal.SIGTERM)
+            out, _ = pipe.communicate()
+            returncode = -1
 
         elapsed_time = int(time.time() - start_time)
 
