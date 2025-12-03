@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+
+set -o nounset
+set -o errexit
+set -o errtrace
+
+ktest_workdir="/home/ktest/ktest"
+
+usage()
+{
+    echo "podman-ktest: Run generic virtual machine tests"
+    echo "Usage: podman-ktest cmd [options]"
+}
+
+if [[ $# = 0 ]]; then
+    usage
+    exit 1
+fi
+
+function cmd_build() {
+    podman build \
+	   -t ktest-runner \
+	   -f ci-lustre/Containerfile.ktest-runner \
+	   .
+}
+
+function cmd_run() {
+    podman run \
+	   -it \
+	   --workdir "$ktest_workdir" \
+	   --tty --interactive=false \
+	   --pids-limit 100000 \
+	   --device /dev/kvm \
+	   -v /home/timothy/git/linux:/home/ktest/git/linux:O \
+	   -v /home/timothy/git/lustre-release/:/home/ktest/git/lustre-release/:O \
+	   -v /home/timothy/ws/xunused/:/home/ktest/xunused/:O \
+	   -v /var/lib/ktest/:/var/lib/ktest/:O \
+	   -v /boot/:/boot/:ro \
+	   -v /tmp/:/tmp/ \
+	   --rm ktest-runner:latest "$@"
+}
+
+function cmd_run_immutable() {
+    podman run \
+	   -it \
+	   --workdir "$ktest_workdir" \
+	   --pids-limit 100000 \
+	   --tty --interactive=false \
+	   --device /dev/kvm \
+	   -v /home/timothy/git/linux:/home/ktest/git/linux:O \
+	   -v /home/timothy/git/lustre-release/:/home/ktest/git/lustre-release/:O \
+	   -v /home/timothy/ws/xunused/:/home/ktest/xunused/:O \
+	   -v /var/lib/ktest/:/var/lib/ktest/:O \
+	   -v /boot/:/boot/:ro \
+	   -v /tmp/:/tmp/:O \
+	   --rm ktest-runner:latest "$@"
+}
+
+# parse command and shift for rest of arg parsing
+CMD="$1"
+shift
+
+# check if command is valid
+if [[ $(type -t "cmd_$CMD") == function ]]; then
+    CMD="cmd_$CMD"
+else
+    usage
+    exit 1
+fi
+
+while getopts "w:h" arg; do
+    case $arg in
+	w)
+	    ktest_workdir="$OPTARG"
+	    ;;
+	h)
+	    usage
+	    exit 0
+	    ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+$CMD "$@"
