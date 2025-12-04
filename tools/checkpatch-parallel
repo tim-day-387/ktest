@@ -8,7 +8,7 @@
 # Author: Timothy Day <timday@amazon.com>
 #
 
-export CHECKPATCH=${CHECKPATCH:-"/home/timothy/git/linux/scripts/checkpatch.pl"}
+export CHECKPATCH=${CHECKPATCH:-"/home/ktest/git/linux/scripts/checkpatch.pl"}
 export NPROC=${NPROC:-$(nproc)}
 
 DIRS="$*"

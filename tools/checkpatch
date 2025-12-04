@@ -1,0 +1,10 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+export CHECKPATCH=${CHECKPATCH:-"/home/ktest/git/linux/scripts/checkpatch.pl"}
+
+git diff HEAD~1 | "$CHECKPATCH" --show-types
