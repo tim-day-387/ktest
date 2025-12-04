@@ -31,6 +31,7 @@ import re
 import random
 import html as pyhtml
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import dateutil.parser
 import shutil
 import pickle
@@ -1298,7 +1299,7 @@ def print_WorkList_to_HTML():
         # Convert timestamp (string) to float
         try:
             timestamp = float(timestamp_raw)
-            readable = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
+            readable = datetime.fromtimestamp(timestamp, ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             timestamp = 0
             readable = "Invalid"
