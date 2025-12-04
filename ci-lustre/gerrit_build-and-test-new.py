@@ -511,6 +511,13 @@ TESTS = [
         "Type": TestType.REPORT,
     },
     {
+        "Command": "cd /home/timothy/git/lustre-release ; ~/ws/ktest/tools/git-contrib-with-rev.sh",
+        "Title": "Contribution Report",
+        "Description": "Fetch contribution statistics for Lustre tree",
+        "Enforced": False,
+        "Type": TestType.REPORT,
+    },
+    {
         "Command": "cd /home/timothy/git/lustre-release ; git diff HEAD~1 | ~/git/linux/scripts/checkpatch.pl --show-types",
         "Title": "Checkpatch",
         "Description": "Run checkpatch.pl from the given mainline kernel",
