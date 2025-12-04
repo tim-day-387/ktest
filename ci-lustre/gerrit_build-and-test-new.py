@@ -25,7 +25,6 @@ import requests
 import time
 import getpass
 import urllib.request, urllib.parse, urllib.error
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
 import threading
 import re
@@ -866,35 +865,6 @@ class Reviewer(object):
 
         return rows
 
-    def run_tests_for_group_parallel(self, tests, change_id, home_path, max_workers=4):
-        tests = list(tests)
-        results = [None] * len(tests)
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(
-                    self.run_test,
-                    test["Command"],
-                    change_id,
-                    test["Title"],
-                    home_path,
-                    test["Enforced"],
-                    test["Description"],
-                ): idx
-                for idx, test in enumerate(tests)
-            }
-
-            for future in as_completed(futures):
-                idx = futures[future]
-                try:
-                    result = future.result()
-                except Exception as e:
-                    # Capture unexpected errors so UI stays consistent
-                    result = f"<tr><td colspan=5>Error: {e}</td></tr>"
-                results[idx] = result
-
-        return "".join(results)
-
     def run_tests(self, branchwide, change_id, home_path):
         rows = ""
         tables = ""
@@ -933,7 +903,7 @@ class Reviewer(object):
         tables += table_template.format(title="In-Tree Build", rows=rows)
         rows = ""
 
-        rows = self.run_tests_for_group_parallel(
+        rows = self.run_tests_for_group(
             (t for t in TESTS if t["Type"] == TestType.VM),
             change_id,
             home_path,
