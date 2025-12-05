@@ -27,8 +27,6 @@ RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
 
 # Setup ccache
 RUN ln -s /usr/bin/ccache /usr/local/bin/clang-20
-RUN ccache --set-config=cache_dir=/tmp/ccache/
-RUN ccache --set-config=max_size=50G
 
 # Create a user for running ktest (ktest should not run as root for VM operations)
 RUN useradd -m -s /bin/bash ktest
@@ -36,6 +34,10 @@ RUN useradd -m -s /bin/bash ktest
 # Switch to ktest user
 USER ktest
 WORKDIR /home/ktest
+
+# Setup ccache
+RUN ccache --set-config=cache_dir=/tmp/ccache/
+RUN ccache --set-config=max_size=50G
 
 # Copy the ktest repository into the container
 COPY --chown=ktest:ktest . /home/ktest/ktest
