@@ -1,0 +1,23 @@
+# Ktest CI Configuration
+# This file configures the CI infrastructure for kernel testing
+
+# Path to the Linux kernel repository
+linux_repo = "/home/ktest/linux"
+
+# Output directory for test results and artifacts
+output_dir = "/workspace/ktest-out"
+
+# Path to the ktest directory (root of this project)
+ktest_dir = "/workspace"
+
+# Directory containing user configuration files
+users_dir = "/workspace/users"
+
+# Maximum duration for a subtest in seconds (1 hour)
+subtest_duration_max = 3600
+
+# Default duration for a subtest in seconds (5 minutes)
+subtest_duration_def = 300
+
+# Enable verbose logging
+verbose = true

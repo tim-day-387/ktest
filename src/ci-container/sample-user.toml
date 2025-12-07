@@ -1,0 +1,17 @@
+# Sample user configuration for ktest CI
+# Copy this file to the users directory and rename it appropriately
+
+# Test group configurations
+[test_group.lustre]
+max_commits = 50
+nice = 0
+test_duration_nice = 180
+test_always_passes_nice = 10
+tests = [
+    "fs/lustre/boot.ktest",
+]
+
+# Branch configurations  
+[branch.master]
+fetch = "https://github.com/tim-day-387/linux"
+tests = ["lustre"]

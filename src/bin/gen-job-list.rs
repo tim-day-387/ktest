@@ -178,12 +178,43 @@ fn user_test_jobs(rc: &CiConfig,
                   user: &str,
                   userconfig: &Userrc,
                   verbose: bool) -> Vec<TestJob> {
-    let mut ret: Vec<_> = userconfig.branch.iter()
-        .flat_map(move |(branch, branchconfig)| branchconfig.tests.iter()
-            .filter_map(|i| userconfig.test_group.get(i)).map(move |testgroup| (branch, testgroup)))
-        .flat_map(move |(branch, testgroup)| testgroup.tests.iter()
-            .flat_map(move |test| branch_test_jobs(rc, durations, repo, user, &branch, &testgroup, &test, verbose)))
-        .collect();
+    eprintln!("DEBUG: user_test_jobs called for user: {}", user);
+    eprintln!("DEBUG: User has {} branches", userconfig.branch.len());
+    for (branch_name, _) in &userconfig.branch {
+        eprintln!("DEBUG: User {} has branch: {}", user, branch_name);
+    }
+    eprintln!("DEBUG: User has {} test groups", userconfig.test_group.len());
+    for (group_name, _) in &userconfig.test_group {
+        eprintln!("DEBUG: User {} has test group: {}", user, group_name);
+    }
+    
+    let mut ret = Vec::new();
+    
+    for (branch, branchconfig) in &userconfig.branch {
+        eprintln!("DEBUG: Branch {} has {} tests", branch, branchconfig.tests.len());
+        
+        for test_group_name in &branchconfig.tests {
+            match userconfig.test_group.get(test_group_name) {
+                Some(testgroup) => {
+                    eprintln!("DEBUG: Processing branch '{}' with test group '{}' containing {} tests", 
+                             branch, test_group_name, testgroup.tests.len());
+                    
+                    for test in &testgroup.tests {
+                        eprintln!("DEBUG: Running branch_test_jobs for user={}, branch={}, test={:?}", 
+                                 user, branch, test);
+                        let jobs = branch_test_jobs(rc, durations, repo, user, branch, testgroup, test, verbose);
+                        eprintln!("DEBUG: branch_test_jobs returned {} jobs", jobs.len());
+                        ret.extend(jobs);
+                    }
+                },
+                None => {
+                    eprintln!("DEBUG: Test group '{}' not found for branch '{}'", test_group_name, branch);
+                }
+            }
+        }
+    }
+
+    eprintln!("DEBUG: user_test_jobs for {} collected {} jobs before sort", user, ret.len());
 
     /* sort by commit, dedup */
 
@@ -196,16 +227,36 @@ fn rc_test_jobs(rc: &CiConfig,
                 durations: Option<&[u8]>,
                 repo: &git2::Repository,
                 verbose: bool) -> Vec<TestJob> {
-    let mut ret: Vec<_> = rc.users.iter()
+    eprintln!("DEBUG: rc_test_jobs called");
+    eprintln!("DEBUG: Total users in config: {}", rc.users.len());
+    
+    let valid_users: Vec<_> = rc.users.iter()
         .filter(|u| u.1.is_ok())
         .map(|(user, userconfig)| (user, userconfig.as_ref().unwrap()))
-        .flat_map(|(user, userconfig)| user_test_jobs(rc, durations, repo, &user, &userconfig, verbose))
         .collect();
+    
+    eprintln!("DEBUG: Valid users (with OK config): {}", valid_users.len());
+    for (user, _) in &valid_users {
+        eprintln!("DEBUG: Valid user: {}", user);
+    }
+    
+    let mut ret: Vec<_> = valid_users.iter()
+        .flat_map(|(user, userconfig)| {
+            eprintln!("DEBUG: Processing user: {}", user);
+            let jobs = user_test_jobs(rc, durations, repo, &user, &userconfig, verbose);
+            eprintln!("DEBUG: User {} returned {} jobs", user, jobs.len());
+            jobs
+        })
+        .collect();
+
+    eprintln!("DEBUG: Total jobs before sort: {}", ret.len());
 
     /* sort by commit, dedup */
 
     ret.sort();
     ret.reverse();
+    
+    eprintln!("DEBUG: Total jobs after sort: {}", ret.len());
     ret
 }
 

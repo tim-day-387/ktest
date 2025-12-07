@@ -57,8 +57,6 @@ shift $(( OPTIND - 1 ))
 
 JOBSERVER=$1
 
-source <(ssh_retry $JOBSERVER cat .ktestrc)
-
 JOBSERVER_LINUX_REPO=ssh://$JOBSERVER/$JOBSERVER_HOME/linux
 HOSTNAME=$(uname -n)
 WORKDIR=$(basename $(pwd))
@@ -131,8 +129,9 @@ run_test_job() {
 
     sync_git_repos
 
-    run_quiet "Fetching $COMMIT" git_fetch linux $COMMIT
-    run_quiet "Checking out $COMMIT" git checkout -f FETCH_HEAD
+    git_fetch linux $BRANCH
+    run_quiet "Checking out" git checkout .
+    run_quiet "Checking out $COMMIT" git checkout $COMMIT
 
     [[ $(git rev-parse HEAD) != $COMMIT ]] && exit 1
 
@@ -167,7 +166,7 @@ run_test_job() {
 
 	$KTEST_DIR/lib/supervisor -T 1200 -f "$FULL_LOG" -S -F	\
 	    -b $TEST_NAME -o ktest-out/out				\
-	    -- build-test-kernel run -P $FULL_TEST_PATH ${SUBTESTS[@]} &
+	    -- /workspace/build-test-kernel run -P $FULL_TEST_PATH ${SUBTESTS[@]} &
 	wait
 
 	SUBTESTS_REMAINING=()
@@ -187,8 +186,8 @@ run_test_job() {
 	    fi
 	done
 
-	echo "Compressing output"
-	find ktest-out/out -type f -name \*log -print0|xargs -0 brotli --rm -9
+	#echo "Compressing output"
+	#find ktest-out/out -type f -name \*log -print0|xargs -0 brotli --rm -9
 
 
 	echo "Sending results to jobserver"
