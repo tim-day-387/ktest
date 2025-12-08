@@ -31,11 +31,9 @@ function cmd_run() {
 	   --tty --interactive=false \
 	   --pids-limit 100000 \
 	   --device /dev/kvm \
-	   -v /home/timothy/git/linux:/home/ktest/git/linux:O \
-	   -v /home/timothy/git/lustre-release/:/home/ktest/git/lustre-release/:O \
-	   -v /home/timothy/ws/xunused/:/home/ktest/xunused/:O \
+	   -v /home/admin/Programming/linux:/home/ktest/git/linux:O \
+	   -v /home/admin/Programming/lustre-release/:/home/ktest/git/lustre-release/:O \
 	   -v /var/lib/ktest/:/var/lib/ktest/:O \
-	   -v /boot/:/boot/:ro \
 	   -v /tmp/:/tmp/ \
 	   --rm ktest-runner:latest "$@"
 }
@@ -47,11 +45,9 @@ function cmd_run_immutable() {
 	   --pids-limit 100000 \
 	   --tty --interactive=false \
 	   --device /dev/kvm \
-	   -v /home/timothy/git/linux:/home/ktest/git/linux:O \
-	   -v /home/timothy/git/lustre-release/:/home/ktest/git/lustre-release/:O \
-	   -v /home/timothy/ws/xunused/:/home/ktest/xunused/:O \
+	   -v /home/admin/Programming/linux:/home/ktest/git/linux:O \
+	   -v /home/admin/Programming/lustre-release/:/home/ktest/git/lustre-release/:O \
 	   -v /var/lib/ktest/:/var/lib/ktest/:O \
-	   -v /boot/:/boot/:ro \
 	   -v /tmp/:/tmp/:O \
 	   --rm ktest-runner:latest "$@"
 }
