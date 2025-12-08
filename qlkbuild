@@ -426,6 +426,34 @@ function cmd_ccplugin()
     "$ktest_ccplugin" "$ktest_lustre_build/compile_commands.json"
 }
 
+function cmd_clang-tidy()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ ! -f "$ktest_lustre_build/compile_commands.json" ]]; then
+	purge_previous_results
+	prepare_linux_source
+	run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+	prepare_lustre_source
+	run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
+    fi
+
+    echo "CLANG-TIDY"
+    local old="$PWD"
+
+    cd "$ktest_lustre_build"
+    run-clang-tidy-20 -checks='-*,linuxkernel-must-check-errs,misc-static-assert'
+    cd "$old"
+}
+
 function cmd_boot()
 {
     cmd_run "$ktest_boot_test"

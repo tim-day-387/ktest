@@ -536,6 +536,13 @@ TESTS = [
         "Type": TestType.OUT_OF_TREE_BUILD,
     },
     {
+        "Command": "./podman-ktest run ./qlkbuild clang-tidy --purge-ktest-out 0 --clean-git 0 --allow-warnings 1 --build-lustre 1",
+        "Title": "Clang Tidy",
+        "Description": "Run Clang Tidy",
+        "Enforced": False,
+        "Type": TestType.OUT_OF_TREE_BUILD,
+    },
+    {
         "Command": "./podman-ktest run ./qlkbuild build --purge-ktest-out 1 --clean-git 1 --allow-warnings 0 --build-lustre 1",
         "Title": "Lustre Build Strict",
         "Description": "Build Lustre (LLVM/OutOfTree/NoWarnings)",
