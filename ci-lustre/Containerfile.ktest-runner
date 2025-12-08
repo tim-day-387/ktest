@@ -25,6 +25,7 @@ RUN chmod 0644 /boot/vmlinuz*
 
 # Get LLVM
 RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
+RUN apt-get install -y clang-tidy-20
 
 # Setup ccache
 RUN ln -s /usr/bin/ccache /usr/local/bin/clang-20
