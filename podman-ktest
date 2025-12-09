@@ -52,6 +52,27 @@ function cmd_run_immutable() {
 	   --rm ktest-runner:latest "$@"
 }
 
+function cmd_build_u24() {
+    podman build \
+	   -t lustre-u24 \
+	   -f ci-lustre/Containerfile.u24 \
+	   .
+    podman run \
+	   -it \
+	   --workdir /home/root/git/lustre-release/ \
+	   --pids-limit 100000 \
+	   --tty --interactive=false \
+	   -v /home/admin/Programming/lustre-release/:/home/root/git/lustre-release/:O \
+	   --rm lustre-u24:latest \
+	   bash -c '
+pwd
+echo "Running tests..."
+./autogen.sh
+./configure --disable-server
+make -j$(nproc)
+       '
+}
+
 # parse command and shift for rest of arg parsing
 CMD="$1"
 shift
