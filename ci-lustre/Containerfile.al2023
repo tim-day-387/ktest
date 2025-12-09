@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0
+
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
+
+# Install ktest dependencies
+RUN yum install -y kernel-devel rpm-build libselinux-devel libtool redhat-rpm-config \
+    libyaml-devel git flex bison keyutils-libs-devel libmount-devel libnl3-devel \
+    kernel-rpm-macros python3-devel openssl-devel ncurses-devel bison flex \
+    elfutils-libelf-devel openssl-devel dwarves keyutils-libs-devel libmount-devel
+RUN yum group install -y "Development Tools"
+
+# Git config
+RUN git config --global safe.directory '*'

@@ -73,6 +73,48 @@ make -j$(nproc)
        '
 }
 
+function cmd_build_al2023() {
+    podman build \
+	   -t lustre-al2023 \
+	   -f ci-lustre/Containerfile.al2023 \
+	   .
+    podman run \
+	   -it \
+	   --workdir /home/root/git/lustre-release/ \
+	   --pids-limit 100000 \
+	   --tty --interactive=false \
+	   -v /home/admin/Programming/lustre-release/:/home/root/git/lustre-release/:O \
+	   --rm lustre-al2023:latest \
+	   bash -c '
+pwd
+echo "Running tests..."
+./autogen.sh
+./configure
+make -j$(nproc)
+       '
+}
+
+function cmd_build_al2() {
+    podman build \
+	   -t lustre-al2 \
+	   -f ci-lustre/Containerfile.al2 \
+	   .
+    podman run \
+	   -it \
+	   --workdir /home/root/git/lustre-release/ \
+	   --pids-limit 100000 \
+	   --tty --interactive=false \
+	   -v /home/admin/Programming/lustre-release/:/home/root/git/lustre-release/:O \
+	   --rm lustre-al2:latest \
+	   bash -c '
+pwd
+echo "Running tests..."
+./autogen.sh
+./configure
+make -j$(nproc)
+       '
+}
+
 # parse command and shift for rest of arg parsing
 CMD="$1"
 shift
