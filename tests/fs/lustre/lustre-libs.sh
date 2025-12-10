@@ -155,8 +155,8 @@ function require-lustre-kernel-config()
     require-kernel-config MULTIUSER
     require-kernel-config NFS_FS
     require-kernel-config BITREVERSE
-    require-kernel-config CRYPTO_DEFLATE
-    require-kernel-config ZLIB_DEFLATE
+    #require-kernel-config CRYPTO_DEFLATE
+    #require-kernel-config ZLIB_DEFLATE
 
     # More tracing support!
     require-kernel-config BPF_SYSCALL
