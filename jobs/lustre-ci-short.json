@@ -1,0 +1,28 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_mainline_ld",
+      "platform": "mainline",
+      "build": "tests/fs/lustre/lockdep-llmount.ktest"
+    },
+    {
+      "name": "boot_ld",
+      "platform": "mainline",
+      "build": "tests/fs/lustre/lockdep-llmount.ktest",
+      "run": "tests/fs/lustre/lockdep-llmount.ktest",
+      "depends_on": ["lustre_mainline_ld"]
+    },
+    {
+      "name": "lustre_mainline",
+      "platform": "mainline",
+      "build": "tests/fs/lustre/boot.ktest"
+    },
+    {
+      "name": "boot",
+      "platform": "mainline",
+      "build": "tests/fs/lustre/boot.ktest",
+      "run": "tests/fs/lustre/boot.ktest",
+      "depends_on": ["lustre_mainline"]
+    }
+  ]
+}

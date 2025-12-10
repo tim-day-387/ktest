@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+# Distro
+FROM public.ecr.aws/amazonlinux/amazonlinux:2
+
+# Install ktest dependencies
+RUN amazon-linux-extras install epel -y
+RUN yum install -y asciidoc audit-libs-devel automake bc binutils-devel \
+    bison device-mapper-devel elfutils-devel elfutils-libelf-devel expect \
+    flex gcc gcc-c++ git glib2 glib2-devel hmaccalc keyutils-libs-devel \
+    krb5-devel ksh libattr-devel libblkid-devel libselinux-devel libtool \
+    libuuid-devel libyaml-devel lsscsi make ncurses-devel net-snmp-devel \
+    net-tools newt-devel numactl-devel parted patchutils pciutils-devel \
+    perl-ExtUtils-Embed pesign redhat-rpm-config rpm-build \
+    systemd-devel tcl tcl-devel tk tk-devel wget xmlto yum-utils zlib-devel \
+    python3-devel libnl3-devel ncompress libaio-devel libffi-devel \
+    python-packaging cmake kernel-devel kernel-headers gcc10 gcc10-c++ dkms \
+    libmount-devel
+
+# Git config
+RUN git config --global safe.directory '*'
