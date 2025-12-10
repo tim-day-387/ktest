@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+# Distro
+FROM rockylinux:9
+
+# Install ktest dependencies
+RUN dnf install -y dnf-plugins-core
+RUN dnf config-manager --enable crb
+RUN dnf install -y gcc autoconf libtool which make patch diffutils file \
+	binutils-devel python3 python3-devel elfutils-devel e2fsprogs-devel \
+	libselinux-devel libaio-devel dnf-plugins-core bc bison flex \
+	libyaml-devel libnl3-devel libmount-devel libtirpc-devel \
+	libblkid-devel openssl-devel libuuid-devel git kernel-devel \
+	keyutils-libs keyutils-libs-devel rpm-build kernel \
+	kernel-abi-stablelists kernel-rpm-macros kmod pkgconfig
+RUN dnf install -y --enablerepo=*debug* kernel-debuginfo
+
+# Build and install latest e2fsprogs
+ARG E2FSPROGS_GIT=git://review.whamcloud.com/tools/e2fsprogs.git
+ENV _E2GIT=${E2FSPROGS_GIT}
+RUN /bin/bash -c \
+	"git clone $_E2GIT e2fsprogs && \
+	cd e2fsprogs && \
+	git checkout -b v1.47.2-wc2 v1.47.2-wc2 && \
+	./configure --with-root-prefix=/usr --enable-elf-shlibs \
+		--disable-uuidd --disable-fsck \
+		--disable-e2initrd-helper \
+		--disable-libblkid --disable-libuuid \
+		--enable-quota --disable-fuse2fs && \
+	make -j && make install && cd .. && rm -rf e2fsprogs"
+
+# Git config
+RUN git config --global safe.directory '*'

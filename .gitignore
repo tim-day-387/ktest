@@ -21,4 +21,6 @@ target
 !.editorconfig
 !.shellcheckrc
 
+__pycache__
+
 *~

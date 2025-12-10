@@ -1,0 +1,24 @@
+{
+  "jobs": [
+    {
+      "name": "zfs_patch",
+      "platform": "zfs_patch",
+      "build": "tests/fs/lustre/boot.ktest",
+      "backing_storage": "zfs"
+    },
+    {
+      "name": "lustre_patch",
+      "platform": "native_1",
+      "build": "tests/fs/lustre/boot.ktest",
+      "backing_storage": "zfs",
+      "depends_on": ["zfs_patch"]
+    },
+    {
+      "name": "kernel_deb",
+      "platform": "kernel_deb",
+      "build": "tests/fs/lustre/inkernel.ktest",
+      "backing_storage": "zfs",
+      "depends_on": ["lustre_patch"]
+    }
+  ]
+}

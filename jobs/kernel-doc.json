@@ -1,0 +1,5 @@
+{
+  "name": "kernel-doc",
+  "platform": "mainline",
+  "tool": "kernel_doc_helper.sh"
+}
