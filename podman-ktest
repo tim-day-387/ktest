@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+set -o errexit
+set -o errtrace
+
+ktest_dir=$(dirname "$(readlink -f "$0")")
+ktest_workdir="/home/ktest/ktest"
+ktest_ccplugin_source="$ktest_dir/../xunused/"
+
+[[ -z $ktest_kernel_source ]] && ktest_kernel_source="$(realpath ~/git/linux/ 2>/dev/null || true)"
+ktest_lustre_source="$ktest_kernel_source/../lustre-release/"
+
+if [[ ! -d $ktest_kernel_source ]]; then
+    echo "kernel source directory $ktest_kernel_source does not exist"
+    exit 1
+fi
+
+usage()
+{
+    echo "podman-ktest: Run generic virtual machine tests"
+    echo "Usage: podman-ktest cmd [options]"
+}
+
+if [[ $# = 0 ]]; then
+    usage
+    exit 1
+fi
+
+function cmd_build() {
+    podman build \
+	   -t ktest-runner \
+	   -f containers/Containerfile.ktest.u24 .
+    podman build \
+	   -t lustre-u24 \
+	   -f containers/Containerfile.lustre.u24 .
+    podman build \
+	   -t lustre-al2023 \
+	   -f containers/Containerfile.lustre.al2023 .
+    podman build \
+	   -t lustre-al2 \
+	   -f containers/Containerfile.lustre.al2 .
+}
+
+function cmd_run() {
+    podman run \
+	   -it \
+	   --workdir "$ktest_workdir" \
+	   --tty --interactive=false \
+	   --pids-limit 100000 \
+	   --device /dev/kvm \
+	   -v "$ktest_kernel_source":/home/ktest/git/linux:O \
+	   -v "$ktest_lustre_source":/home/ktest/git/lustre-release/:O \
+	   -v "$ktest_ccplugin_source":/home/ktest/xunused/:O \
+	   -v /var/lib/ktest/:/var/lib/ktest/:O \
+	   -v /tmp/:/tmp/ \
+	   --rm ktest-runner:latest "$@"
+}
+
+function cmd_run_immutable() {
+    podman run \
+	   -it \
+	   --workdir "$ktest_workdir" \
+	   --pids-limit 100000 \
+	   --tty --interactive=false \
+	   --device /dev/kvm \
+	   -v "$ktest_kernel_source":/home/ktest/git/linux:O \
+	   -v "$ktest_lustre_source":/home/ktest/git/lustre-release/:O \
+	   -v "$ktest_ccplugin_source":/home/ktest/xunused/:O \
+	   -v /var/lib/ktest/:/var/lib/ktest/:O \
+	   -v /tmp/:/tmp/:O \
+	   --rm ktest-runner:latest "$@"
+}
+
+function cmd_build_u24() {
+    podman run \
+	   -it \
+	   --workdir /home/root/git/lustre-release/ \
+	   --pids-limit 100000 \
+	   --tty --interactive=false \
+	   -v "$ktest_lustre_source":/home/root/git/lustre-release/:O \
+	   --rm lustre-u24:latest \
+	   bash -c '
+./autogen.sh
+./configure --disable-server
+make --quiet -j$(nproc)
+       '
+}
+
+function cmd_build_al2023() {
+    podman run \
+	   -it \
+	   --workdir /home/root/git/lustre-release/ \
+	   --pids-limit 100000 \
+	   --tty --interactive=false \
+	   -v "$ktest_lustre_source":/home/root/git/lustre-release/:O \
+	   --rm lustre-al2023:latest \
+	   bash -c '
+./autogen.sh
+./configure --enable-efa
+make --quiet -j$(nproc)
+       '
+}
+
+function cmd_build_al2() {
+    podman run \
+	   -it \
+	   --workdir /home/root/git/lustre-release/ \
+	   --pids-limit 100000 \
+	   --tty --interactive=false \
+	   -v "$ktest_lustre_source":/home/root/git/lustre-release/:O \
+	   --rm lustre-al2:latest \
+	   bash -c '
+./autogen.sh
+./configure
+make --quiet -j$(nproc)
+       '
+}
+
+# parse command and shift for rest of arg parsing
+CMD="$1"
+shift
+
+# check if command is valid
+if [[ $(type -t "cmd_$CMD") == function ]]; then
+    CMD="cmd_$CMD"
+else
+    usage
+    exit 1
+fi
+
+while getopts "w:h" arg; do
+    case $arg in
+	w)
+	    ktest_workdir="$OPTARG"
+	    ;;
+	h)
+	    usage
+	    exit 0
+	    ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+$CMD "$@"
