@@ -265,6 +265,69 @@ function cmd_run()
     start_vm
 }
 
+function cmd_boot_native()
+{
+    ktest_root_image="/var/lib/ktest/root.amd64"
+    ktest_test="$ktest_dir/tests/fs/lustre/inkernel.ktest"
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    purge_previous_results
+    prepare_linux_source
+    prepare_linux_lustre_source
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    start_vm
+}
+
+function build_lustre_intree()
+{
+    local old="$PWD"
+
+    cd "$ktest_lustre_build"
+
+    rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
+
+    # No strict errors
+    if [[ "${ktest_lustre_allow_warnings}" == "1" ]]; then
+	export CFLAGS="-Wno-error=attribute-warning -Wno-error=unused-but-set-variable -Wno-error=single-bit-bitfield-constant-conversion -Wno-error=format-security -Wno-error=cast-function-type-strict"
+    fi
+
+    # Disable persistent OSDs
+    export with_ldiskfs="no"
+    export with_zfs="no"
+
+    # Disable optional features
+    export with_o2ib="no"
+    export enable_gss="no"
+    export enable_crypto="no"
+
+    # Always build the server
+    export enable_server="yes"
+
+    # ktest uses statically linked tools
+    export enable_shared="no"
+
+    # Assume that Linux is in the same directory as Lustre
+    export with_linux="$ktest_kernel_source"
+
+    # Build the kernel via ktest into tmp
+    export ARCH="$(uname -m)"
+    export with_linux_obj="/tmp/ktest-out/kernel_build.$ARCH/"
+
+    # Misc
+    export LLVM="-20"
+
+    ./autogen.sh
+    ./configure || cat config.log
+
+    cd "$old"
+}
+
 function build_lustre()
 {
     local old="$PWD"
@@ -302,6 +365,7 @@ function build_lustre()
     # Disable optional features
     export with_o2ib="no"
     export enable_gss="no"
+    export enable_crypto="no"
 
     # Always build the server
     export enable_server="yes"
@@ -320,7 +384,7 @@ function build_lustre()
     export LLVM="-20"
 
     ./autogen.sh
-    ./configure
+    ./configure || cat config.log
     bear -- make -j$ktest_njobs
 
     # Newer kernels have these lines that the plugin hates
@@ -361,6 +425,21 @@ function prepare_lustre_source()
     cd "$old"
 }
 
+function run_copy_builtin()
+{
+    local old="$PWD"
+
+    cd "$ktest_lustre_build"
+    ./copy-builtin "$ktest_kernel_source"
+    cd "$ktest_kernel_source"
+    git add *
+    git add -f include/lustre/config.h
+    git add include/lustre_compat
+    git commit -m "Lustre"
+    git format-patch HEAD~1 --stdout > /tmp/lustre.patch
+    cd "$old"
+}
+
 function prepare_linux_source()
 {
     local old="$PWD"
@@ -369,6 +448,15 @@ function prepare_linux_source()
     if [[ "${ktest_lustre_clean_git}" == "1" ]]; then
 	run_quiet_with_status "CLEAN LINUX [$(get_commit_subject)]" "DONE" git clean -xdf
     fi
+    cd "$old"
+}
+
+function prepare_linux_lustre_source()
+{
+    local old="$PWD"
+
+    cd "$ktest_kernel_source"
+    git apply /tmp/lustre.patch
     cd "$old"
 }
 
@@ -401,6 +489,37 @@ function cmd_build()
 	build_lustre
 	create_root_image
     fi
+}
+
+function cmd_generate_lustre_patch()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    purge_previous_results
+
+    if [[ "${ktest_kernel_build_enable}" == "1" ]]; then
+	prepare_linux_source
+	run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    fi
+
+    if [[ "${ktest_lustre_build_enable}" == "1" ]]; then
+	prepare_lustre_source
+	run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre_intree
+    fi
+
+    run_copy_builtin
 }
 
 function cmd_ccplugin()

@@ -55,6 +55,8 @@ COPY --chown=ktest:ktest . /home/ktest/ktest
 
 # Git config
 RUN git config --global safe.directory '*'
+RUN git config --global user.email "john@ktest.com"
+RUN git config --global user.name "John Ktest"
 
 # Generate SSH key for ktest user (required for build-test-kernel ssh)
 RUN mkdir -p /home/ktest/.ssh && \

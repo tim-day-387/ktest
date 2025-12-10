@@ -56,7 +56,7 @@ function cmd_run() {
 	   --tty --interactive=false \
 	   --pids-limit 100000 \
 	   --device /dev/kvm \
-	   -v "$ktest_kernel_source":/home/ktest/git/linux:O \
+	   -v "$ktest_kernel_source":/home/ktest/git/linux:O,U \
 	   -v "$ktest_lustre_source":/home/ktest/git/lustre-release/:O \
 	   -v "$ktest_ccplugin_source":/home/ktest/xunused/:O \
 	   -v /var/lib/ktest/:/var/lib/ktest/:O \
