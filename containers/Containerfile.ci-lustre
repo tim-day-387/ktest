@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+# CI container for Lustre Gerrit review daemon
+# Extends ktest-runner with nginx and Python dependencies for CI
+
+# Start from ktest-runner base image
+FROM ktest-runner:latest
+
+# Switch back to root to install additional packages
+USER root
+
+# Install nginx and Python packages for CI
+RUN apt-get update && apt-get install -y \
+    nginx \
+    python3-requests \
+    python3-dateutil \
+    attr \
+    git \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install podman Python bindings
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --break-system-packages podman
+
+# Setup nginx
+# Remove default nginx site
+RUN rm -f /etc/nginx/sites-enabled/default
+
+# Create directory for CI output (ephemeral, in container)
+RUN mkdir -p /var/www/ci-lustre/upstream-patch-review && \
+    chown -R ktest:ktest /var/www/ci-lustre
+
+# Create git directory for Linux and Lustre repos
+RUN mkdir -p /home/ktest/git && \
+    chown -R ktest:ktest /home/ktest/git
+
+# Create nginx cache directory
+RUN mkdir -p /var/cache/nginx && \
+    chown -R www-data:www-data /var/cache/nginx
+
+# Copy entire ktest repository
+COPY --chown=ktest:ktest . /home/ktest/ktest/
+
+# Copy ktestrc configuration for container
+COPY --chown=ktest:ktest containers/ktestrc.container /home/ktest/.ktestrc
+
+# Link nginx configuration from ktest repo
+RUN ln -s /home/ktest/ktest/ci-lustre/nginx-ci.conf /etc/nginx/sites-available/ci-lustre && \
+    ln -s /etc/nginx/sites-available/ci-lustre /etc/nginx/sites-enabled/ci-lustre
+
+# Link entrypoint script from ktest repo
+RUN ln -s /home/ktest/ktest/ci-lustre/entrypoint.sh /usr/local/bin/entrypoint.sh && \
+    chmod +x /usr/local/bin/entrypoint.sh
+
+# Expose nginx port
+EXPOSE 80
+
+# Set working directory
+WORKDIR /home/ktest/ktest/ci-lustre
+
+# Use entrypoint script to start nginx and CI daemon
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
