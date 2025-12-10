@@ -1,0 +1,5 @@
+{
+  "name": "lustre_al2023",
+  "platform": "al2023",
+  "build": "tests/fs/lustre/boot.ktest"
+}

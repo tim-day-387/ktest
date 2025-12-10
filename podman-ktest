@@ -1,0 +1,1429 @@
+#!/usr/bin/env python3
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+import os
+import sys
+import argparse
+import json
+from pathlib import Path
+import podman
+import threading
+import time
+import tempfile
+import shutil
+import subprocess
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def get_podman_socket(custom_socket=None):
+    """Get podman socket URL, preferring custom socket if provided"""
+    if custom_socket:
+        return custom_socket
+    return f"unix:///run/user/{os.getuid()}/podman/podman.sock"
+
+
+CONFIGS = {
+    "mainline": {
+        "image": "ktest-runner:latest",
+        "build_script": "./qlkbuild build",
+        "working_dir": "/home/ktest/ktest/",
+        "run_script": "./qlkbuild run",
+    },
+    "u24": {
+        "image": "lustre-u24:latest",
+        "build_script": """
+./autogen.sh
+./configure --disable-server
+make --quiet -j$(nproc)
+""",
+        "working_dir": "/home/ktest/git/lustre-release/",
+    },
+    "al2023": {
+        "image": "lustre-al2023:latest",
+        "build_script": """
+./autogen.sh
+./configure --enable-efa
+make --quiet -j$(nproc)
+""",
+        "working_dir": "/home/ktest/git/lustre-release/",
+    },
+    "al2": {
+        "image": "lustre-al2:latest",
+        "build_script": """
+./autogen.sh
+./configure
+make --quiet -j$(nproc)
+""",
+        "working_dir": "/home/ktest/git/lustre-release/",
+    },
+}
+
+
+def valid_job_config(job_config):
+    required_fields = ["name", "platform"]
+
+    for field in required_fields:
+        if field not in job_config:
+            print(f"Error: Missing required field '{field}' in {job_path}")
+            return False
+
+    return True
+
+
+def load_job_file(job_name):
+    ktest_dir = Path(__file__).resolve().parent
+    job_path = ktest_dir / "jobs" / f"{job_name}.json"
+
+    if not job_path.exists():
+        print(f"Error: Job file {job_path} does not exist")
+        sys.exit(1)
+
+    try:
+        with open(job_path, "r") as f:
+            job_config = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON in {job_path}: {e}")
+        sys.exit(1)
+
+    if "jobs" not in job_config:
+        if not valid_job_config(job_config):
+            print("Invalid job configuration")
+            sys.exit(1)
+
+        return [job_config]
+
+    jobs = job_config["jobs"]
+    if not isinstance(jobs, list):
+        print(f"Error: 'jobs' must be an array in {file_path}")
+        sys.exit(1)
+
+    for _, job in enumerate(jobs):
+        if not valid_job_config(job):
+            print("Invalid job configuration")
+            sys.exit(1)
+
+    return jobs
+
+
+def topological_sort(jobs):
+    """
+    Perform topological sort on jobs based on dependencies.
+    Returns a list of job "levels" where each level contains jobs that can run in parallel.
+    """
+    # Build dependency graph
+    job_map = {job["name"]: job for job in jobs}
+
+    # Validate dependencies exist
+    for job in jobs:
+        depends_on = job.get("depends_on", [])
+        for dep in depends_on:
+            if dep not in job_map:
+                print(f"Error: Job '{job['name']}' depends on unknown job '{dep}'")
+                sys.exit(1)
+
+    # Track in-degree (number of dependencies) for each job
+    in_degree = {job["name"]: len(job.get("depends_on", [])) for job in jobs}
+
+    # Build reverse dependency graph (who depends on me)
+    dependents = {job["name"]: [] for job in jobs}
+    for job in jobs:
+        for dep in job.get("depends_on", []):
+            dependents[dep].append(job["name"])
+
+    # Detect cycles using DFS
+    visited = set()
+    rec_stack = set()
+
+    def has_cycle(node):
+        visited.add(node)
+        rec_stack.add(node)
+
+        for dependent in dependents.get(node, []):
+            if dependent not in visited:
+                if has_cycle(dependent):
+                    return True
+            elif dependent in rec_stack:
+                return True
+
+        rec_stack.remove(node)
+        return False
+
+    for job_name in job_map:
+        if job_name not in visited:
+            if has_cycle(job_name):
+                print(f"Error: Circular dependency detected in job dependencies")
+                sys.exit(1)
+
+    # Perform topological sort by levels
+    levels = []
+    remaining = set(job_map.keys())
+
+    while remaining:
+        # Find all jobs with no remaining dependencies
+        ready = [name for name in remaining if in_degree[name] == 0]
+
+        if not ready:
+            print(f"Error: Circular dependency detected (no jobs ready to run)")
+            sys.exit(1)
+
+        levels.append([job_map[name] for name in ready])
+
+        # Remove ready jobs and update in-degrees
+        for name in ready:
+            remaining.remove(name)
+            for dependent in dependents[name]:
+                in_degree[dependent] -= 1
+
+    return levels
+
+
+def get_build_config(platform):
+    if platform not in CONFIGS:
+        print(
+            f"Error: Unknown platform '{platform}'. Valid platforms: {', '.join(CONFIGS.keys())}"
+        )
+        sys.exit(1)
+
+    return CONFIGS[platform]
+
+
+def create_source_tarballs(dirs):
+    """Create tarballs for kernel, lustre, and ccplugin sources in /tmp/
+    Returns dict with paths to the created tarballs."""
+
+    tarball_paths = {}
+
+    # Create kernel tarball using git archive
+    kernel_tarball = "/tmp/ktest-kernel.tar.gz"
+    print(f"Creating kernel tarball at {kernel_tarball}...")
+    subprocess.run(
+        [
+            "git",
+            "archive",
+            "--format=tar.gz",
+            "--prefix=linux/",
+            "-o",
+            kernel_tarball,
+            "HEAD",
+        ],
+        cwd=dirs["ktest_kernel_source"],
+        check=True,
+    )
+    tarball_paths["kernel"] = kernel_tarball
+
+    # Create lustre tarball using regular tar
+    lustre_tarball = "/tmp/ktest-lustre.tar.gz"
+    print(f"Creating lustre tarball at {lustre_tarball}...")
+    subprocess.run(
+        [
+            "tar",
+            "-czf",
+            lustre_tarball,
+            "--transform",
+            "s,^./,lustre-release/,",
+            ".",
+        ],
+        cwd=dirs["ktest_lustre_source"],
+        check=True,
+    )
+    tarball_paths["lustre"] = lustre_tarball
+
+    # Create ccplugin tarball using git archive
+    ccplugin_tarball = "/tmp/ktest-ccplugin.tar.gz"
+    tarball_paths["ccplugin"] = ccplugin_tarball
+
+    return tarball_paths
+
+
+def put_archive(container, tarball_path, archive_path):
+    start_time = time.time()
+    with open(tarball_path, "rb") as f:
+        container.put_archive(archive_path, f)
+    elapsed = time.time() - start_time
+    print(f"put_archive({tarball_path}): {elapsed:.2f}s")
+
+
+def ensure_ccache_dir(client):
+    """Ensure /tmp/ccache exists with proper permissions using a temporary container"""
+    try:
+        client.containers.run(
+            image="ktest-runner:latest",
+            command=["sh", "-c", "mkdir -p /tmp/ccache && chmod 777 /tmp/ccache"],
+            mounts=[
+                {
+                    "type": "bind",
+                    "source": "/tmp",
+                    "target": "/tmp",
+                    "read_only": False,
+                }
+            ],
+            remove=True,
+        )
+    except Exception as e:
+        print(f"Warning: Error creating /tmp/ccache: {e}")
+
+
+def run_in_container(
+    client,
+    image,
+    command,
+    working_dir,
+    ktest_out_dir=None,
+    tarball_paths=None,
+    sync_kernel=False,
+    sync_lustre=False,
+    sync_ccplugin=False,
+    sync_ktest_out=False,
+    podman_socket=None,
+):
+    # Use provided ktest_out_dir or default to /tmp/ktest-out
+    ktest_out_host = ktest_out_dir if ktest_out_dir else "/tmp/ktest-out"
+
+    # Ensure /tmp/ccache exists with proper permissions
+    ensure_ccache_dir(client)
+
+    # Only mount /var/lib/ktest as overlay_volume
+    overlay_volumes = [
+        {
+            "source": "/var/lib/ktest",
+            "destination": "/var/lib/ktest",
+        },
+    ]
+
+    # Only mount ccache, not ktest-out
+    mounts = [
+        {
+            "type": "bind",
+            "source": "/tmp/ccache",
+            "target": "/tmp/ccache",
+            "read_only": False,
+        },
+    ]
+
+    # Mount podman socket if provided (for CI container to spawn job containers)
+    if podman_socket:
+        socket_path = podman_socket.replace("unix://", "")
+        mounts.append(
+            {
+                "type": "bind",
+                "source": socket_path,
+                "target": socket_path,
+                "read_only": False,
+            }
+        )
+
+    # Create container (but don't start it yet)
+    # Remove auto-remove so we can extract archives after completion
+    container = client.containers.create(
+        image=image,
+        command=command,
+        stdin_open=False,
+        devices=["/dev/kvm"],
+        pids_limit=100000,
+        overlay_volumes=overlay_volumes,
+        mounts=mounts,
+        remove=False,
+        working_dir=working_dir,
+    )
+
+    try:
+        if sync_kernel:
+            put_archive(container, tarball_paths["kernel"], "/home/ktest/git")
+        if sync_lustre:
+            put_archive(container, tarball_paths["lustre"], "/home/ktest/git")
+        if sync_ccplugin:
+            put_archive(container, tarball_paths["ccplugin"], "/home/ktest")
+
+        tarball_path = f"{ktest_out_host}.tar"
+
+        if Path(tarball_path).exists() and sync_ktest_out:
+            put_archive(container, tarball_path, "/tmp")
+
+        container.start()
+
+        return container, ktest_out_host
+
+    except Exception as e:
+        # Clean up container on error
+        try:
+            container.stop(timeout=5)
+            container.remove()
+        except:
+            pass
+        raise
+
+
+def log_container(log_path, container):
+    # Write logs to file or stdout
+    if log_path:
+        with open(log_path, "wb") as log_file:
+            for line in container.logs(stream=True, stdout=True, stderr=True):
+                log_file.write(line)
+
+        # I can't fix this any other way...
+        subprocess.run(["sed", "-i", "s/\r\r/\r/g", log_path], check=True)
+    else:
+        for line in container.logs(stream=True, stdout=True, stderr=True):
+            print(line.decode("utf-8"), end="")
+
+
+def run_ktest(
+    job_config,
+    build_config,
+    dirs,
+    log_path,
+    ktest_out_dir=None,
+    tarball_paths=None,
+    podman_socket=None,
+):
+    if not log_path:
+        print(f"Running test: {job_config.get('run', '')}")
+
+    command = build_config["run_script"] + " " + job_config.get("run", "")
+
+    start_time = time.time()
+    socket_url = get_podman_socket(podman_socket)
+    with podman.PodmanClient(base_url=socket_url) as client:
+        container, ktest_out_host = run_in_container(
+            client,
+            build_config["image"],
+            ["bash", "-c", command],
+            build_config["working_dir"],
+            ktest_out_dir,
+            tarball_paths,
+            sync_kernel=False,
+            sync_lustre=False,
+            sync_ccplugin=False,
+            sync_ktest_out=True,
+        )
+
+        try:
+            log_container(log_path, container)
+
+            return_code = container.wait()
+        finally:
+            # Clean up container
+            try:
+                container.stop(timeout=5)
+            except:
+                pass
+            try:
+                container.remove()
+            except:
+                pass
+
+    runtime = int(time.time() - start_time)
+    return return_code, runtime
+
+
+def run_build_lustre(
+    job_config,
+    build_config,
+    dirs,
+    log_path,
+    ktest_out_dir=None,
+    tarball_paths=None,
+    podman_socket=None,
+):
+    if not log_path:
+        print(f"Running build: {job_config.get('build', '')}")
+
+    if job_config["platform"] == "mainline":
+        command = build_config["build_script"] + " " + job_config.get("build", "")
+    else:
+        command = build_config["build_script"]
+
+    start_time = time.time()
+    socket_url = get_podman_socket(podman_socket)
+    with podman.PodmanClient(base_url=socket_url) as client:
+        container, ktest_out_host = run_in_container(
+            client,
+            build_config["image"],
+            ["bash", "-c", command],
+            build_config["working_dir"],
+            ktest_out_dir,
+            tarball_paths,
+            sync_kernel=True,
+            sync_lustre=True,
+            sync_ccplugin=False,
+            sync_ktest_out=True,
+        )
+
+        try:
+            log_container(log_path, container)
+
+            return_code = container.wait()
+
+            if job_config["platform"] == "mainline":
+                start_time = time.time()
+                archive_stream, _ = container.get_archive("/tmp/ktest-out")
+
+                # Save the tarball directly without extracting, streaming chunks
+                tarball_path = f"{ktest_out_host}.tar"
+                with open(tarball_path, "wb") as f:
+                    for chunk in archive_stream:
+                        f.write(chunk)
+                elapsed = time.time() - start_time
+                print(f"get_archive(ktest-out): {elapsed:.2f}s")
+        finally:
+            # Clean up container
+            try:
+                container.stop(timeout=5)
+            except:
+                pass
+            try:
+                container.remove()
+            except:
+                pass
+
+    runtime = int(time.time() - start_time)
+    return return_code, runtime
+
+
+def run_tool(
+    job_config,
+    build_config,
+    dirs,
+    log_path,
+    ktest_out_dir=None,
+    tarball_paths=None,
+    podman_socket=None,
+):
+    if not log_path:
+        print(f"Running tool: {job_config['tool']}")
+
+    command = "/home/ktest/ktest/tools/" + job_config["tool"]
+
+    start_time = time.time()
+    socket_url = get_podman_socket(podman_socket)
+    with podman.PodmanClient(base_url=socket_url) as client:
+        container, ktest_out_host = run_in_container(
+            client,
+            build_config["image"],
+            [command],
+            "/home/ktest/git/lustre-release/",
+            ktest_out_dir,
+            tarball_paths,
+            sync_kernel=True,
+            sync_lustre=True,
+            sync_ccplugin=False,
+            sync_ktest_out=True,
+        )
+
+        try:
+            log_container(log_path, container)
+
+            return_code = container.wait()
+        finally:
+            # Clean up container
+            try:
+                container.stop(timeout=5)
+            except:
+                pass
+            try:
+                container.remove()
+            except:
+                pass
+
+    runtime = int(time.time() - start_time)
+    return return_code, runtime
+
+
+def run_job_config(
+    job_config,
+    dirs,
+    log_path=None,
+    ktest_out_dir=None,
+    tarball_paths=None,
+    podman_socket=None,
+):
+    """Run a job from a job configuration object"""
+    platform = job_config["platform"]
+    build_config = get_build_config(platform)
+
+    if not log_path:
+        print(f"Running job: {job_config['name']}")
+        print(f"Platform: {platform}")
+
+    return_code = 0
+    runtime = 0
+
+    if job_config.get("run", False):
+        return_code, runtime = run_ktest(
+            job_config,
+            build_config,
+            dirs,
+            log_path,
+            ktest_out_dir,
+            tarball_paths,
+            podman_socket,
+        )
+    elif job_config.get("build", False):
+        return_code, runtime = run_build_lustre(
+            job_config,
+            build_config,
+            dirs,
+            log_path,
+            ktest_out_dir,
+            tarball_paths,
+            podman_socket,
+        )
+    elif job_config.get("tool", False):
+        return_code, runtime = run_tool(
+            job_config,
+            build_config,
+            dirs,
+            log_path,
+            ktest_out_dir,
+            tarball_paths,
+            podman_socket,
+        )
+
+    # Output JSON with return code and runtime
+    if log_path:
+        json_path = log_path.replace(".log", ".json")
+        result_data = {
+            "job_name": job_config["name"],
+            "return_code": return_code,
+            "runtime_seconds": runtime,
+            "optional": job_config.get("optional", False),
+            "description": job_config.get("description", ""),
+        }
+        with open(json_path, "w") as json_file:
+            json.dump(result_data, json_file, indent=2)
+
+    return return_code
+
+
+def cmd_job(args, dirs, podman_socket=None):
+    """Execute one or more jobs defined in JSON files (single-job or multi-job format)"""
+    # Clean up and create results directory
+    results_dir = Path("/tmp/ktest-results")
+    if results_dir.exists():
+        shutil.rmtree(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create source tarballs once at the start
+    tarball_paths = create_source_tarballs(dirs)
+
+    # Ensure tarballs are cleaned up when the function exits
+    def cleanup_tarballs(ktest_dirs=None):
+        # Clean up source tarballs
+        for tarball in tarball_paths.values():
+            try:
+                if Path(tarball).exists():
+                    Path(tarball).unlink()
+            except Exception as e:
+                print(f"Warning: Failed to delete {tarball}: {e}")
+
+        # Clean up ktest-out tarballs
+        if ktest_dirs:
+            for ktest_out in ktest_dirs.values():
+                ktest_out_tarball = f"{ktest_out}.tar"
+                try:
+                    if Path(ktest_out_tarball).exists():
+                        Path(ktest_out_tarball).unlink()
+                except Exception as e:
+                    print(f"Warning: Failed to delete {ktest_out_tarball}: {e}")
+
+    job_args = args.job_names
+
+    # Separate single-job names from multi-job file paths
+    all_jobs = []
+
+    for arg in job_args:
+        jobs = load_job_file(arg)
+        all_jobs.extend(jobs)
+
+    # Check for duplicate job names
+    job_names = [job["name"] for job in all_jobs]
+    duplicates = [name for name in job_names if job_names.count(name) > 1]
+    if duplicates:
+        print(f"Error: Duplicate job names found: {', '.join(set(duplicates))}")
+        sys.exit(1)
+
+    # Build dependency structures
+    job_map = {job["name"]: job for job in all_jobs}
+
+    # Validate dependencies exist
+    for job in all_jobs:
+        depends_on = job.get("depends_on", [])
+        for dep in depends_on:
+            if dep not in job_map:
+                print(f"Error: Job '{job['name']}' depends on unknown job '{dep}'")
+                sys.exit(1)
+
+    # Check for cycles using topological sort (reuse existing validation)
+    levels = topological_sort(all_jobs)
+
+    print(f"Executing {len(all_jobs)} jobs with dependencies")
+    print("Jobs will start as soon as their dependencies are satisfied")
+    print()
+
+    pending_jobs = set(job_map.keys())
+    running_jobs = set()
+    completed_jobs = {}  # job_name -> (return_code, log_path)
+    job_ktest_dirs = {}  # job_name -> ktest_out_dir
+    lock = threading.Lock()
+
+    # Build reverse dependency map (which jobs depend on me)
+    dependents = defaultdict(list)
+    for job in all_jobs:
+        for dep in job.get("depends_on", []):
+            dependents[dep].append(job["name"])
+
+    def get_ktest_out_for_job(job_name):
+        """Get or create ktest_out directory for a job.
+        Jobs with dependencies reuse their dependency's ktest_out directory."""
+        with lock:
+            if job_name in job_ktest_dirs:
+                return job_ktest_dirs[job_name]
+
+            job = job_map[job_name]
+            deps = job.get("depends_on", [])
+
+            # If job has dependencies, reuse the first dependency's ktest_out
+            if deps:
+                dep_ktest_out = job_ktest_dirs.get(deps[0])
+                if dep_ktest_out:
+                    job_ktest_dirs[job_name] = dep_ktest_out
+                    return dep_ktest_out
+
+            # Create new temp directory for this job
+            ktest_out = tempfile.mkdtemp(prefix=f"ktest_{job_name}_")
+            os.chmod(ktest_out, 0o777)  # Allow container user to write
+            job_ktest_dirs[job_name] = ktest_out
+            return ktest_out
+
+    def can_start_job(job_name):
+        """Check if all dependencies for a job are satisfied"""
+        job = job_map[job_name]
+        deps = job.get("depends_on", [])
+        for dep in deps:
+            if dep not in completed_jobs:
+                return False
+            # Check if dependency failed
+            if completed_jobs[dep][0] != 0:
+                return False
+        return True
+
+    def get_ready_jobs():
+        """Get list of jobs that can start now"""
+        with lock:
+            ready = [name for name in pending_jobs if can_start_job(name)]
+            return ready
+
+    def mark_job_running(job_name):
+        """Mark a job as running"""
+        with lock:
+            if job_name in pending_jobs:
+                pending_jobs.remove(job_name)
+                running_jobs.add(job_name)
+                return True
+            return False
+
+    def mark_job_completed(job_name, return_code, log_path):
+        """Mark a job as completed and return newly ready jobs"""
+        with lock:
+            if job_name in running_jobs:
+                running_jobs.remove(job_name)
+            completed_jobs[job_name] = (return_code, log_path)
+
+            # Print completion status
+            status = "SUCCESS" if return_code == 0 else "FAILED"
+            log_info = f", log: {log_path}" if log_path else ""
+            print(
+                f"Job {job_name} completed: {status} (return code = {return_code}{log_info})"
+            )
+
+            # Find jobs that can now start
+            newly_ready = []
+            for dependent in dependents.get(job_name, []):
+                if dependent in pending_jobs and can_start_job(dependent):
+                    newly_ready.append(dependent)
+
+            return newly_ready, return_code != 0
+
+    # Single job optimization - run with stdout
+    if len(all_jobs) == 1:
+        job = all_jobs[0]
+        job_name = job["name"]
+        ktest_out = tempfile.mkdtemp(prefix=f"ktest_{job_name}_")
+        os.chmod(ktest_out, 0o777)  # Allow container user to write
+        job_ktest_dirs[job_name] = ktest_out
+
+        try:
+            print(f"Running job: {job_name}")
+            print(f"ktest-out directory: {ktest_out}")
+            return_code = run_job_config(
+                job, dirs, None, ktest_out, tarball_paths, podman_socket
+            )
+            completed_jobs[job_name] = (return_code, None)
+
+            if return_code != 0:
+                print(f"Job {job_name} FAILED with return code {return_code}")
+                print(f"ktest-out preserved at: {ktest_out}")
+                return 1
+            else:
+                print(f"Job {job_name} completed successfully")
+                return 0
+        finally:
+            # Clean up temp directory on success
+            if return_code == 0:
+                shutil.rmtree(ktest_out, ignore_errors=True)
+            # Clean up tarballs
+            cleanup_tarballs(job_ktest_dirs)
+
+    # Multi-job execution with dynamic scheduling
+    max_workers = min(len(all_jobs), 10)  # Reasonable limit on parallelism
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+    futures = {}  # future -> job_name
+    overall_failure = False
+
+    try:
+        # Start initial jobs (those with no dependencies)
+        ready_jobs = get_ready_jobs()
+        for job_name in ready_jobs:
+            if mark_job_running(job_name):
+                job = job_map[job_name]
+                ktest_out = get_ktest_out_for_job(job_name)
+                log_path = f"/tmp/ktest-results/{job_name}.log"
+                print(f"Starting job: {job_name} (ktest-out: {ktest_out})")
+                future = executor.submit(
+                    run_job_config,
+                    job,
+                    dirs,
+                    log_path,
+                    ktest_out,
+                    tarball_paths,
+                    podman_socket,
+                )
+                futures[future] = job_name
+
+        # Process completed jobs and start new ones
+        while futures or pending_jobs:
+            if not futures:
+                # No jobs running but jobs pending - must be blocked by failures
+                break
+
+            # Wait for next job to complete
+            done_futures = as_completed(futures)
+            for future in done_futures:
+                job_name = futures[future]
+                del futures[future]
+
+                try:
+                    return_code = future.result()
+                    log_path = f"/tmp/ktest-results/{job_name}.log"
+                except Exception as e:
+                    print(f"Error running job {job_name}: {e}")
+                    return_code = -1
+                    log_path = f"/tmp/ktest-results/{job_name}.log"
+
+                # Mark completed and get newly ready jobs
+                newly_ready, failed = mark_job_completed(
+                    job_name, return_code, log_path
+                )
+
+                if failed:
+                    overall_failure = True
+
+                # Start newly ready jobs
+                for ready_job_name in newly_ready:
+                    if mark_job_running(ready_job_name):
+                        job = job_map[ready_job_name]
+                        ktest_out = get_ktest_out_for_job(ready_job_name)
+                        log_path = f"/tmp/ktest-results/{ready_job_name}.log"
+                        print(
+                            f"Starting job: {ready_job_name} (ktest-out: {ktest_out})"
+                        )
+                        future = executor.submit(
+                            run_job_config,
+                            job,
+                            dirs,
+                            log_path,
+                            ktest_out,
+                            tarball_paths,
+                            podman_socket,
+                        )
+                        futures[future] = ready_job_name
+
+                # Only process one completion at a time to immediately start dependencies
+                break
+
+    finally:
+        executor.shutdown(wait=True)
+
+        for _, ktest_out in job_ktest_dirs.items():
+            shutil.rmtree(ktest_out, ignore_errors=True)
+
+        # Clean up tarballs
+        cleanup_tarballs(job_ktest_dirs)
+
+    # Print final summary
+    print()
+    print("=" * 60)
+    print("Final Results:")
+    for job_name in job_names:
+        if job_name in completed_jobs:
+            return_code, log_path = completed_jobs[job_name]
+            status = "SUCCESS" if return_code == 0 else "FAILED"
+            log_info = f", log: {log_path}" if log_path else ""
+            print(f"  {job_name}: {status} (return code = {return_code}{log_info})")
+        else:
+            print(f"  {job_name}: SKIPPED (due to dependency failure)")
+
+    return 0 if not overall_failure else 1
+
+
+def load_ktestrc():
+    """Load environment variables from ~/.ktestrc if it exists"""
+    ktestrc_path = Path.home() / ".ktestrc"
+    env_vars = {}
+
+    if ktestrc_path.exists():
+        try:
+            # Execute the shell script and capture exported variables
+            result = os.popen(f"bash -c 'source {ktestrc_path} && env'").read()
+            for line in result.strip().split("\n"):
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    env_vars[key] = value
+        except Exception as e:
+            print(f"Warning: Failed to load ~/.ktestrc: {e}")
+
+    return env_vars
+
+
+def get_ktest_dirs():
+    """Get ktest directory paths"""
+    ktest_dir = Path(__file__).resolve().parent
+    ktest_ccplugin_source = ktest_dir.parent / "xunused"
+
+    # Load variables from ~/.ktestrc
+    ktestrc_vars = load_ktestrc()
+
+    # Get kernel source from environment, ktestrc, or default location
+    ktest_kernel_source = os.environ.get("ktest_kernel_source")
+    if not ktest_kernel_source:
+        ktest_kernel_source = ktestrc_vars.get("ktest_kernel_source")
+    if not ktest_kernel_source:
+        linux_path = Path.home() / "git" / "linux"
+        if linux_path.exists():
+            ktest_kernel_source = str(linux_path.resolve())
+
+    if not ktest_kernel_source or not Path(ktest_kernel_source).exists():
+        ktestrc_path = Path.home() / ".ktestrc"
+        if not ktestrc_path.exists():
+            print(f"Error: kernel source directory not found")
+            print(f"")
+            print(f"Please run 'podman-ktest setup' to configure paths,")
+            print(f"or set the ktest_kernel_source environment variable")
+        else:
+            print(
+                f"Error: kernel source directory {ktest_kernel_source} does not exist"
+            )
+        sys.exit(1)
+
+    ktest_lustre_source = ktestrc_vars.get("ktest_lustre_source")
+    if not ktest_lustre_source:
+        ktest_lustre_source = str(Path(ktest_kernel_source).parent / "lustre-release")
+
+    return {
+        "ktest_dir": str(ktest_dir),
+        "ktest_ccplugin_source": str(ktest_ccplugin_source),
+        "ktest_kernel_source": ktest_kernel_source,
+        "ktest_lustre_source": ktest_lustre_source,
+    }
+
+
+def _build_image(dirs, dockerfile, tag, name, podman_socket=None):
+    """Build a single container image"""
+    socket_url = get_podman_socket(podman_socket)
+    with podman.PodmanClient(base_url=socket_url) as client:
+        print(f"Building {name}...")
+        client.images.build(
+            path=dirs["ktest_dir"],
+            dockerfile=dockerfile,
+            tag=tag,
+            layers=True,
+            outputformat="application/vnd.oci.image.manifest.v1+json",
+            rm=False,
+        )
+        print(f"Finished building {name}")
+        return name
+
+
+def cmd_build(args, dirs, podman_socket=None):
+    """Build container images in parallel"""
+    # Build ktest-runner first since ci-lustre depends on it
+    base_image = {
+        "dockerfile": "containers/Containerfile.ktest.u24",
+        "tag": "ktest-runner:latest",
+        "name": "ktest-runner",
+    }
+
+    # Build ktest-runner first
+    _build_image(
+        dirs,
+        base_image["dockerfile"],
+        base_image["tag"],
+        base_image["name"],
+        podman_socket,
+    )
+
+    # Now build dependent images in parallel
+    dependent_images = [
+        {
+            "dockerfile": "containers/Containerfile.lustre.u24",
+            "tag": "lustre-u24:latest",
+            "name": "lustre-u24",
+        },
+        {
+            "dockerfile": "containers/Containerfile.lustre.al2023",
+            "tag": "lustre-al2023:latest",
+            "name": "lustre-al2023",
+        },
+        {
+            "dockerfile": "containers/Containerfile.lustre.al2",
+            "tag": "lustre-al2:latest",
+            "name": "lustre-al2",
+        },
+        {
+            "dockerfile": "containers/Containerfile.ci-lustre",
+            "tag": "ci-lustre:latest",
+            "name": "ci-lustre",
+        },
+    ]
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(
+                _build_image,
+                dirs,
+                img["dockerfile"],
+                img["tag"],
+                img["name"],
+                podman_socket,
+            ): img["name"]
+            for img in dependent_images
+        }
+
+        for future in as_completed(futures):
+            img_name = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Error building {img_name}: {e}")
+                raise
+
+
+def cmd_run(args, dirs, podman_socket=None):
+    tarball_paths = create_source_tarballs(dirs)
+
+    socket_url = get_podman_socket(podman_socket)
+    with podman.PodmanClient(base_url=socket_url) as client:
+        container, ktest_out_host = run_in_container(
+            client,
+            "ktest-runner:latest",
+            args.command,
+            "/home/ktest/ktest",
+            None,
+            tarball_paths,
+            sync_kernel=False,
+            sync_lustre=False,
+            sync_ccplugin=False,
+            sync_ktest_out=False,
+        )
+
+        try:
+            log_container(None, container)
+
+            return_code = container.wait()
+
+            return return_code
+        finally:
+            # Clean up container
+            try:
+                container.stop(timeout=5)
+            except:
+                pass
+            try:
+                container.remove()
+            except:
+                pass
+
+
+def cmd_info(args, dirs, podman_socket=None):
+    """Display podman info"""
+    socket_url = get_podman_socket(podman_socket)
+    with podman.PodmanClient(base_url=socket_url) as client:
+        print(client.info())
+
+
+def cmd_deploy(args, dirs, podman_socket=None):
+    """Deploy the Lustre CI container"""
+    socket_url = get_podman_socket(podman_socket)
+
+    # Determine the socket path to mount from the host
+    # If --ci-container-socket is provided, use it as the source
+    # Otherwise, use the same path as the host socket
+    if args.ci_container_socket:
+        host_socket_to_mount = args.ci_container_socket.replace("unix://", "")
+    else:
+        host_socket_to_mount = socket_url.replace("unix://", "")
+
+    # Check if gerrit auth file exists and parse it
+    gerrit_auth_path = Path(args.gerrit_auth).resolve()
+    if not gerrit_auth_path.exists():
+        print(f"Error: Gerrit auth file not found: {gerrit_auth_path}")
+        return 1
+
+    # Parse gerrit auth file to extract credentials
+    try:
+        with open(gerrit_auth_path, "r") as f:
+            auth_data = json.load(f)
+
+        # Default to review.whamcloud.com, but allow override via GERRIT_HOST env var
+        gerrit_host = os.environ.get("GERRIT_HOST", "review.whamcloud.com")
+
+        if gerrit_host not in auth_data:
+            print(f"Error: Gerrit host '{gerrit_host}' not found in auth file")
+            print(f"Available hosts: {', '.join(auth_data.keys())}")
+            return 1
+
+        if "gerrit/http" not in auth_data[gerrit_host]:
+            print(
+                f"Error: 'gerrit/http' credentials not found for host '{gerrit_host}'"
+            )
+            return 1
+
+        gerrit_username = auth_data[gerrit_host]["gerrit/http"]["username"]
+        gerrit_password = auth_data[gerrit_host]["gerrit/http"]["password"]
+
+        print(
+            f"Loaded Gerrit credentials for {gerrit_host} (username: {gerrit_username})"
+        )
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON in auth file: {e}")
+        return 1
+    except KeyError as e:
+        print(f"Error: Missing key in auth file: {e}")
+        return 1
+
+    # Validate github-pages requirements
+    if args.hosting == "github-pages" and not args.github_token:
+        print("Error: --github-token is required for github-pages hosting mode")
+        return 1
+
+    with podman.PodmanClient(base_url=socket_url) as client:
+        # Check if ci-lustre image exists, if not build it
+        try:
+            client.images.get("ci-lustre:latest")
+            print("Found ci-lustre:latest image")
+        except:
+            print("ci-lustre:latest image not found, building it...")
+            ktest_dir = Path(__file__).resolve().parent
+            try:
+                client.images.build(
+                    path=str(ktest_dir),
+                    dockerfile="containers/Containerfile.ci-lustre",
+                    tag="ci-lustre:latest",
+                    layers=True,
+                    outputformat="application/vnd.oci.image.manifest.v1+json",
+                    rm=False,
+                )
+                print("Built ci-lustre:latest image")
+            except Exception as e:
+                print(f"Error building ci-lustre image: {e}")
+                return 1
+
+        # Stop and remove existing container if it exists
+        try:
+            existing = client.containers.get(args.name)
+            print(f"Found existing container {args.name}")
+            try:
+                print(f"Stopping existing container {args.name}...")
+                existing.stop(timeout=10)
+            except Exception as e:
+                print(f"Warning: Failed to stop container: {e}")
+                # Continue anyway to try removal
+
+            try:
+                print(f"Removing existing container {args.name}...")
+                existing.remove()
+                print(f"Removed existing container {args.name}")
+            except Exception as e:
+                print(f"Error: Failed to remove existing container: {e}")
+                print(
+                    f"You may need to manually remove it with: podman rm -f {args.name}"
+                )
+                return 1
+        except podman.errors.exceptions.NotFound:
+            # Container doesn't exist, that's fine
+            pass
+        except Exception as e:
+            print(f"Warning: Error checking for existing container: {e}")
+            # Try to force remove by name in case it's in a bad state
+            try:
+                print(f"Attempting to force remove container by name...")
+                client.containers.get(args.name).remove(force=True)
+                print(f"Successfully force removed container {args.name}")
+            except Exception as e2:
+                print(f"Error: Could not remove existing container: {e2}")
+                print(
+                    f"You may need to manually remove it with: podman rm -f {args.name}"
+                )
+                return 1
+
+        # Prepare environment variables
+        env = {
+            "HOSTING_MODE": args.hosting,
+            "GERRIT_USERNAME": gerrit_username,
+            "GERRIT_PASSWORD": gerrit_password,
+            "OUTPUT_DIR": "/var/www/ci-lustre/upstream-patch-review",
+            "PODMAN_SOCKET": "/run/podman/podman.sock",
+        }
+
+        # Add GitHub token if provided
+        if args.github_token:
+            env["GITHUB_TOKEN"] = args.github_token
+
+        # Prepare mounts - only mount podman socket
+        mounts = [
+            {
+                "type": "bind",
+                "source": host_socket_to_mount,
+                "target": "/run/podman/podman.sock",
+                "read_only": False,
+            },
+        ]
+
+        # Prepare port bindings
+        ports = {}
+        if args.hosting == "nginx":
+            ports = {"80/tcp": args.port}
+
+        # Create and start the container
+        print(f"Creating CI container '{args.name}'...")
+        print(f"  Hosting mode: {args.hosting}")
+        if args.hosting == "nginx":
+            print(f"  Nginx port: {args.port}")
+            print(f"  Output dir: {env['OUTPUT_DIR']}")
+
+        container = client.containers.create(
+            image="ci-lustre:latest",
+            name=args.name,
+            environment=env,
+            mounts=mounts,
+            ports=ports,
+            detach=True,
+            remove=False,
+        )
+
+        container.start()
+
+        print()
+        print(f"CI container '{args.name}' started successfully!")
+        print()
+        print("To view logs:")
+        print(f"  podman logs -f {args.name}")
+        print()
+        print("To stop:")
+        print(f"  podman stop {args.name}")
+        print()
+        if args.hosting == "nginx":
+            print(
+                f"Web interface will be available at: http://localhost:{args.port}/upstream-patch-review/"
+            )
+        elif args.hosting == "github-pages":
+            print(
+                f"Results will be pushed to: https://tim-day-387.github.io/upstream-patch-review/"
+            )
+
+        return 0
+
+
+def cmd_setup(args, dirs=None):
+    """Interactive setup to create ~/.ktestrc configuration file"""
+    ktestrc_path = Path.home() / ".ktestrc"
+
+    print("podman-ktest setup")
+    print("=" * 60)
+    print()
+
+    if ktestrc_path.exists():
+        print(f"Warning: {ktestrc_path} already exists")
+        response = input("Do you want to overwrite it? [y/N]: ").strip().lower()
+        if response != "y":
+            print("Setup cancelled")
+            return 0
+        print()
+
+    # Prompt for kernel source directory
+    print("Kernel source directory:")
+    print("  This is the directory containing your Linux kernel source code")
+    default_kernel = str(Path.home() / "git" / "linux")
+    kernel_source = input(f"  Path [{default_kernel}]: ").strip()
+    if not kernel_source:
+        kernel_source = default_kernel
+
+    kernel_path = Path(kernel_source).expanduser().resolve()
+    if not kernel_path.exists():
+        print(f"  Warning: {kernel_path} does not exist")
+        response = input("  Continue anyway? [y/N]: ").strip().lower()
+        if response != "y":
+            print("Setup cancelled")
+            return 1
+    print()
+
+    # Prompt for lustre source directory
+    print("Lustre source directory:")
+    print("  This is the directory containing your Lustre source code")
+    default_lustre = str(kernel_path.parent / "lustre-release")
+    lustre_source = input(f"  Path [{default_lustre}]: ").strip()
+    if not lustre_source:
+        lustre_source = default_lustre
+
+    lustre_path = Path(lustre_source).expanduser().resolve()
+    if not lustre_path.exists():
+        print(f"  Warning: {lustre_path} does not exist")
+        response = input("  Continue anyway? [y/N]: ").strip().lower()
+        if response != "y":
+            print("Setup cancelled")
+            return 1
+    print()
+
+    # Create the ktestrc file
+    print(f"Creating {ktestrc_path}...")
+    ktestrc_content = f"""#!/bin/bash
+# ktest configuration file
+# This file is sourced as a shell script
+
+# Kernel source directory
+export ktest_kernel_source="{kernel_path}"
+
+# Lustre source directory
+export ktest_lustre_source="{lustre_path}"
+"""
+
+    try:
+        with open(ktestrc_path, "w") as f:
+            f.write(ktestrc_content)
+        ktestrc_path.chmod(0o644)
+        print(f"Successfully created {ktestrc_path}")
+        print()
+        print("Configuration:")
+        print(f"  ktest_kernel_source={kernel_path}")
+        print(f"  ktest_lustre_source={lustre_path}")
+        print()
+        print("Setup complete!")
+        return 0
+    except Exception as e:
+        print(f"Error: Failed to create {ktestrc_path}: {e}")
+        return 1
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="podman-ktest: Run generic virtual machine tests"
+    )
+    parser.add_argument(
+        "--podman-socket",
+        default=None,
+        help=f"Podman socket URL (default: unix:///run/user/{os.getuid()}/podman/podman.sock)",
+    )
+    subparsers = parser.add_subparsers(dest="cmd", help="Command to run", required=True)
+
+    # Commands
+    subparsers.add_parser("info", help="Display podman info")
+    subparsers.add_parser("setup", help="Interactive setup to create ~/.ktestrc")
+    subparsers.add_parser("build", help="Build container images")
+
+    # Run command - accepts all remaining arguments
+    run_parser = subparsers.add_parser("run", help="Run ktest in container")
+    run_parser.add_argument(
+        "command", nargs=argparse.REMAINDER, help="Command to run in container"
+    )
+
+    # Job command - run one or more jobs from JSON files
+    job_parser = subparsers.add_parser(
+        "job", help="Run one or more jobs from JSON files"
+    )
+    job_parser.add_argument(
+        "job_names", nargs="+", help="Name(s) of job(s) (without .json extension)"
+    )
+
+    # Deploy command - deploy the CI container
+    deploy_parser = subparsers.add_parser(
+        "deploy", help="Deploy the Lustre CI container"
+    )
+    deploy_parser.add_argument(
+        "--hosting",
+        choices=["nginx", "github-pages"],
+        default="nginx",
+        help="Hosting mode: nginx (serve from container) or github-pages (push to GitHub)",
+    )
+    deploy_parser.add_argument(
+        "--gerrit-auth",
+        required=True,
+        help="Path to Gerrit authentication JSON file",
+    )
+    deploy_parser.add_argument(
+        "--github-token",
+        help="GitHub personal access token for github-pages mode (required for github-pages hosting)",
+    )
+    deploy_parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="Port to expose nginx on (default: 8080)",
+    )
+    deploy_parser.add_argument(
+        "--name",
+        default="lustre-ci",
+        help="Container name (default: lustre-ci)",
+    )
+    deploy_parser.add_argument(
+        "--ci-container-socket",
+        default=None,
+        help="Podman socket path to use inside the CI container (default: same as --podman-socket)",
+    )
+
+    args = parser.parse_args()
+
+    # Setup command doesn't need dirs
+    if args.cmd == "setup":
+        result = cmd_setup(args)
+        sys.exit(result)
+
+    # Get directory configuration
+    dirs = get_ktest_dirs()
+
+    # Get podman socket URL
+    podman_socket = args.podman_socket
+
+    # Map commands to functions
+    commands = {
+        "build": cmd_build,
+        "run": cmd_run,
+        "info": cmd_info,
+        "job": cmd_job,
+        "deploy": cmd_deploy,
+    }
+
+    # Execute the command
+    result = commands[args.cmd](args, dirs, podman_socket)
+    sys.exit(result)
+
+
+if __name__ == "__main__":
+    main()

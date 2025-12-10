@@ -1,0 +1,13 @@
+[Unit]
+Description=Lustre bot
+
+[Service]
+WorkingDirectory=/home/timothy/ws/ktest/
+Environment="GERRIT_AUTH_PATH=/home/timothy/auth.json"
+ExecStart=/home/timothy/ws/ktest/ci-lustre/gerrit_build-and-test-new.py
+Type=simple
+Restart=always
+RuntimeMaxSec=1d
+
+[Install]
+WantedBy=default.target
