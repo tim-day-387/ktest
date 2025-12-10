@@ -1,0 +1,5 @@
+{
+  "name": "checkpatch",
+  "platform": "mainline",
+  "tool": "checkpatch"
+}

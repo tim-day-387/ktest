@@ -1,0 +1,5 @@
+{
+  "name": "checkpatch-parallel",
+  "platform": "mainline",
+  "tool": "checkpatch-parallel"
+}

@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+# Distro
+FROM ubuntu:24.04
+
+# Set environment variables to avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install ktest dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential bc bison flex libelf-dev \
+    libssl-dev qemu-system-x86 qemu-utils \
+    minicom socat vde2 git ssh rsync brotli \
+    lsb-release wget software-properties-common \
+    gnupg clang bear pahole kmod swig quilt \
+    libtool pkg-config libpython3-dev libmount-dev \
+    libaio-dev libssl-dev libnl-genl-3-dev \
+    libkeyutils-dev libyaml-dev libreadline-dev \
+    module-assistant debhelper libsnmp-dev \
+    mpi-default-dev curl libguestfs-tools \
+    qemu-utils linux-image-generic ccache \
+    python3-ply python3-git
+
+# Purge this stuff
+RUN rm -rf /var/lib/apt/lists/*
+RUN chmod 0644 /boot/vmlinuz*
+
+# Get LLVM
+RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
+RUN apt-get install -y clang-tidy-20
+
+# Setup ccache
+RUN ln -s /usr/bin/ccache /usr/local/bin/clang-20
+
+# Create a user for running ktest (ktest should not run as root for VM operations)
+RUN useradd -m -s /bin/bash ktest
+
+# Switch to ktest user
+USER ktest
+WORKDIR /home/ktest
+
+# Setup ccache
+RUN ccache --set-config=cache_dir=/tmp/ccache/
+RUN ccache --set-config=max_size=50G
+
+# Copy the ktest repository into the container
+COPY --chown=ktest:ktest . /home/ktest/ktest
+
+# Git config
+RUN git config --global safe.directory '*'
+
+# Generate SSH key for ktest user (required for build-test-kernel ssh)
+RUN mkdir -p /home/ktest/.ssh && \
+    ssh-keygen -t rsa -b 4096 -f /home/ktest/.ssh/id_rsa -N ""
+
+# Set default working directory to ktest
+WORKDIR /home/ktest/ktest
+
+# Default command
+CMD ["/bin/bash"]
