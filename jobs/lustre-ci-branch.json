@@ -1,0 +1,139 @@
+{
+  "jobs": [
+    {
+      "name": "checkpatch-parallel",
+      "platform": "mainline",
+      "tool": "checkpatch-parallel",
+      "optional": true,
+      "description": "Run checkpatch.pl on the entire Lustre tree"
+    },
+    {
+      "name": "contribution-report",
+      "platform": "mainline",
+      "tool": "contributions",
+      "optional": true,
+      "description": "Fetch contribution statistics for Lustre tree"
+    },
+    {
+      "name": "license-status",
+      "platform": "mainline",
+      "tool": "license-status",
+      "optional": true,
+      "description": "Fetch license info for Lustre tree"
+    },
+    {
+      "name": "kernel-doc",
+      "platform": "mainline",
+      "tool": "kernel_doc_helper.sh",
+      "optional": true,
+      "description": "Check the number of kernel doc errors"
+    },
+    {
+      "name": "lustre_u24",
+      "platform": "u24",
+      "build": "tests/fs/lustre/boot.ktest",
+      "optional": false,
+      "description": "Build Lustre (U24/OutOfTree)"
+    },
+    {
+      "name": "lustre_al2023",
+      "platform": "al2023",
+      "build": "tests/fs/lustre/boot.ktest",
+      "optional": false,
+      "description": "Build Lustre (AL2023/OutOfTree)"
+    },
+    {
+      "name": "lustre_mainline_strict",
+      "platform": "mainline",
+      "build": "tests/fs/lustre/boot-strict.ktest",
+      "optional": true,
+      "description": "Build Lustre (LLVM/OutOfTree/NoWarnings)"
+    },
+    {
+      "name": "lustre_mainline",
+      "platform": "mainline",
+      "build": "tests/fs/lustre/boot.ktest",
+      "optional": false,
+      "description": "Build Lustre (LLVM/OutOfTree)"
+    },
+    {
+      "name": "lustre_mainline_native",
+      "platform": "mainline",
+      "build": "tests/fs/lustre/boot.ktest",
+      "optional": false,
+      "description": "Build Lustre (InTree)"
+    },
+    {
+      "name": "clang-tidy",
+      "platform": "mainline",
+      "tool": "clang-tidy",
+      "optional": true,
+      "description": "Run Clang Tidy",
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "cc-plugin",
+      "platform": "mainline",
+      "tool": "cc-plugin",
+      "optional": true,
+      "description": "Run Lustre LLVM Compiler Plugin",
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "boot",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/boot.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "llmount",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/llmount.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "llog-unit",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/llog-unit.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "mgs-setup",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/mgs-setup.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "sanity-1",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/sanity/sanity-1.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "sanity-2",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/sanity/sanity-2.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "sanity-3",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/sanity/sanity-3.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "sanity-4",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/sanity/sanity-4.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    }
+  ]
+}

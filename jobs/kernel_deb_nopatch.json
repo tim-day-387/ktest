@@ -1,0 +1,10 @@
+{
+  "jobs": [
+    {
+      "name": "kernel_deb",
+      "platform": "kernel_deb",
+      "build": "tests/fs/lustre/lustre_root.ktest",
+      "backing_storage": "zfs"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_mainline",
+      "platform": "mainline",
+      "build": "tests/fs/lustre/boot.ktest"
+    },
+    {
+      "name": "clang-tidy",
+      "platform": "mainline",
+	"tool": "clang-tidy",
+      "depends_on": ["lustre_mainline"]
+    },
+    {
+      "name": "cc-plugin",
+      "platform": "mainline",
+      "tool": "cc-plugin",
+      "depends_on": ["lustre_mainline"]
+    }
+  ]
+}

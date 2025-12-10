@@ -1,0 +1,67 @@
+name: Test podman-ktest with Lustre
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lustre-ci-short:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Free disk space
+      run: |
+        ./ci-selftest/util_free_space.sh
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-podman podman
+
+    - name: Start podman socket
+      run: |
+        systemctl --user start podman.socket
+
+    - name: Clone Linux kernel
+      run: |
+        mkdir -p ~/git
+        git clone --depth 1 --branch v6.14 \
+          https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+          ~/git/linux
+
+    - name: Clone Lustre
+      run: |
+        git clone --depth 1 \
+          git://git.whamcloud.com/fs/lustre-release.git \
+          ~/git/lustre-release
+
+    - name: Create ktestrc
+      run: |
+        cat > ~/.ktestrc << 'EOF'
+        export ktest_kernel_source="$HOME/git/linux"
+        export ktest_lustre_source="$HOME/git/lustre-release"
+        EOF
+
+    - name: Build ktest-runner container image
+      run: |
+        df -h
+        ./podman-ktest build --ci-only
+        podman system prune -f
+
+    - name: Build root image for ktest
+      run: |
+        df -h
+        sudo ./root_image init
+        sudo ./root_image create
+
+    - name: Enable KVM
+      run: |
+        sudo chmod 777 /dev/kvm
+
+    - name: Run lustre-ci-short
+      run: |
+        ./podman-ktest job lustre-ci-short --stdout

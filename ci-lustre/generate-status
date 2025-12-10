@@ -1,0 +1,39 @@
+#!/bin/bash
+
+PATCH_DIR="/var/www/ci-lustre/upstream-patch-review"
+METADATA_FILE="$PATCH_DIR/metadata_store.json"
+
+# Count patches from metadata_store.json using jq
+if [ -f "$METADATA_FILE" ]; then
+    PATCH_COUNT=$(jq 'length' "$METADATA_FILE")
+else
+    PATCH_COUNT=0
+fi
+
+# Get uptime
+UPTIME_INFO=$(uptime)
+
+# Get total disk space used (excluding .git)
+TOTAL_SPACE=$(du -ch --exclude=".git" "$PATCH_DIR" | grep total$ | awk '{print $1}')
+
+# Compute space per patch (in bytes for accuracy, then format)
+ONE_GB=$((1024 * 1024 * 1024))
+TOTAL_BYTES=$(du -sb --exclude=".git" "$PATCH_DIR" | awk '{print $1}')
+if [ "$PATCH_COUNT" -gt 0 ]; then
+    SPACE_PER_PATCH_BYTES=$((TOTAL_BYTES / PATCH_COUNT))
+    MAX_PATCHES=$(( ONE_GB / SPACE_PER_PATCH_BYTES ))
+else
+    SPACE_PER_PATCH_BYTES=0
+    MAX_PATCHES="Unlimited"
+fi
+
+# Convert bytes to human-readable form
+SPACE_PER_PATCH_HUMAN=$(numfmt --to=iec $SPACE_PER_PATCH_BYTES)
+
+echo "PatchCount: $PATCH_COUNT"
+echo "Uptime: $UPTIME_INFO"
+echo "TotalSpace: $TOTAL_SPACE"
+echo "SpacePerPatch: $SPACE_PER_PATCH_HUMAN"
+echo "MaxPatches: $MAX_PATCHES"
+
+exit 0

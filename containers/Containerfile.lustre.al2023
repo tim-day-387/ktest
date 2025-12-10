@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+# Distro
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
+
+# Install ktest dependencies
+RUN yum group install -y "Development Tools"
+RUN yum install -y kernel6.12-devel rpm-build libselinux-devel libtool redhat-rpm-config \
+    libyaml-devel git flex bison keyutils-libs-devel libmount-devel libnl3-devel \
+    kernel-rpm-macros python3-devel openssl-devel ncurses-devel bison flex \
+    elfutils-libelf-devel openssl-devel dwarves keyutils-libs-devel libmount-devel \
+    kernel6.12
+
+# EFA
+RUN curl -O https://efa-installer.amazonaws.com/aws-efa-installer-1.45.1.tar.gz \
+    && tar -xf aws-efa-installer-1.45.1.tar.gz --no-same-owner && cd aws-efa-installer \
+    && ./efa_installer.sh -y --no-verify --skip-kmod
+
+# Git config
+RUN git config --global safe.directory '*'

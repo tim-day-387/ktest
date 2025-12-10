@@ -1,0 +1,9 @@
+#!/bin/bash
+# ktest configuration file for ci-lustre container
+# This file is sourced as a shell script
+
+# Kernel source directory (in container)
+export ktest_kernel_source="/home/ktest/git/linux"
+
+# Lustre source directory (in container)
+export ktest_lustre_source="/home/ktest/git/lustre-release"

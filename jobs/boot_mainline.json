@@ -1,0 +1,6 @@
+{
+  "name": "lustre_mainline",
+  "platform": "mainline",
+  "build": "tests/fs/lustre/boot.ktest",
+  "run": "tests/fs/lustre/boot.ktest"
+}

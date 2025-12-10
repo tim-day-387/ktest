@@ -1,0 +1,22 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_patch",
+      "platform": "native_1",
+      "build": "tests/fs/lustre/boot.ktest"
+    },
+    {
+      "name": "lustre_native",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/inkernel.ktest",
+      "depends_on": ["lustre_patch"]
+    },
+    {
+      "name": "boot",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/inkernel.ktest",
+      "run": "tests/fs/lustre/inkernel.ktest",
+      "depends_on": ["lustre_native"]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "jobs": [
+    {
+      "name": "userland_deb",
+      "platform": "userland_deb",
+      "build": "tests/fs/lustre/inkernel.ktest",
+      "backing_storage": "zfs"
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+name: Publish Container Images
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Free disk space
+      run: |
+        ./ci-selftest/util_free_space.sh
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-podman podman
+
+    - name: Start podman socket
+      run: |
+        systemctl --user start podman.socket
+
+    - name: Build all container images
+      run: |
+        ./podman-ktest build
+
+    - name: Log in to GitHub Container Registry
+      run: |
+        echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+
+    - name: Tag and push images
+      run: |
+        # Get repository owner (lowercase required for ghcr.io)
+        OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+
+        # List of images to push
+        IMAGES=(
+          "ktest-runner:latest"
+          "lustre-u24:latest"
+          "lustre-al2023:latest"
+          "lustre-al2:latest"
+          "ci-lustre:latest"
+        )
+
+        for IMAGE in "${IMAGES[@]}"; do
+          IMAGE_NAME="${IMAGE%:*}"
+          IMAGE_TAG="${IMAGE#*:}"
+
+          # Tag with ghcr.io prefix
+          podman tag "${IMAGE}" "ghcr.io/${OWNER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+          # Also tag with commit SHA for versioning
+          podman tag "${IMAGE}" "ghcr.io/${OWNER}/${IMAGE_NAME}:${{ github.sha }}"
+
+          # Push both tags
+          podman push "ghcr.io/${OWNER}/${IMAGE_NAME}:${IMAGE_TAG}"
+          podman push "ghcr.io/${OWNER}/${IMAGE_NAME}:${{ github.sha }}"
+
+          echo "Pushed ghcr.io/${OWNER}/${IMAGE_NAME}:${IMAGE_TAG}"
+          echo "Pushed ghcr.io/${OWNER}/${IMAGE_NAME}:${{ github.sha }}"
+        done

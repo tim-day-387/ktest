@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+# Distro
+FROM ubuntu:24.04
+
+# Set environment variables to avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install ktest dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential bc bison flex libelf-dev \
+    libssl-dev qemu-system-x86 qemu-utils \
+    minicom socat vde2 git ssh rsync brotli \
+    lsb-release wget software-properties-common \
+    gnupg clang bear pahole kmod swig quilt \
+    libtool pkg-config libpython3-dev libmount-dev \
+    libaio-dev libssl-dev libnl-genl-3-dev \
+    libkeyutils-dev libyaml-dev libreadline-dev \
+    module-assistant debhelper libsnmp-dev \
+    mpi-default-dev curl libguestfs-tools \
+    qemu-utils linux-image-generic ccache \
+    linux-headers-generic-hwe-24.04
+
+# Purge this stuff
+RUN rm -rf /var/lib/apt/lists/*
+
+# Git config
+RUN git config --global safe.directory '*'
