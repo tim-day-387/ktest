@@ -1,0 +1,463 @@
+#!/usr/bin/env python3
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+import os
+import sys
+import argparse
+from pathlib import Path
+import podman
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+PODMAN_SOCKET = f"unix:///run/user/{os.getuid()}/podman/podman.sock"
+
+
+def get_ktest_dirs():
+    """Get ktest directory paths"""
+    ktest_dir = Path(__file__).resolve().parent
+    ktest_workdir = "/home/ktest/ktest"
+    ktest_ccplugin_source = ktest_dir.parent / "xunused"
+
+    # Get kernel source from environment or default location
+    ktest_kernel_source = os.environ.get("ktest_kernel_source")
+    if not ktest_kernel_source:
+        linux_path = Path.home() / "git" / "linux"
+        if linux_path.exists():
+            ktest_kernel_source = str(linux_path.resolve())
+
+    if not ktest_kernel_source or not Path(ktest_kernel_source).exists():
+        print(f"kernel source directory {ktest_kernel_source} does not exist")
+        sys.exit(1)
+
+    ktest_lustre_source = Path(ktest_kernel_source).parent / "lustre-release"
+
+    return {
+        "ktest_dir": str(ktest_dir),
+        "ktest_workdir": ktest_workdir,
+        "ktest_ccplugin_source": str(ktest_ccplugin_source),
+        "ktest_kernel_source": ktest_kernel_source,
+        "ktest_lustre_source": str(ktest_lustre_source),
+    }
+
+
+def _build_image(dirs, dockerfile, tag, name):
+    """Build a single container image"""
+    with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
+        print(f"Building {name}...")
+        client.images.build(
+            path=dirs["ktest_dir"],
+            dockerfile=dockerfile,
+            tag=tag,
+            layers=True,
+            outputformat="application/vnd.oci.image.manifest.v1+json",
+            rm=False,
+        )
+        print(f"Finished building {name}")
+        return name
+
+
+def cmd_build(args, dirs):
+    """Build container images in parallel"""
+    images = [
+        {
+            "dockerfile": "containers/Containerfile.ktest.u24",
+            "tag": "ktest-runner:latest",
+            "name": "ktest-runner",
+        },
+        {
+            "dockerfile": "containers/Containerfile.lustre.u24",
+            "tag": "lustre-u24:latest",
+            "name": "lustre-u24",
+        },
+        {
+            "dockerfile": "containers/Containerfile.lustre.al2023",
+            "tag": "lustre-al2023:latest",
+            "name": "lustre-al2023",
+        },
+        {
+            "dockerfile": "containers/Containerfile.lustre.al2",
+            "tag": "lustre-al2:latest",
+            "name": "lustre-al2",
+        },
+    ]
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(
+                _build_image,
+                dirs,
+                img["dockerfile"],
+                img["tag"],
+                img["name"],
+            ): img["name"]
+            for img in images
+        }
+
+        for future in as_completed(futures):
+            img_name = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Error building {img_name}: {e}")
+                raise
+
+
+def cmd_run(args, dirs):
+    """Run ktest in container"""
+    with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
+
+        container = client.containers.run(
+            image="ktest-runner:latest",
+            command=args.command,
+            working_dir=dirs["ktest_workdir"],
+            tty=True,
+            stdin_open=False,
+            pids_limit=100000,
+            devices=["/dev/kvm"],
+            overlay_volumes=[
+                {
+                    "source": dirs["ktest_kernel_source"],
+                    "destination": "/home/ktest/git/linux",
+                },
+                {
+                    "source": dirs["ktest_lustre_source"],
+                    "destination": "/home/ktest/git/lustre-release",
+                },
+                {
+                    "source": dirs["ktest_ccplugin_source"],
+                    "destination": "/home/ktest/xunused",
+                },
+                {
+                    "source": "/var/lib/ktest",
+                    "destination": "/var/lib/ktest",
+                },
+            ],
+            mounts=[
+                {
+                    "type": "bind",
+                    "source": "/tmp/",
+                    "target": "/tmp/",
+                    "read_only": False,
+                },
+            ],
+            remove=True,  # auto-remove after exit
+            detach=True,  # IMPORTANT
+        )
+
+        for line in container.logs(stream=True, stdout=True, stderr=True):
+            print(line.decode("utf-8"), end="")
+
+        return container.wait()
+
+
+def cmd_run_immutable(args, dirs):
+    """Run ktest in container"""
+    with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
+
+        container = client.containers.run(
+            image="ktest-runner:latest",
+            command=args.command,
+            working_dir=dirs["ktest_workdir"],
+            tty=True,
+            stdin_open=False,
+            pids_limit=100000,
+            devices=["/dev/kvm"],
+            overlay_volumes=[
+                {
+                    "source": dirs["ktest_kernel_source"],
+                    "destination": "/home/ktest/git/linux",
+                },
+                {
+                    "source": dirs["ktest_lustre_source"],
+                    "destination": "/home/ktest/git/lustre-release",
+                },
+                {
+                    "source": dirs["ktest_ccplugin_source"],
+                    "destination": "/home/ktest/xunused",
+                },
+                {
+                    "source": "/var/lib/ktest",
+                    "destination": "/var/lib/ktest",
+                },
+                {
+                    "source": "/tmp/",
+                    "destination": "/tmp/",
+                },
+            ],
+            remove=True,  # auto-remove after exit
+            detach=True,  # IMPORTANT
+        )
+
+        for line in container.logs(stream=True, stdout=True, stderr=True):
+            print(line.decode("utf-8"), end="")
+
+        return container.wait()
+
+
+def cmd_build_u24(args, dirs):
+    """Build Lustre on Ubuntu 24"""
+    build_script = """
+./autogen.sh
+./configure --disable-server
+make --quiet -j$(nproc)
+"""
+
+    """Run ktest in container"""
+    with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
+
+        container = client.containers.run(
+            image="lustre-u24:latest",
+            command=["bash", "-c", build_script],
+            working_dir="/home/root/git/lustre-release/",
+            tty=True,
+            stdin_open=False,
+            pids_limit=100000,
+            overlay_volumes=[
+                {
+                    "source": dirs["ktest_lustre_source"],
+                    "destination": "/home/root/git/lustre-release",
+                },
+            ],
+            remove=True,
+            detach=True,
+        )
+
+        for line in container.logs(stream=True, stdout=True, stderr=True):
+            print(line.decode("utf-8"), end="")
+
+        return container.wait()
+
+
+def cmd_build_al2023(args, dirs):
+    """Build Lustre on Amazon Linux 2023"""
+    build_script = """
+./autogen.sh
+./configure --enable-efa
+make --quiet -j$(nproc)
+"""
+
+    """Run ktest in container"""
+    with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
+
+        container = client.containers.run(
+            image="lustre-al2023:latest",
+            command=["bash", "-c", build_script],
+            working_dir="/home/root/git/lustre-release/",
+            tty=True,
+            stdin_open=False,
+            pids_limit=100000,
+            overlay_volumes=[
+                {
+                    "source": dirs["ktest_lustre_source"],
+                    "destination": "/home/root/git/lustre-release",
+                },
+            ],
+            remove=True,
+            detach=True,
+        )
+
+        for line in container.logs(stream=True, stdout=True, stderr=True):
+            print(line.decode("utf-8"), end="")
+
+        return container.wait()
+
+
+def cmd_build_al2(args, dirs):
+    """Build Lustre on Amazon Linux 2"""
+    build_script = """
+./autogen.sh
+./configure
+make --quiet -j$(nproc)
+"""
+
+    """Run ktest in container"""
+    with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
+
+        container = client.containers.run(
+            image="lustre-al2:latest",
+            command=["bash", "-c", build_script],
+            working_dir="/home/root/git/lustre-release/",
+            tty=True,
+            stdin_open=False,
+            pids_limit=100000,
+            overlay_volumes=[
+                {
+                    "source": dirs["ktest_lustre_source"],
+                    "destination": "/home/root/git/lustre-release",
+                },
+            ],
+            remove=True,
+            detach=True,
+        )
+
+        for line in container.logs(stream=True, stdout=True, stderr=True):
+            print(line.decode("utf-8"), end="")
+
+        return container.wait()
+
+
+def _run_build_with_log(build_name, log_path, dirs):
+    """Run a build function and save logs to a file"""
+    with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
+        # Get the build script and image from the build function
+        if build_name == "build_u24":
+            image = "lustre-u24:latest"
+            build_script = """
+./autogen.sh
+./configure --disable-server
+make --quiet -j$(nproc)
+"""
+        elif build_name == "build_al2023":
+            image = "lustre-al2023:latest"
+            build_script = """
+./autogen.sh
+./configure --enable-efa
+make --quiet -j$(nproc)
+"""
+        elif build_name == "build_al2":
+            image = "lustre-al2:latest"
+            build_script = """
+./autogen.sh
+./configure
+make --quiet -j$(nproc)
+"""
+
+        container = client.containers.run(
+            image=image,
+            command=["bash", "-c", build_script],
+            working_dir="/home/root/git/lustre-release/",
+            tty=True,
+            stdin_open=False,
+            pids_limit=100000,
+            overlay_volumes=[
+                {
+                    "source": dirs["ktest_lustre_source"],
+                    "destination": "/home/root/git/lustre-release",
+                },
+            ],
+            remove=True,
+            detach=True,
+        )
+
+        # Write logs to file
+        with open(log_path, "wb") as log_file:
+            for line in container.logs(stream=True, stdout=True, stderr=True):
+                log_file.write(line)
+
+        return container.wait()
+
+
+def cmd_build_all_parallel(args, dirs):
+    """Build Lustre on all distros in parallel"""
+    builds = [
+        ("build_al2", "/tmp/build_al2.log"),
+        ("build_al2023", "/tmp/build_al2023.log"),
+        ("build_u24", "/tmp/build_u24.log"),
+    ]
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(
+                _run_build_with_log,
+                build_name,
+                log_path,
+                dirs,
+            ): build_name
+            for build_name, log_path in builds
+        }
+
+        results = {}
+        for future in as_completed(futures):
+            build_name = futures[future]
+            try:
+                return_code = future.result()
+                results[build_name] = return_code
+            except Exception as e:
+                print(f"Error building {build_name}: {e}")
+                results[build_name] = -1
+
+    # Print results
+    for build_name, log_path in builds:
+        return_code = results.get(build_name, -1)
+        print(f"{build_name}: return code = {return_code}, log saved to {log_path}")
+
+    # Return non-zero if any build failed
+    return max(results.values())
+
+
+def cmd_info(args, dirs):
+    """Build container images"""
+    with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
+        print(client.info())
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="podman-ktest: Run generic virtual machine tests"
+    )
+    parser.add_argument("-w", "--workdir", help="Working directory")
+
+    subparsers = parser.add_subparsers(dest="cmd", help="Command to run", required=True)
+
+    # Build command
+    subparsers.add_parser("build", help="Build container images")
+
+    # Run command - accepts all remaining arguments
+    run_parser = subparsers.add_parser("run", help="Run ktest in container")
+    run_parser.add_argument(
+        "command", nargs=argparse.REMAINDER, help="Command to run in container"
+    )
+
+    # Info command
+    subparsers.add_parser("info", help="Display podman info")
+
+    # Run immutable command
+    run_immutable_parser = subparsers.add_parser(
+        "run_immutable", help="Run ktest in immutable container"
+    )
+    run_immutable_parser.add_argument(
+        "command", nargs=argparse.REMAINDER, help="Command to run in container"
+    )
+
+    # Build commands for different distros
+    subparsers.add_parser("build_u24", help="Build Lustre on Ubuntu 24")
+    subparsers.add_parser("build_al2023", help="Build Lustre on Amazon Linux 2023")
+    subparsers.add_parser("build_al2", help="Build Lustre on Amazon Linux 2")
+    subparsers.add_parser(
+        "build_all_parallel", help="Build Lustre on all distros in parallel"
+    )
+
+    args = parser.parse_args()
+
+    # Get directory configuration
+    dirs = get_ktest_dirs()
+
+    # Override workdir if specified
+    if args.workdir:
+        dirs["ktest_workdir"] = args.workdir
+
+    # Map commands to functions
+    commands = {
+        "build": cmd_build,
+        "run": cmd_run,
+        "info": cmd_info,
+        "run_immutable": cmd_run_immutable,
+        "build_u24": cmd_build_u24,
+        "build_al2023": cmd_build_al2023,
+        "build_al2": cmd_build_al2,
+        "build_all_parallel": cmd_build_all_parallel,
+    }
+
+    # Execute the command
+    result = commands[args.cmd](args, dirs)
+    sys.exit(result)
+
+
+if __name__ == "__main__":
+    main()
