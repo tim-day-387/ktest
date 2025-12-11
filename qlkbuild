@@ -276,7 +276,24 @@ function build_lustre()
     # No strict errors
     if [[ "${ktest_lustre_allow_warnings}" == "1" ]]; then
 	export CFLAGS="-Wno-error=attribute-warning -Wno-error=unused-but-set-variable -Wno-error=single-bit-bitfield-constant-conversion -Wno-error=format-security -Wno-error=cast-function-type-strict"
+	export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
+    else
+	export CFLAGS="-I$LINUX_OBJ/include"
     fi
+
+    # Find headers
+    LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
+    SUBARCH="x86"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated/uapi"
+    export KCFLAGS="-I$LINUX_OBJ/include"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated/uapi"
 
     # Disable persistent OSDs
     export with_ldiskfs="no"
@@ -305,6 +322,9 @@ function build_lustre()
     ./autogen.sh
     ./configure
     bear -- make -j$ktest_njobs
+
+    # Newer kernels have these lines that the plugin hates
+    sed -i '/-Wp,-MMD,.*\.d/d' "$ktest_lustre_build/compile_commands.json"
 
     validate_lustre_build
 
