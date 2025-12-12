@@ -529,6 +529,20 @@ TESTS = [
         "Type": TestType.OUT_OF_TREE_BUILD,
     },
     {
+        "Command": "./podman-ktest build_al2023",
+        "Title": "Build on Amazon Linux 2023 (with EFA)",
+        "Description": "Build Lustre (AL2023/OutOfTree)",
+        "Enforced": True,
+        "Type": TestType.OUT_OF_TREE_BUILD,
+    },
+    {
+        "Command": "./podman-ktest build_u24",
+        "Title": "Build on Ubuntu 24",
+        "Description": "Build Lustre (U24/OutOfTree)",
+        "Enforced": True,
+        "Type": TestType.OUT_OF_TREE_BUILD,
+    },
+    {
         "Command": "./podman-ktest run ./qlkbuild ccplugin --purge-ktest-out 0 --clean-git 0 --allow-warnings 1 --build-lustre 1",
         "Title": "Compiler Plugin",
         "Description": "Run Lustre LLVM Compiler Plugin",

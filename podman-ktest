@@ -38,6 +38,15 @@ function cmd_build() {
     podman build \
 	   -t ktest-runner \
 	   -f containers/Containerfile.ktest.u24 .
+    podman build \
+	   -t lustre-u24 \
+	   -f containers/Containerfile.lustre.u24 .
+    podman build \
+	   -t lustre-al2023 \
+	   -f containers/Containerfile.lustre.al2023 .
+    podman build \
+	   -t lustre-al2 \
+	   -f containers/Containerfile.lustre.al2 .
 }
 
 function cmd_run() {
@@ -71,9 +80,6 @@ function cmd_run_immutable() {
 }
 
 function cmd_build_u24() {
-    podman build \
-	   -t lustre-u24 \
-	   -f containers/Containerfile.lustre.u24 .
     podman run \
 	   -it \
 	   --workdir /home/root/git/lustre-release/ \
@@ -89,9 +95,6 @@ make -j$(nproc)
 }
 
 function cmd_build_al2023() {
-    podman build \
-	   -t lustre-al2023 \
-	   -f containers/Containerfile.lustre.al2023 .
     podman run \
 	   -it \
 	   --workdir /home/root/git/lustre-release/ \
@@ -107,9 +110,6 @@ make -j$(nproc)
 }
 
 function cmd_build_al2() {
-    podman build \
-	   -t lustre-al2 \
-	   -f containers/Containerfile.lustre.al2 .
     podman run \
 	   -it \
 	   --workdir /home/root/git/lustre-release/ \
