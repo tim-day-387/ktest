@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Run ktest in parallel.
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+import os
+import argparse
+import subprocess
+import shutil
+import logging
+import threading
+import signal
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
+
+def run_script(command):
+    start_time = time.time()
+    timeout_seconds = 500
+
+    try:
+        pipe = subprocess.run(
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                preexec_fn=os.setsid,
+                timeout=timeout_seconds,
+        )
+
+        out = pipe.stdout
+        returncode = pipe.returncode
+    except subprocess.TimeoutExpired as e:
+        out = e.stdout
+        returncode = -1
+
+    elapsed_time = int(time.time() - start_time)
+    out = out.decode("utf8", errors="strict").strip()
+
+    return out, returncode, elapsed_time
+
+def setup_logging(output_dir, verbose):
+    log_file = os.path.join(output_dir, "tests.log")
+
+    logger.setLevel(logging.DEBUG)
+
+    # File handler
+    file_handler = logging.FileHandler(log_file)
+    file_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    file_handler.setFormatter(file_formatter)
+
+    file_handler.setLevel(logging.DEBUG)
+
+    logger.addHandler(file_handler)
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_formatter = logging.Formatter("%(message)s")
+    console_handler.setFormatter(console_formatter)
+
+    if verbose:
+        console_handler.setLevel(logging.DEBUG)
+    else:
+        console_handler.setLevel(logging.INFO)
+
+    logger.addHandler(console_handler)
+
+
+def run_build():
+    run_script("./podman-ktest run ./qlkbuild build --purge-ktest-out 1 --clean-git 1 --allow-warnings 1 --build-lustre 1")
+
+
+def run_ktest(test_file):
+    command = "./podman-ktest run_immutable ./qlkbuild run --purge-ktest-out 0 --clean-git 0 --allow-warnings 1 --build-lustre 0 --build-kernel 0 " + test_file
+    out, rc, runtime = run_script(command)
+    return out
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run ktest in parallel.")
+    parser.add_argument("tests_dir", help="Directory containing ktest files.")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose output."
+    )
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=os.cpu_count(),
+        help="Number of parallel jobs (default: number of CPUs).",
+    )
+
+    args = parser.parse_args()
+
+    setup_logging(".", args.verbose)
+
+    # Gather all test files
+    test_files = [
+        os.path.join(args.tests_dir, f)
+        for f in os.listdir(args.tests_dir)
+        if f.endswith(".ktest")
+    ]
+
+    if not test_files:
+        logger.error(f"No .ktest files found in {args.tests_dir}.")
+        return
+
+    start_time = time.time()
+    results = [None] * len(test_files)
+
+    # Run the build
+    run_build()
+
+    # Run tests in parallel
+    with ThreadPoolExecutor(max_workers=args.jobs) as executor:
+        futures = {
+            executor.submit(
+                run_ktest, test
+            ): idx
+            for idx, test in enumerate(test_files)
+        }
+
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                result = future.result()
+            except Exception as e:
+                # Capture unexpected errors so UI stays consistent
+                result = "FAIL"
+            results[idx] = result
+
+    # Pretty print results
+    elapsed_time = int(time.time() - start_time)
+    logger.info(f"Done in {elapsed_time}s!")
+    for result in results:
+        logger.debug(result)
+
+
+if __name__ == "__main__":
+    main()
