@@ -530,7 +530,7 @@ TESTS = [
     },
     {
         "Command": "./podman-ktest build_al2023",
-        "Title": "Build on Amazon Linux 2023 (with EFA)",
+        "Title": "Build on Amazon Linux 2023",
         "Description": "Build Lustre (AL2023/OutOfTree)",
         "Enforced": True,
         "Type": TestType.OUT_OF_TREE_BUILD,
