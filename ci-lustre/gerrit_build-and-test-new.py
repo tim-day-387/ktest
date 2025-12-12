@@ -515,6 +515,13 @@ TESTS = [
         "Type": TestType.REPORT,
     },
     {
+        "Command": "./podman-ktest run_immutable -w /home/ktest/git/lustre-release /home/ktest/ktest/tools/kernel_doc_helper.sh",
+        "Title": "Kernel Doc Report",
+        "Description": "Check the number of kernel doc errors",
+        "Enforced": False,
+        "Type": TestType.REPORT,
+    },
+    {
         "Command": "./podman-ktest run -w /home/ktest/git/lustre-release /home/ktest/ktest/tools/checkpatch",
         "Title": "Checkpatch",
         "Description": "Run checkpatch.pl from the given mainline kernel",
@@ -526,6 +533,13 @@ TESTS = [
         "Title": "Lustre Build",
         "Description": "Build Lustre (LLVM/OutOfTree)",
         "Enforced": True,
+        "Type": TestType.OUT_OF_TREE_BUILD,
+    },
+    {
+        "Command": "./podman-ktest run ./qlkbuild build --purge-ktest-out 1 --clean-git 1 --allow-warnings 0 --build-lustre 1",
+        "Title": "Lustre Build Strict",
+        "Description": "Build Lustre (LLVM/OutOfTree/NoWarnings)",
+        "Enforced": False,
         "Type": TestType.OUT_OF_TREE_BUILD,
     },
     {
@@ -553,13 +567,6 @@ TESTS = [
         "Command": "./podman-ktest run ./qlkbuild clang-tidy --purge-ktest-out 0 --clean-git 0 --allow-warnings 1 --build-lustre 1",
         "Title": "Clang Tidy",
         "Description": "Run Clang Tidy",
-        "Enforced": False,
-        "Type": TestType.OUT_OF_TREE_BUILD,
-    },
-    {
-        "Command": "./podman-ktest run ./qlkbuild build --purge-ktest-out 1 --clean-git 1 --allow-warnings 0 --build-lustre 1",
-        "Title": "Lustre Build Strict",
-        "Description": "Build Lustre (LLVM/OutOfTree/NoWarnings)",
         "Enforced": False,
         "Type": TestType.OUT_OF_TREE_BUILD,
     },
@@ -913,7 +920,7 @@ class Reviewer(object):
         tables = ""
 
         if branchwide:
-            rows = self.run_tests_for_group(
+            rows = self.run_tests_for_group_parallel(
                 (t for t in TESTS if t["Type"] == TestType.REPORT),
                 change_id,
                 home_path,

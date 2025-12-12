@@ -90,7 +90,7 @@ function cmd_build_u24() {
 	   bash -c '
 ./autogen.sh
 ./configure --disable-server
-make -j$(nproc)
+make --quiet -j$(nproc)
        '
 }
 
@@ -105,7 +105,7 @@ function cmd_build_al2023() {
 	   bash -c '
 ./autogen.sh
 ./configure --enable-efa
-make -j$(nproc)
+make --quiet -j$(nproc)
        '
 }
 
@@ -120,7 +120,7 @@ function cmd_build_al2() {
 	   bash -c '
 ./autogen.sh
 ./configure
-make -j$(nproc)
+make --quiet -j$(nproc)
        '
 }
 

@@ -278,12 +278,12 @@ function build_lustre()
     # No strict errors
     if [[ "${ktest_lustre_allow_warnings}" == "1" ]]; then
 	export CFLAGS="-Wno-error=attribute-warning -Wno-error=unused-but-set-variable -Wno-error=single-bit-bitfield-constant-conversion -Wno-error=format-security -Wno-error=cast-function-type-strict"
-	export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
     else
-	export CFLAGS="-I$LINUX_OBJ/include"
+	export CFLAGS="-Werror"
     fi
 
     # Find headers
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
     export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
     export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
     export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
@@ -397,7 +397,8 @@ function cmd_build()
 
     if [[ "${ktest_lustre_build_enable}" == "1" ]]; then
 	prepare_lustre_source
-	run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
+	#run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
+	build_lustre
 	create_root_image
     fi
 }
