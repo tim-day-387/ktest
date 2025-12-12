@@ -490,6 +490,7 @@ class TestType(Enum):
     OUT_OF_TREE_BUILD = 3
     IN_TREE_BUILD = 4
     VM = 5
+    OUT_OF_TREE_BUILD_CHECK = 6
 
 
 TESTS = [
@@ -529,13 +530,6 @@ TESTS = [
         "Type": TestType.STYLE,
     },
     {
-        "Command": "./podman-ktest run ./qlkbuild build --purge-ktest-out 1 --clean-git 1 --allow-warnings 1 --build-lustre 1",
-        "Title": "Lustre Build",
-        "Description": "Build Lustre (LLVM/OutOfTree)",
-        "Enforced": True,
-        "Type": TestType.OUT_OF_TREE_BUILD,
-    },
-    {
         "Command": "./podman-ktest run ./qlkbuild build --purge-ktest-out 1 --clean-git 1 --allow-warnings 0 --build-lustre 1",
         "Title": "Lustre Build Strict",
         "Description": "Build Lustre (LLVM/OutOfTree/NoWarnings)",
@@ -543,32 +537,39 @@ TESTS = [
         "Type": TestType.OUT_OF_TREE_BUILD,
     },
     {
+        "Command": "./podman-ktest run ./qlkbuild build --purge-ktest-out 1 --clean-git 1 --allow-warnings 1 --build-lustre 1",
+        "Title": "Lustre Build",
+        "Description": "Build Lustre (LLVM/OutOfTree)",
+        "Enforced": True,
+        "Type": TestType.OUT_OF_TREE_BUILD,
+    },
+    {
         "Command": "./podman-ktest build_al2023",
         "Title": "Build on Amazon Linux 2023",
         "Description": "Build Lustre (AL2023/OutOfTree)",
         "Enforced": True,
-        "Type": TestType.OUT_OF_TREE_BUILD,
+        "Type": TestType.OUT_OF_TREE_BUILD_CHECK,
     },
     {
         "Command": "./podman-ktest build_u24",
         "Title": "Build on Ubuntu 24",
         "Description": "Build Lustre (U24/OutOfTree)",
         "Enforced": True,
-        "Type": TestType.OUT_OF_TREE_BUILD,
+        "Type": TestType.OUT_OF_TREE_BUILD_CHECK,
     },
     {
-        "Command": "./podman-ktest run ./qlkbuild ccplugin --purge-ktest-out 0 --clean-git 0 --allow-warnings 1 --build-lustre 1",
+        "Command": "./podman-ktest run_immutable ./qlkbuild ccplugin --purge-ktest-out 0 --clean-git 0 --allow-warnings 1 --build-lustre 1",
         "Title": "Compiler Plugin",
         "Description": "Run Lustre LLVM Compiler Plugin",
         "Enforced": False,
-        "Type": TestType.OUT_OF_TREE_BUILD,
+        "Type": TestType.OUT_OF_TREE_BUILD_CHECK,
     },
     {
-        "Command": "./podman-ktest run ./qlkbuild clang-tidy --purge-ktest-out 0 --clean-git 0 --allow-warnings 1 --build-lustre 1",
+        "Command": "./podman-ktest run_immutable ./qlkbuild clang-tidy --purge-ktest-out 0 --clean-git 0 --allow-warnings 1 --build-lustre 1",
         "Title": "Clang Tidy",
         "Description": "Run Clang Tidy",
         "Enforced": False,
-        "Type": TestType.OUT_OF_TREE_BUILD,
+        "Type": TestType.OUT_OF_TREE_BUILD_CHECK,
     },
     {
         "Command": "./podman-ktest run ./qlkbuild build --purge-ktest-out 1 --clean-git 1 --allow-warnings 1 --build-lustre 1",
@@ -943,6 +944,14 @@ class Reviewer(object):
             home_path,
         )
         tables += table_template.format(title="Out-of-Tree Build", rows=rows)
+        rows = ""
+
+        rows = self.run_tests_for_group_parallel(
+            (t for t in TESTS if t["Type"] == TestType.OUT_OF_TREE_BUILD_CHECK),
+            change_id,
+            home_path,
+        )
+        tables += table_template.format(title="Out-of-Tree Checks", rows=rows)
         rows = ""
 
         rows = self.run_tests_for_group(
