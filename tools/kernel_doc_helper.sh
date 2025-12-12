@@ -14,7 +14,7 @@ folder_lst0="fid/ fld/ fld/ ldlm/ llite/ lfsck/ lmv/ lod/ lov/ mdc/ mdd/ mdt/  \
              ptlrpc/ quota/ target/ utils/"
 folder_lst1="lnet/lnet"
 
-KERNEL_DOC="/home/timothy/git/linux/scripts/kernel-doc"
+KERNEL_DOC="/home/ktest/git/linux/scripts/kernel-doc"
 
 BIN="$0"
 BINPATH="$(dirname "$(readlink -f "$BIN")")"
@@ -62,8 +62,8 @@ get_kern_doc_warning()
 if (( $# == 1 )); then
 	get_kern_doc_warning "$folder_lst0" "$BINPATH/../../lustre/" $1
 else
-	get_kern_doc_warning "$folder_lst0" "/home/timothy/git/lustre-release/lustre/"
-	get_kern_doc_warning "$folder_lst1" "/home/timothy/git/lustre-release/"
+	get_kern_doc_warning "$folder_lst0" "/home/ktest/git/lustre-release/lustre/"
+	get_kern_doc_warning "$folder_lst1" "/home/ktest/git/lustre-release/"
 fi
 
 echo "$TOTAL : Total"
