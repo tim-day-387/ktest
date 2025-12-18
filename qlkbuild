@@ -491,6 +491,27 @@ function cmd_build()
     fi
 }
 
+function cmd_build_rpm()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    purge_previous_results
+    prepare_linux_source
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel_rpm
+}
+
 function cmd_generate_lustre_patch()
 {
     if [[ $# = 0 ]]; then

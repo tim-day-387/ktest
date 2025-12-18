@@ -26,7 +26,8 @@ RUN apt-get update && apt-get install -y \
     libkeyutils-dev libyaml-dev libreadline-dev \
     module-assistant debhelper libsnmp-dev \
     mpi-default-dev curl libguestfs-tools \
-    qemu-utils linux-image-generic ccache
+    qemu-utils linux-image-generic ccache \
+    rpm
 
 # Purge this stuff
 RUN rm -rf /var/lib/apt/lists/*
@@ -45,6 +46,9 @@ RUN useradd -m -s /bin/bash ktest
 # Switch to ktest user
 USER ktest
 WORKDIR /home/ktest
+
+# Setup RPM
+RUN echo "%_binary_payload w2T16.xzdio" >> /home/ktest/.rpmmacros
 
 # Setup ccache
 RUN ccache --set-config=cache_dir=/tmp/ccache/

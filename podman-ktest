@@ -37,16 +37,16 @@ fi
 function cmd_build() {
     podman build \
 	   -t ktest-runner \
-	   -f containers/Containerfile.ktest.u24 .
+	   -f "$ktest_dir/containers/Containerfile.ktest.u24" .
     podman build \
 	   -t lustre-u24 \
-	   -f containers/Containerfile.lustre.u24 .
+	   -f "$ktest_dir/containers/Containerfile.lustre.u24" .
     podman build \
 	   -t lustre-al2023 \
-	   -f containers/Containerfile.lustre.al2023 .
+	   -f "$ktest_dir/containers/Containerfile.lustre.al2023" .
     podman build \
 	   -t lustre-al2 \
-	   -f containers/Containerfile.lustre.al2 .
+	   -f "$ktest_dir/containers/Containerfile.lustre.al2" .
 }
 
 function cmd_run() {

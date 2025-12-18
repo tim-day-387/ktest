@@ -166,7 +166,7 @@ function require-lustre-kernel-config()
     require-kernel-config BPF_JIT
 
     # Profiling
-    require-kernel-config CONFIG_MEM_ALLOC_PROFILING
+    # require-kernel-config CONFIG_MEM_ALLOC_PROFILING
 }
 
 function require-lustre-debug-kernel-config()
