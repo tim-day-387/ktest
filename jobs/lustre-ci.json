@@ -22,6 +22,20 @@
       "description": "Build Lustre (AL2023/OutOfTree)"
     },
     {
+      "name": "lustre_u24_userland",
+      "platform": "u24_userland",
+      "build": "tests/fs/lustre/boot.ktest",
+      "optional": true,
+      "description": "Build Lustre (U24/OutOfTree)"
+    },
+    {
+      "name": "lustre_al2023_userland",
+      "platform": "al2023_userland",
+      "build": "tests/fs/lustre/boot.ktest",
+      "optional": true,
+      "description": "Build Lustre (AL2023/OutOfTree)"
+    },
+    {
       "name": "lustre_mainline_strict",
       "platform": "mainline",
       "build": "tests/fs/lustre/boot-strict.ktest",

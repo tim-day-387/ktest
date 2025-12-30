@@ -47,6 +47,24 @@ make --quiet -j$(nproc)
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
     },
+    "u24_userland": {
+        "image": "lustre-u24:latest",
+        "build_script": """
+./autogen.sh
+./configure --disable-server --disable-modules
+make --quiet -j$(nproc)
+""",
+        "working_dir": "/home/ktest/git/lustre-release/",
+    },
+    "al2023_userland": {
+        "image": "lustre-al2023:latest",
+        "build_script": """
+./autogen.sh
+./configure --enable-efa --disable-modules
+make --quiet -j$(nproc)
+""",
+        "working_dir": "/home/ktest/git/lustre-release/",
+    },
     "al2": {
         "image": "lustre-al2:latest",
         "build_script": """
