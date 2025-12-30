@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y \
     module-assistant debhelper libsnmp-dev \
     mpi-default-dev curl libguestfs-tools \
     qemu-utils linux-image-generic ccache \
-    python3-ply python3-git
+    python3-ply python3-git capnproto
 
 # Purge this stuff
 RUN rm -rf /var/lib/apt/lists/*
@@ -56,6 +56,14 @@ COPY --chown=ktest:ktest . /home/ktest/ktest
 
 # Git config
 RUN git config --global safe.directory '*'
+
+# Get Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/home/ktest/.cargo/bin:${PATH}"
+
+# Build ktest with cargo
+WORKDIR /home/ktest/ktest
+RUN cargo build --release
 
 # Generate SSH key for ktest user (required for build-test-kernel ssh)
 RUN mkdir -p /home/ktest/.ssh && \
