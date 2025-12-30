@@ -259,8 +259,9 @@ function cmd_run()
     if [[ "${ktest_lustre_build_enable}" == "1" ]]; then
 	prepare_lustre_source
 	run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
-	create_root_image
     fi
+
+    create_root_image
 
     start_vm
 }
@@ -398,8 +399,9 @@ function cmd_build()
     if [[ "${ktest_lustre_build_enable}" == "1" ]]; then
 	prepare_lustre_source
 	run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
-	create_root_image
     fi
+
+    find "$ktest_out" -name '*.o' -type f -delete
 }
 
 cmd_help()

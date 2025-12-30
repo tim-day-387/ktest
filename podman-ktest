@@ -18,14 +18,16 @@ import threading
 import time
 import tempfile
 import shutil
+import subprocess
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 PODMAN_SOCKET = f"unix:///run/user/{os.getuid()}/podman/podman.sock"
+
 CONFIGS = {
     "mainline": {
         "image": "ktest-runner:latest",
-        "build_script": "./qlkbuild build --purge-ktest-out 0 --clean-git 1 --allow-warnings 1 --build-lustre 1",
+        "build_script": "./qlkbuild build --purge-ktest-out 0 --clean-git 0 --allow-warnings 1 --build-lustre 1",
         "working_dir": "/home/ktest/ktest/",
         "run_script": "./qlkbuild run --purge-ktest-out 0 --clean-git 0 --allow-warnings 1 --build-lustre 0 --build-kernel 0",
     },
@@ -205,8 +207,88 @@ def get_build_config(platform):
     return CONFIGS[platform]
 
 
+def create_source_tarballs(dirs):
+    """Create tarballs for kernel, lustre, and ccplugin sources in /tmp/
+    Returns dict with paths to the created tarballs."""
+
+    tarball_paths = {}
+
+    # Create kernel tarball using git archive
+    kernel_tarball = "/tmp/ktest-kernel.tar.gz"
+    print(f"Creating kernel tarball at {kernel_tarball}...")
+    subprocess.run(
+        [
+            "git",
+            "archive",
+            "--format=tar.gz",
+            "--prefix=linux/",
+            "-o",
+            kernel_tarball,
+            "HEAD",
+        ],
+        cwd=dirs["ktest_kernel_source"],
+        check=True,
+    )
+    tarball_paths["kernel"] = kernel_tarball
+
+    # Create lustre tarball using git archive
+    lustre_tarball = "/tmp/ktest-lustre.tar.gz"
+    print(f"Creating lustre tarball at {lustre_tarball}...")
+    subprocess.run(
+        [
+            "git",
+            "archive",
+            "--format=tar.gz",
+            "--prefix=lustre-release/",
+            "-o",
+            lustre_tarball,
+            "HEAD",
+        ],
+        cwd=dirs["ktest_lustre_source"],
+        check=True,
+    )
+    tarball_paths["lustre"] = lustre_tarball
+
+    # Create ccplugin tarball using git archive
+    ccplugin_tarball = "/tmp/ktest-ccplugin.tar.gz"
+    print(f"Creating ccplugin tarball at {ccplugin_tarball}...")
+    subprocess.run(
+        [
+            "git",
+            "archive",
+            "--format=tar.gz",
+            "--prefix=xunused/",
+            "-o",
+            ccplugin_tarball,
+            "HEAD",
+        ],
+        cwd=dirs["ktest_ccplugin_source"],
+        check=True,
+    )
+    tarball_paths["ccplugin"] = ccplugin_tarball
+
+    return tarball_paths
+
+
+def put_archive(container, tarball_path, archive_path):
+    start_time = time.time()
+    with open(tarball_path, "rb") as f:
+        container.put_archive(archive_path, f)
+    elapsed = time.time() - start_time
+    print(f"put_archive({tarball_path}): {elapsed:.2f}s")
+
+
 def run_in_container(
-    client, image, command, working_dir, dirs, read_only, ktest_out_dir=None
+    client,
+    image,
+    command,
+    working_dir,
+    ktest_out_dir=None,
+    tarball_paths=None,
+    sync_kernel=False,
+    sync_lustre=False,
+    sync_ccplugin=False,
+    sync_ktest_out=False,
 ):
     # Use provided ktest_out_dir or default to /tmp/ktest-out
     ktest_out_host = ktest_out_dir if ktest_out_dir else "/tmp/ktest-out"
@@ -217,89 +299,80 @@ def run_in_container(
         Path(ccache_dir).mkdir(parents=True, exist_ok=True)
         Path(ccache_dir).chmod(0o777)
 
-    if read_only:
-        overlay_volumes = [
-            {
-                "source": dirs["ktest_kernel_source"],
-                "destination": "/home/ktest/git/linux",
-            },
-            {
-                "source": dirs["ktest_lustre_source"],
-                "destination": "/home/ktest/git/lustre-release",
-            },
-            {
-                "source": dirs["ktest_ccplugin_source"],
-                "destination": "/home/ktest/xunused",
-            },
-            {
-                "source": "/var/lib/ktest",
-                "destination": "/var/lib/ktest",
-            },
-            {
-                "source": ktest_out_host,
-                "destination": "/tmp/ktest-out",
-            },
-        ]
-        mounts = [
-            {
-                "type": "bind",
-                "source": "/tmp/ccache",
-                "target": "/tmp/ccache",
-                "read_only": False,
-            },
-        ]
-    else:
-        overlay_volumes = [
-            {
-                "source": dirs["ktest_kernel_source"],
-                "destination": "/home/ktest/git/linux",
-            },
-            {
-                "source": dirs["ktest_lustre_source"],
-                "destination": "/home/ktest/git/lustre-release",
-            },
-            {
-                "source": dirs["ktest_ccplugin_source"],
-                "destination": "/home/ktest/xunused",
-            },
-            {
-                "source": "/var/lib/ktest",
-                "destination": "/var/lib/ktest",
-            },
-        ]
-        mounts = [
-            {
-                "type": "bind",
-                "source": "/tmp/ccache",
-                "target": "/tmp/ccache",
-                "read_only": False,
-            },
-            {
-                "type": "bind",
-                "source": ktest_out_host,
-                "target": "/tmp/ktest-out",
-                "read_only": False,
-            },
-        ]
+    # Only mount /var/lib/ktest as overlay_volume
+    overlay_volumes = [
+        {
+            "source": "/var/lib/ktest",
+            "destination": "/var/lib/ktest",
+        },
+    ]
 
-    container = client.containers.run(
+    # Only mount ccache, not ktest-out
+    mounts = [
+        {
+            "type": "bind",
+            "source": "/tmp/ccache",
+            "target": "/tmp/ccache",
+            "read_only": False,
+        },
+    ]
+
+    # Create container (but don't start it yet)
+    # Remove auto-remove so we can extract archives after completion
+    container = client.containers.create(
         image=image,
         command=command,
-        working_dir=working_dir,
         tty=True,
         stdin_open=False,
         devices=["/dev/kvm"],
         pids_limit=100000,
         overlay_volumes=overlay_volumes,
         mounts=mounts,
-        remove=True,
-        detach=True,
+        remove=False,
+        working_dir=working_dir,
     )
 
-    return container
+    try:
+        if sync_kernel:
+            put_archive(container, tarball_paths["kernel"], "/home/ktest/git")
+        if sync_lustre:
+            put_archive(container, tarball_paths["lustre"], "/home/ktest/git")
+        if sync_ccplugin:
+            put_archive(container, tarball_paths["ccplugin"], "/home/ktest")
+
+        tarball_path = f"{ktest_out_host}.tar"
+
+        if Path(tarball_path).exists() and sync_ktest_out:
+            put_archive(container, tarball_path, "/tmp")
+
+        container.start()
+
+        return container, ktest_out_host
+
+    except Exception as e:
+        # Clean up container on error
+        try:
+            container.stop(timeout=5)
+            container.remove()
+        except:
+            pass
+        raise
 
 
-def run_ktest(job_config, build_config, dirs, log_path, ktest_out_dir=None):
+def log_container(log_path, container):
+    # Write logs to file or stdout
+    if log_path:
+        with open(log_path, "wb") as log_file:
+            for line in container.logs(stream=True, stdout=True, stderr=True):
+                log_file.write(line)
+    else:
+        for line in container.logs(stream=True, stdout=True, stderr=True):
+            print(line.decode("utf-8"), end="")
+
+
+def run_ktest(
+    job_config, build_config, dirs, log_path, ktest_out_dir=None, tarball_paths=None
+):
     if not log_path:
         print(f"Running test: {job_config.get('run', '')}")
 
@@ -307,32 +380,41 @@ def run_ktest(job_config, build_config, dirs, log_path, ktest_out_dir=None):
 
     start_time = time.time()
     with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
-        container = run_in_container(
+        container, ktest_out_host = run_in_container(
             client,
             build_config["image"],
             ["bash", "-c", command],
             build_config["working_dir"],
-            dirs,
-            True,
             ktest_out_dir,
+            tarball_paths,
+            sync_kernel=False,
+            sync_lustre=False,
+            sync_ccplugin=False,
+            sync_ktest_out=True,
         )
 
-        # Write logs to file or stdout
-        if log_path:
-            with open(log_path, "wb") as log_file:
-                for line in container.logs(stream=True, stdout=True, stderr=True):
-                    log_file.write(line)
-        else:
-            for line in container.logs(stream=True, stdout=True, stderr=True):
-                print(line.decode("utf-8"), end="")
+        try:
+            log_container(log_path, container)
 
-        return_code = container.wait()
+            return_code = container.wait()
+        finally:
+            # Clean up container
+            try:
+                container.stop(timeout=5)
+            except:
+                pass
+            try:
+                container.remove()
+            except:
+                pass
 
     runtime = int(time.time() - start_time)
     return return_code, runtime
 
 
-def run_build_lustre(job_config, build_config, dirs, log_path, ktest_out_dir=None):
+def run_build_lustre(
+    job_config, build_config, dirs, log_path, ktest_out_dir=None, tarball_paths=None
+):
     if not log_path:
         print(f"Running build: {job_config.get('build', '')}")
 
@@ -343,42 +425,53 @@ def run_build_lustre(job_config, build_config, dirs, log_path, ktest_out_dir=Non
 
     start_time = time.time()
     with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
-        container = run_in_container(
+        container, ktest_out_host = run_in_container(
             client,
             build_config["image"],
             ["bash", "-c", command],
             build_config["working_dir"],
-            dirs,
-            False,
             ktest_out_dir,
+            tarball_paths,
+            sync_kernel=True,
+            sync_lustre=True,
+            sync_ccplugin=False,
+            sync_ktest_out=True,
         )
 
-        # Write logs to file or stdout
-        if log_path:
-            with open(log_path, "wb") as log_file:
-                for line in container.logs(stream=True, stdout=True, stderr=True):
-                    log_file.write(line)
-        else:
-            for line in container.logs(stream=True, stdout=True, stderr=True):
-                print(line.decode("utf-8"), end="")
+        try:
+            log_container(log_path, container)
 
-        return_code = container.wait()
+            return_code = container.wait()
 
-        container = run_in_container(
-            client,
-            build_config["image"],
-            ["chmod", "-R", "777", "/tmp/ktest-out"],
-            build_config["working_dir"],
-            dirs,
-            False,
-            ktest_out_dir,
-        )
+            if job_config["platform"] == "mainline":
+                start_time = time.time()
+                archive_stream, _ = container.get_archive("/tmp/ktest-out")
+
+                # Save the tarball directly without extracting, streaming chunks
+                tarball_path = f"{ktest_out_host}.tar"
+                with open(tarball_path, "wb") as f:
+                    for chunk in archive_stream:
+                        f.write(chunk)
+                elapsed = time.time() - start_time
+                print(f"get_archive(ktest-out): {elapsed:.2f}s")
+        finally:
+            # Clean up container
+            try:
+                container.stop(timeout=5)
+            except:
+                pass
+            try:
+                container.remove()
+            except:
+                pass
 
     runtime = int(time.time() - start_time)
     return return_code, runtime
 
 
-def run_tool(job_config, build_config, dirs, log_path, ktest_out_dir=None):
+def run_tool(
+    job_config, build_config, dirs, log_path, ktest_out_dir=None, tarball_paths=None
+):
     if not log_path:
         print(f"Running tool: {job_config['tool']}")
 
@@ -386,32 +479,41 @@ def run_tool(job_config, build_config, dirs, log_path, ktest_out_dir=None):
 
     start_time = time.time()
     with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
-        container = run_in_container(
+        container, ktest_out_host = run_in_container(
             client,
             build_config["image"],
             command,
             "/home/ktest/git/lustre-release/",
-            dirs,
-            True,
             ktest_out_dir,
+            tarball_paths,
+            sync_kernel=True,
+            sync_lustre=True,
+            sync_ccplugin=True,
+            sync_ktest_out=True,
         )
 
-        # Write logs to file or stdout
-        if log_path:
-            with open(log_path, "wb") as log_file:
-                for line in container.logs(stream=True, stdout=True, stderr=True):
-                    log_file.write(line)
-        else:
-            for line in container.logs(stream=True, stdout=True, stderr=True):
-                print(line.decode("utf-8"), end="")
+        try:
+            log_container(log_path, container)
 
-        return_code = container.wait()
+            return_code = container.wait()
+        finally:
+            # Clean up container
+            try:
+                container.stop(timeout=5)
+            except:
+                pass
+            try:
+                container.remove()
+            except:
+                pass
 
     runtime = int(time.time() - start_time)
     return return_code, runtime
 
 
-def run_job_config(job_config, dirs, log_path=None, ktest_out_dir=None):
+def run_job_config(
+    job_config, dirs, log_path=None, ktest_out_dir=None, tarball_paths=None
+):
     """Run a job from a job configuration object"""
     platform = job_config["platform"]
     build_config = get_build_config(platform)
@@ -425,15 +527,15 @@ def run_job_config(job_config, dirs, log_path=None, ktest_out_dir=None):
 
     if job_config.get("run", False):
         return_code, runtime = run_ktest(
-            job_config, build_config, dirs, log_path, ktest_out_dir
+            job_config, build_config, dirs, log_path, ktest_out_dir, tarball_paths
         )
     elif job_config.get("build", False):
         return_code, runtime = run_build_lustre(
-            job_config, build_config, dirs, log_path, ktest_out_dir
+            job_config, build_config, dirs, log_path, ktest_out_dir, tarball_paths
         )
     elif job_config.get("tool", False):
         return_code, runtime = run_tool(
-            job_config, build_config, dirs, log_path, ktest_out_dir
+            job_config, build_config, dirs, log_path, ktest_out_dir, tarball_paths
         )
 
     # Output JSON with return code and runtime
@@ -459,6 +561,29 @@ def cmd_job(args, dirs):
     if results_dir.exists():
         shutil.rmtree(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create source tarballs once at the start
+    tarball_paths = create_source_tarballs(dirs)
+
+    # Ensure tarballs are cleaned up when the function exits
+    def cleanup_tarballs(ktest_dirs=None):
+        # Clean up source tarballs
+        for tarball in tarball_paths.values():
+            try:
+                if Path(tarball).exists():
+                    Path(tarball).unlink()
+            except Exception as e:
+                print(f"Warning: Failed to delete {tarball}: {e}")
+
+        # Clean up ktest-out tarballs
+        if ktest_dirs:
+            for ktest_out in ktest_dirs.values():
+                ktest_out_tarball = f"{ktest_out}.tar"
+                try:
+                    if Path(ktest_out_tarball).exists():
+                        Path(ktest_out_tarball).unlink()
+                except Exception as e:
+                    print(f"Warning: Failed to delete {ktest_out_tarball}: {e}")
 
     job_args = args.job_names
 
@@ -589,7 +714,7 @@ def cmd_job(args, dirs):
         try:
             print(f"Running job: {job_name}")
             print(f"ktest-out directory: {ktest_out}")
-            return_code = run_job_config(job, dirs, None, ktest_out)
+            return_code = run_job_config(job, dirs, None, ktest_out, tarball_paths)
             completed_jobs[job_name] = (return_code, None)
 
             if return_code != 0:
@@ -603,6 +728,8 @@ def cmd_job(args, dirs):
             # Clean up temp directory on success
             if return_code == 0:
                 shutil.rmtree(ktest_out, ignore_errors=True)
+            # Clean up tarballs
+            cleanup_tarballs(job_ktest_dirs)
 
     # Multi-job execution with dynamic scheduling
     max_workers = min(len(all_jobs), 10)  # Reasonable limit on parallelism
@@ -619,7 +746,9 @@ def cmd_job(args, dirs):
                 ktest_out = get_ktest_out_for_job(job_name)
                 log_path = f"/tmp/ktest-results/{job_name}.log"
                 print(f"Starting job: {job_name} (ktest-out: {ktest_out})")
-                future = executor.submit(run_job_config, job, dirs, log_path, ktest_out)
+                future = executor.submit(
+                    run_job_config, job, dirs, log_path, ktest_out, tarball_paths
+                )
                 futures[future] = job_name
 
         # Process completed jobs and start new ones
@@ -660,7 +789,12 @@ def cmd_job(args, dirs):
                             f"Starting job: {ready_job_name} (ktest-out: {ktest_out})"
                         )
                         future = executor.submit(
-                            run_job_config, job, dirs, log_path, ktest_out
+                            run_job_config,
+                            job,
+                            dirs,
+                            log_path,
+                            ktest_out,
+                            tarball_paths,
                         )
                         futures[future] = ready_job_name
 
@@ -672,6 +806,9 @@ def cmd_job(args, dirs):
 
         for _, ktest_out in job_ktest_dirs.items():
             shutil.rmtree(ktest_out, ignore_errors=True)
+
+        # Clean up tarballs
+        cleanup_tarballs(job_ktest_dirs)
 
     # Print final summary
     print()
@@ -813,39 +950,38 @@ def cmd_build(args, dirs):
 
 
 def cmd_run(args, dirs):
-    """Run ktest in container"""
+    tarball_paths = create_source_tarballs(dirs)
+
     with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
-        container = run_in_container(
+        container, ktest_out_host = run_in_container(
             client,
             "ktest-runner:latest",
             args.command,
             "/home/ktest/ktest",
-            dirs,
-            False,
+            None,
+            tarball_paths,
+            sync_kernel=False,
+            sync_lustre=False,
+            sync_ccplugin=False,
+            sync_ktest_out=False,
         )
 
-        for line in container.logs(stream=True, stdout=True, stderr=True):
-            print(line.decode("utf-8"), end="")
+        try:
+            log_container(None, container)
 
-        return container.wait()
+            return_code = container.wait()
 
-
-def cmd_run_immutable(args, dirs):
-    """Run ktest in container"""
-    with podman.PodmanClient(base_url=PODMAN_SOCKET) as client:
-        container = run_in_container(
-            client,
-            "ktest-runner:latest",
-            args.command,
-            "/home/ktest/ktest",
-            dirs,
-            True,
-        )
-
-        for line in container.logs(stream=True, stdout=True, stderr=True):
-            print(line.decode("utf-8"), end="")
-
-        return container.wait()
+            return return_code
+        finally:
+            # Clean up container
+            try:
+                container.stop(timeout=5)
+            except:
+                pass
+            try:
+                container.remove()
+            except:
+                pass
 
 
 def cmd_info(args, dirs):
@@ -951,14 +1087,6 @@ def main():
         "command", nargs=argparse.REMAINDER, help="Command to run in container"
     )
 
-    # Run immutable command
-    run_immutable_parser = subparsers.add_parser(
-        "run_immutable", help="Run ktest in immutable container"
-    )
-    run_immutable_parser.add_argument(
-        "command", nargs=argparse.REMAINDER, help="Command to run in container"
-    )
-
     # Job command - run one or more jobs from JSON files
     job_parser = subparsers.add_parser(
         "job", help="Run one or more jobs from JSON files"
@@ -982,7 +1110,6 @@ def main():
         "build": cmd_build,
         "run": cmd_run,
         "info": cmd_info,
-        "run_immutable": cmd_run_immutable,
         "job": cmd_job,
     }
 
