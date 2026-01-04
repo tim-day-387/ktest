@@ -73,6 +73,46 @@ run_quiet()
     fi
 }
 
+function run_quiet_with_status()
+{
+    local msg="$1"
+    local status="$2"
+    shift
+    shift
+
+    if $ktest_verbose; then
+	if [[ -n $msg ]]; then
+	    echo "$msg:"
+	fi
+	"$@"
+    else
+	if [[ -n $msg ]]; then
+	    echo -n "$msg ... "
+	fi
+
+	get_tmpdir
+
+	msg=$(echo "$msg" | sed 's/[^A-Za-z0-9._-]/_/g')
+
+	local out="$ktest_tmp/out-$msg"
+
+	set +e
+	(set -e; "$@") > "$out" 2>&1
+	local ret=$?
+	set -e
+
+	if [[ $ret != 0 ]]; then
+	    echo
+	    cat "$out"
+	    exit 1
+	fi
+
+	if [[ -n $status ]]; then
+	    echo done
+	fi
+    fi
+}
+
 join_by()
 {
     local IFS="$1"

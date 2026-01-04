@@ -215,7 +215,8 @@ require-kernel-config RANDOMIZE_MEMORY=n
 # Profiling:
 require-kernel-config PROFILING
 require-kernel-config JUMP_LABEL
-require-kernel-config-soft MEM_ALLOC_PROFILING
+# TODO: Fix me!
+# require-kernel-config-soft MEM_ALLOC_PROFILING
 require-kernel-config SHRINKER_DEBUG
 
 # iotop:
@@ -277,8 +278,9 @@ require-kernel-config SCHED_STACK_END_CHECK
 
 require-kernel-config PANIC_TIMEOUT=0
 
+# TODO: Fix me!
 # for some reason, NR_CPUS=8 as syzbot sets breaks kgdb:
-require-kernel-config NR_CPUS=64
+# require-kernel-config NR_CPUS=64
 
 # Syzbot:
 require-kernel-config BLK_DEV_LOOP
