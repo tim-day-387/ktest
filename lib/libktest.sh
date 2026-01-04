@@ -474,10 +474,11 @@ do_make()
 
     make --jobs="$ktest_njobs"			\
 	--directory="$ktest_kernel_source"    	\
-	CC="$ktest_compiler"			\
+	CC="ccache $ktest_compiler"		\
 	LLVM="$(map_clang_version)"		\
 	O="$ktest_kernel_build"			\
 	INSTALL_MOD_PATH="$ktest_kernel_binary"	\
+	KBUILD_MODPOST_WARN=1  	\
 	"${ktest_kernel_make_append[@]}"	\
 	"${MAKEARGS[@]}"			\
 	"$@"
@@ -627,4 +628,64 @@ build_kernel()
 
     local kernel_version=$(cat "$ktest_kernel_build/include/config/kernel.release")
     $DEPMOD -b "$ktest_kernel_binary/" -v $kernel_version
+}
+
+configure_kernel_rpm()
+{
+    local kconfig="$ktest_kernel_build/.config"
+
+    cp "$ktest_dir/debian.config" "$kconfig"
+
+    log_verbose "kernel_config_require: ${ktest_kernel_config_require[@]}  ${ktest_kernel_config_require_soft[@]}"
+
+    MAKEARGS+=("LOCALVERSION=-ktest")
+
+    for opt in "${ktest_kernel_config_require[@]}"; do
+	[[ -n $opt ]] && kernel_opt set "$opt"
+    done
+
+    for opt in "${ktest_kernel_config_require_soft[@]}"; do
+	[[ -n $opt ]] && kernel_opt set "$opt"
+    done
+
+    do_make olddefconfig
+
+    for opt in "${ktest_kernel_config_require[@]}"; do
+	[[ -n $opt ]] && kernel_opt check "$opt"
+    done
+}
+
+build_kernel_rpm()
+{
+    rm -rf "$ktest_kernel_binary"
+    mkdir -p "$ktest_kernel_binary"
+
+    configure_kernel_rpm
+
+    kernel_opt set NET_VENDOR_AMAZON
+    kernel_opt set ENA_ETHERNET
+
+    do_make binrpm-pkg
+
+    # Copy RPMs to output directory
+    rpm_output_dir="/tmp/ktest-output"
+    find ~/rpmbuild/RPMS -name '*.rpm' -exec cp {} "$rpm_output_dir/" \;
+}
+
+build_kernel_deb()
+{
+    rm -rf "$ktest_kernel_binary"
+    mkdir -p "$ktest_kernel_binary"
+
+    configure_kernel_rpm
+
+    kernel_opt set NET_VENDOR_AMAZON
+    kernel_opt set ENA_ETHERNET
+
+    do_make bindeb-pkg
+
+    # Copy DEBs to output directory (they're created in parent of kernel source)
+    deb_output_dir="/tmp/ktest-output"
+    find "$(dirname "$ktest_kernel_source")" -maxdepth 1 -name '*.deb' -exec cp {} "$deb_output_dir/" \;
+    find "$(dirname "$ktest_kernel_build")" -maxdepth 1 -name '*.deb' -exec cp {} "$deb_output_dir/" \;
 }

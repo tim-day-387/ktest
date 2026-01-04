@@ -1,0 +1,657 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Modified for Lustre: Timothy Day <timday@amazon.com>
+#
+
+set -o nounset
+set -o errexit
+set -o errtrace
+
+ktest_dir=$(dirname "$(readlink -f "$0")")
+
+. "$ktest_dir/lib/libktest.sh"
+
+checkdep clang
+checkdep bison
+checkdep bear
+checkdep flex
+checkdep make
+checkdep gcc
+checkdep bc
+
+# Lustre parameters
+export CC="${CC:-clang-20}"
+export FSTYPE="${BACKING_STORAGE:-wbcfs}"
+
+# Ktest parameters
+ktest_kernel_source="$(realpath ~/git/linux/ 2>/dev/null || true)"
+ktest_lustre_source="$ktest_kernel_source/../lustre-release/"
+ktest_zfs_source="$ktest_kernel_source/../zfs/"
+ktest_boot_test="$ktest_dir/tests/fs/lustre/boot.ktest"
+ktest_ccplugin="$ktest_dir/../xunused/build/xunused"
+ktest_compiler="${CC:-clang-20}"
+ktest_skip_kernel_config=false
+ktest_lustre_allow_warnings=0
+ktest_lustre_build_enable=1
+ktest_kernel_build_enable=1
+ktest_out="/tmp/ktest-out/"
+ktest_root_image="$ktest_out/root.amd64.new"
+ktest_lustre_clean_git=0
+ktest_lustre_purge=0
+ktest_njobs=$(nproc)
+ktest_precise=false
+ktest_loop=false
+DEPMOD=depmod
+MAKEARGS=()
+COVERAGE=""
+
+if ! which depmod > /dev/null; then
+    DEPMOD=/sbin/depmod
+fi
+
+function usage()
+{
+    echo "qlkbuild: Quick Lustre Kernel Build"
+    echo "Usage: qlkbuild cmd [options]"
+    ktest_usage_cmds
+    echo "  build <test>        Build kernel for a test configuration"
+    echo "  ccplugin <test>     Build and run CC plugin"
+    echo "  oldconfig           Run make oldconfig"
+    echo "  config              Run make nconfig"
+    echo
+    ktest_usage_post
+}
+
+if [[ $# = 0 ]]; then
+    usage
+    exit 1
+fi
+
+# Parse command
+CMD="$1"
+shift
+
+while getopts "h${ktest_args}" arg; do
+    case $arg in
+	h)
+	    usage
+	    exit 0
+	    ;;
+    esac
+    parse_ktest_arg $arg
+done
+shift $(( OPTIND - 1 ))
+
+parse_args_post
+
+# default parameters
+[[ -z $ktest_kernel_source ]]	&& ktest_kernel_source="."
+
+if [[ ! -d $ktest_kernel_source ]]; then
+    echo "kernel source directory $ktest_kernel_source does not exist"
+    exit 1
+fi
+
+ktest_kernel_source=$(readlink -e "$ktest_kernel_source")
+
+ktest_kernel_build="$ktest_out/kernel_build.$ktest_arch"
+ktest_lustre_build="$ktest_out/lustre_build.$ktest_arch"
+ktest_zfs_build="$ktest_out/zfs_build.$ktest_arch"
+mkdir -p "$ktest_kernel_build"
+mkdir -p "$ktest_lustre_build"
+if [[ -d "$ktest_zfs_source" ]]; then
+    mkdir -p "$ktest_zfs_build"
+fi
+
+if [[ -n $CROSS_COMPILE ]]; then
+    checkdep "$ARCH_TRIPLE-gcc" "gcc-$ARCH_TRIPLE"
+fi
+
+function check_file() {
+    local file="$1"
+
+    if [[ ! -f "$file" ]]; then
+	echo "$file not found!"
+	exit 1
+    fi
+
+    return 0
+}
+
+function validate_lustre_build() {
+    check_file "$ktest_lustre_build/lnet/lnet/lnet.ko"
+    check_file "$ktest_lustre_build/lustre/llite/lustre.ko"
+
+    # Check OSD module based on FSTYPE (backing storage)
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	check_file "$ktest_lustre_build/lustre/osd-zfs/osd_zfs.ko"
+    else
+	check_file "$ktest_lustre_build/lustre/osd-wbcfs/osd_wbcfs.ko"
+    fi
+}
+
+function validate_native_lustre_build() {
+    check_file "$ktest_kernel_build/net/lnet/lnet/lnet.ko"
+    check_file "$ktest_kernel_build/fs/lustre/llite/lustre.ko"
+
+    # Check OSD module based on FSTYPE (backing storage)
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	check_file "$ktest_kernel_build/fs/lustre/osd-zfs/osd_zfs.ko"
+    else
+	check_file "$ktest_kernel_build/fs/lustre/osd-wbcfs/osd_wbcfs.ko"
+    fi
+}
+
+function sync_root_image() {
+    "$ktest_dir/root_image" sync
+}
+
+function create_root_image() {
+    local old="$PWD"
+
+    cd "$ktest_lustre_build"
+    run_quiet_with_status "UPDATE ROOT IMAGE" "DONE" sync_root_image
+    cd "$old"
+}
+
+function cmd_run()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    create_root_image
+
+    start_vm
+}
+
+function cmd_run_native()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_dir/tests/fs/lustre/inkernel.ktest"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_root_image="/var/lib/ktest/root.amd64"
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    create_root_image
+
+    start_vm
+}
+
+function build_lustre_intree()
+{
+    local old="$PWD"
+    local LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
+    local SUBARCH="x86"
+
+    cd "$ktest_lustre_build"
+
+    rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
+
+    # No strict errors
+    if [[ "${ktest_lustre_allow_warnings}" == "1" ]]; then
+	export CFLAGS="-Wno-error=attribute-warning -Wno-error=unused-but-set-variable -Wno-error=single-bit-bitfield-constant-conversion -Wno-error=format-security -Wno-error=cast-function-type-strict"
+    else
+	export CFLAGS="-Werror"
+    fi
+
+    # Find headers
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated/uapi"
+    export KCFLAGS="-I$LINUX_OBJ/include"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated/uapi"
+
+    # Configure OSD based on FSTYPE (backing storage)
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	export with_ldiskfs="no"
+	export with_zfs="$ktest_zfs_build"
+	export with_zfs_obj="$ktest_zfs_build"
+	export with_spl="$ktest_zfs_build"
+	export with_spl_obj="$ktest_zfs_build"
+    else
+	export with_ldiskfs="no"
+	export with_zfs="no"
+    fi
+
+    # Disable optional features
+    export with_o2ib="no"
+    export enable_gss="no"
+    export enable_crypto="no"
+
+    # Always build the server
+    export enable_server="yes"
+
+    # ktest uses statically linked tools
+    export enable_shared="no"
+
+    # Assume that Linux is in the same directory as Lustre
+    export with_linux="$ktest_kernel_source"
+
+    # Build the kernel via ktest into tmp
+    export ARCH="$(uname -m)"
+    export with_linux_obj="/tmp/ktest-out/kernel_build.$ARCH/"
+
+    # Misc
+    export LLVM="-20"
+
+    ./autogen.sh
+    ./configure || cat config.log
+
+    cd "$old"
+}
+
+function build_lustre()
+{
+    local old="$PWD"
+    local LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
+    local SUBARCH="x86"
+
+    cd "$ktest_lustre_build"
+
+    rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
+
+    # No strict errors
+    if [[ "${ktest_lustre_allow_warnings}" == "1" ]]; then
+	export CFLAGS="-Wno-error=attribute-warning -Wno-error=unused-but-set-variable -Wno-error=single-bit-bitfield-constant-conversion -Wno-error=format-security -Wno-error=cast-function-type-strict"
+    else
+	export CFLAGS="-Werror"
+    fi
+
+    # Find headers
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated/uapi"
+    export KCFLAGS="-I$LINUX_OBJ/include"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated/uapi"
+
+    # Disable persistent OSDs
+    export with_ldiskfs="no"
+    export with_zfs="no"
+
+    # Disable optional features
+    export with_o2ib="no"
+    export enable_gss="no"
+    export enable_crypto="no"
+
+    # Always build the server
+    export enable_server="yes"
+
+    # ktest uses statically linked tools
+    export enable_shared="no"
+
+    # Assume that Linux is in the same directory as Lustre
+    export with_linux="$ktest_kernel_source"
+
+    # Build the kernel via ktest into tmp
+    export ARCH="$(uname -m)"
+    export with_linux_obj="/tmp/ktest-out/kernel_build.$ARCH/"
+
+    # Misc
+    export LLVM="-20"
+
+    ./autogen.sh
+    ./configure || cat config.log
+    bear -- make -j$ktest_njobs
+
+    # Newer kernels have these lines that the plugin hates
+    sed -i '/-Wp,-MMD,.*\.d/d' "$ktest_lustre_build/compile_commands.json"
+
+    validate_lustre_build
+
+    cd "$old"
+}
+
+function safe_delete_dir() {
+    local dir="$1"
+
+    # Check that an argument was provided
+    if [ -z "$dir" ]; then
+        echo "Error: no directory provided" >&2
+        return 1
+    fi
+
+    # Check that it exists and is a directory
+    if [ ! -d "$dir" ]; then
+        echo "Warning: '$dir' does not exist or is not a directory" >&2
+        return 0
+    fi
+
+    # Safety check: only allow deletion inside /tmp
+    case "$dir" in
+        /tmp/*)
+            if [ "$dir" = "/tmp" ]; then
+                echo "Refusing to delete /tmp itself" >&2
+                return 1
+            fi
+            echo "Deleting directory: $dir"
+            rm -rf -- "$dir"
+            ;;
+        *)
+            echo "Refusing to delete: '$dir' (not under /tmp)" >&2
+            return 1
+            ;;
+    esac
+}
+
+function purge_previous_results()
+{
+    run_quiet_with_status "CLEANUP" "DONE" safe_delete_dir "$ktest_out"
+    mkdir -p "$ktest_kernel_build"
+    mkdir -p "$ktest_lustre_build"
+    if [[ -d "$ktest_zfs_source" ]]; then
+	mkdir -p "$ktest_zfs_build"
+    fi
+}
+
+function run_copy_builtin()
+{
+    local old="$PWD"
+
+    cd "$ktest_kernel_source"
+
+    # Apply ZFS patch if it exists (must be applied before Lustre)
+    if [[ -f "$ktest_out/zfs.patch" ]]; then
+	echo "Applying ZFS patch..."
+	git am "$ktest_out/zfs.patch"
+    fi
+
+    cd "$ktest_lustre_build"
+    ./copy-builtin "$ktest_kernel_source"
+    cd "$ktest_kernel_source"
+    git add *
+    git add -f include/lustre/config.h
+    git add include/lustre_compat
+    git commit -m "Lustre"
+
+    # Save patches to /tmp before purging
+    git format-patch HEAD~1 --stdout > /tmp/lustre.patch
+    if [[ -f "$ktest_out/zfs.patch" ]]; then
+	cp "$ktest_out/zfs.patch" /tmp/zfs.patch
+    fi
+
+    purge_previous_results
+
+    # Restore patches after purge
+    mv /tmp/lustre.patch "$ktest_out/lustre.patch"
+    if [[ -f /tmp/zfs.patch ]]; then
+	mv /tmp/zfs.patch "$ktest_out/zfs.patch"
+    fi
+
+    cd "$old"
+}
+
+function build_zfs()
+{
+    local old="$PWD"
+    local LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
+
+    cd "$ktest_zfs_build"
+    sed -i 's/CDDL/GPL/' "$ktest_zfs_source/META"
+    rsync --archive -r "$ktest_zfs_source" "$ktest_zfs_build"
+
+    # Configure ZFS - build modules first to generate Module.symvers
+    export ARCH="$(uname -m)"
+    export LLVM="-20"
+
+    ./autogen.sh
+    ./configure \
+        --with-linux="$ktest_kernel_source" \
+        --with-linux-obj="$LINUX_OBJ"
+
+    # Build ZFS modules to generate headers and Module.symvers
+    make -j$ktest_njobs
+
+    # Now reconfigure with --enable-linux-builtin for copy-builtin
+    ./configure \
+        --with-linux="$ktest_kernel_source" \
+        --with-linux-obj="$LINUX_OBJ" \
+        --enable-linux-builtin
+
+    cd "$old"
+}
+
+function run_zfs_copy_builtin()
+{
+    local old="$PWD"
+
+    cd "$ktest_zfs_build"
+
+    # Ensure zfs_gitrev.h exists before copy-builtin (make clean may delete it)
+    if [[ ! -f include/zfs_gitrev.h ]]; then
+        local gitrev="unknown"
+        if command -v git &> /dev/null && git rev-parse --git-dir &> /dev/null; then
+            gitrev=$(git describe --always --long --dirty 2>/dev/null || echo "unknown")
+        fi
+        mkdir -p include
+        printf '#define\tZFS_META_GITREV "%s"\n' "$gitrev" > include/zfs_gitrev.h
+    fi
+
+    ./copy-builtin "$ktest_kernel_source"
+    cp "$ktest_zfs_build/module/Module.symvers" "$ktest_kernel_source/fs/zfs/"
+
+    # Ensure zfs_gitrev.h exists in include/zfs/
+    if [[ ! -f "$ktest_kernel_source/include/zfs/zfs_gitrev.h" ]]; then
+        echo "Warning: zfs_gitrev.h not found in kernel tree, creating it"
+        printf '#define\tZFS_META_GITREV "unknown"\n' > "$ktest_kernel_source/include/zfs/zfs_gitrev.h"
+    fi
+
+    # Copy zfs_gitrev.h to source directories that use #include "zfs_gitrev.h"
+    # (quoted includes search the source file's directory first)
+    cp "$ktest_kernel_source/include/zfs/zfs_gitrev.h" "$ktest_kernel_source/fs/zfs/zfs/"
+    cp "$ktest_kernel_source/include/zfs/zfs_gitrev.h" "$ktest_kernel_source/fs/zfs/os/linux/spl/"
+
+    cd "$ktest_kernel_source"
+    git add *
+    git add fs/zfs/
+    git add -f fs/zfs/Kbuild
+    git add include/zfs/
+    git commit -m "ZFS"
+    git format-patch HEAD~1 --stdout > "$ktest_out/zfs.patch"
+    cd "$old"
+}
+
+function cmd_generate_zfs_patch()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_quiet_with_status "ZFS BUILD [$(basename "$ktest_test")]" "DONE" build_zfs
+
+    run_zfs_copy_builtin
+}
+
+function cmd_build()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
+
+    # Purge junk from ktest_out to save space
+    find "$ktest_out" -name '*.o' -type f -delete
+}
+
+function prepare_linux_source()
+{
+    local old="$PWD"
+
+    cd "$ktest_kernel_source"
+
+    # Apply ZFS patch if it exists (must be applied before Lustre)
+    if [[ -f "$ktest_out/zfs.patch" ]]; then
+	echo "Applying ZFS patch..."
+	git am "$ktest_out/zfs.patch"
+    fi
+
+    # Apply Lustre patch
+    echo "Applying Lustre patch..."
+    git am "$ktest_out/lustre.patch"
+
+    cd "$old"
+}
+
+function validate_native_zfs_build() {
+    check_file "$ktest_kernel_build/fs/zfs/zfs.ko"
+    check_file "$ktest_kernel_build/fs/zfs/spl.ko"
+}
+
+function cmd_build_native()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_dir/tests/fs/lustre/inkernel.ktest"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    prepare_linux_source
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    validate_native_lustre_build
+
+    # Validate ZFS build if ZFS patch was applied
+    if [[ -f "$ktest_out/zfs.patch" ]]; then
+	validate_native_zfs_build
+    fi
+
+    # Purge junk from ktest_out to save space
+    find "$ktest_out" -name '*.o' -type f -delete
+}
+
+function cmd_build_rpm()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    prepare_linux_source
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel_rpm
+}
+
+function cmd_build_deb()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    prepare_linux_source
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel_deb
+}
+
+function cmd_generate_lustre_patch()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre_intree
+
+    run_copy_builtin
+}
+
+function cmd_help()
+{
+    usage
+}
+
+if [[ $(type -t "cmd_$CMD") == function ]]; then
+    CMD="cmd_$CMD"
+elif [[ $(type -t "ktest_$CMD") == function ]]; then
+    CMD="ktest_$CMD"
+else
+    usage
+    exit 1
+fi
+
+$CMD "$@"
