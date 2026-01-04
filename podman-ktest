@@ -482,7 +482,7 @@ def run_tool(
         container, ktest_out_host = run_in_container(
             client,
             build_config["image"],
-            command,
+            [command],
             "/home/ktest/git/lustre-release/",
             ktest_out_dir,
             tarball_paths,
