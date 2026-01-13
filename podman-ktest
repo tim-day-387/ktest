@@ -46,6 +46,11 @@ IMAGES = [
         "name": "lustre-al2",
     },
     {
+        "dockerfile": "containers/Containerfile.lustre.rocky9",
+        "tag": "lustre-rocky9:latest",
+        "name": "lustre-rocky9",
+    },
+    {
         "dockerfile": "containers/Containerfile.ci-lustre",
         "tag": "ci-lustre:latest",
         "name": "ci-lustre",
@@ -94,6 +99,15 @@ make --quiet -j$(nproc)
 ./autogen.sh
 ./configure
 make --quiet -j$(nproc)
+""",
+        "working_dir": "/home/ktest/git/lustre-release/",
+    },
+    "rocky9": {
+        "image": "lustre-rocky9:latest",
+        "build_script": """
+./autogen.sh
+./configure --enable-server
+make --quiet -j$(nproc) rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
     },
