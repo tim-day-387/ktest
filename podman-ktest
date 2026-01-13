@@ -881,7 +881,7 @@ def cmd_job(args, dirs, podman_socket=None, shared_filesystem=None):
             return newly_ready, return_code != 0
 
     # Single job optimization - run with stdout
-    if len(all_jobs) == 1:
+    if len(all_jobs) == 1 and not args.stdout:
         job = all_jobs[0]
         job_name = job["name"]
         ktest_out = tempfile.mkdtemp(prefix=f"ktest_{job_name}_")
@@ -927,7 +927,7 @@ def cmd_job(args, dirs, podman_socket=None, shared_filesystem=None):
             if mark_job_running(job_name):
                 job = job_map[job_name]
                 ktest_out = get_ktest_out_for_job(job_name)
-                log_path = f"/tmp/ktest-results/{job_name}.log"
+                log_path = None if args.stdout else f"/tmp/ktest-results/{job_name}.log"
                 future = executor.submit(
                     run_job_config,
                     job,
@@ -955,11 +955,11 @@ def cmd_job(args, dirs, podman_socket=None, shared_filesystem=None):
 
                 try:
                     return_code = future.result()
-                    log_path = f"/tmp/ktest-results/{job_name}.log"
+                    log_path = None if args.stdout else f"/tmp/ktest-results/{job_name}.log"
                 except Exception as e:
                     print(f"Error running job {job_name}: {e}")
                     return_code = -1
-                    log_path = f"/tmp/ktest-results/{job_name}.log"
+                    log_path = None if args.stdout else f"/tmp/ktest-results/{job_name}.log"
 
                 # Mark completed and get newly ready jobs
                 newly_ready, failed = mark_job_completed(
@@ -975,7 +975,7 @@ def cmd_job(args, dirs, podman_socket=None, shared_filesystem=None):
                     if mark_job_running(ready_job_name):
                         job = job_map[ready_job_name]
                         ktest_out = get_ktest_out_for_job(ready_job_name)
-                        log_path = f"/tmp/ktest-results/{ready_job_name}.log"
+                        log_path = None if args.stdout else f"/tmp/ktest-results/{ready_job_name}.log"
                         future = executor.submit(
                             run_job_config,
                             job,
@@ -1525,6 +1525,11 @@ def main():
         "--tarball-input",
         action="store_true",
         help="Use tarballs for source input (default: use overlay mounts)",
+    )
+    job_parser.add_argument(
+        "--stdout",
+        action="store_true",
+        help="Print output to stdout instead of log files (even for multiple jobs)",
     )
 
     # Deploy command - deploy the CI container
