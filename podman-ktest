@@ -320,7 +320,8 @@ def ensure_ccache_dir(client, ccache_dir, use_container):
 
     if not use_container:
         ccache_path.mkdir(parents=True, exist_ok=True)
-        os.chmod(ccache_path, 0o755)
+        os.chmod(ccache_path, 0o777)
+        os.chmod(ccache_path.parent, 0o777)
         return
 
     parent_dir = str(ccache_path.parent.parent)
