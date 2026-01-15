@@ -1106,41 +1106,49 @@ def _build_image(dirs, dockerfile, tag, name, podman_socket=None):
 
 def cmd_build(args, dirs, podman_socket=None):
     """Build container images in parallel"""
-    # Build ktest-runner first since ci-lustre depends on it
-    base_image = IMAGES[0]  # ktest-runner is first in the list
+    # Determine which images to build
+    if args.ci_only:
+        # Only build ktest-runner and ci-lustre
+        images_to_build = [img for img in IMAGES if img["name"] in ("ktest-runner", "ci-lustre")]
+    else:
+        images_to_build = IMAGES
 
-    # Build ktest-runner first
-    _build_image(
-        dirs,
-        base_image["dockerfile"],
-        base_image["tag"],
-        base_image["name"],
-        podman_socket,
-    )
+    # Build ktest-runner first since ci-lustre depends on it
+    base_images = [img for img in images_to_build if img["name"] == "ktest-runner"]
+    dependent_images = [img for img in images_to_build if img["name"] != "ktest-runner"]
+
+    # Build base image(s) first
+    for base_image in base_images:
+        _build_image(
+            dirs,
+            base_image["dockerfile"],
+            base_image["tag"],
+            base_image["name"],
+            podman_socket,
+        )
 
     # Now build dependent images in parallel
-    dependent_images = IMAGES[1:]  # All images except ktest-runner
+    if dependent_images:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {
+                executor.submit(
+                    _build_image,
+                    dirs,
+                    img["dockerfile"],
+                    img["tag"],
+                    img["name"],
+                    podman_socket,
+                ): img["name"]
+                for img in dependent_images
+            }
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            executor.submit(
-                _build_image,
-                dirs,
-                img["dockerfile"],
-                img["tag"],
-                img["name"],
-                podman_socket,
-            ): img["name"]
-            for img in dependent_images
-        }
-
-        for future in as_completed(futures):
-            img_name = futures[future]
-            try:
-                future.result()
-            except Exception as e:
-                print(f"Error building {img_name}: {e}")
-                raise
+            for future in as_completed(futures):
+                img_name = futures[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"Error building {img_name}: {e}")
+                    raise
 
 
 def cmd_run(args, dirs, podman_socket=None, shared_filesystem=None):
@@ -1496,7 +1504,14 @@ def main():
     # Commands
     subparsers.add_parser("info", help="Display podman info")
     subparsers.add_parser("setup", help="Interactive setup to create ~/.ktestrc")
-    subparsers.add_parser("build", help="Build container images")
+
+    # Build command
+    build_parser = subparsers.add_parser("build", help="Build container images")
+    build_parser.add_argument(
+        "--ci-only",
+        action="store_true",
+        help="Only build ktest-runner and ci-lustre containers",
+    )
 
     # Stop command - stop running containers
     stop_parser = subparsers.add_parser(
