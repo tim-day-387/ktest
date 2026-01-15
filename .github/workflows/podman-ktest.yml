@@ -1,0 +1,53 @@
+name: Test podman-ktest with Lustre
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lustre-ci-short:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-pip podman
+        pip3 install podman
+
+    - name: Start podman socket
+      run: |
+        systemctl --user start podman.socket
+        echo "PODMAN_SOCKET=unix:///run/user/$(id -u)/podman/podman.sock" >> $GITHUB_ENV
+
+    - name: Create ktestrc
+      run: |
+        cat > ~/.ktestrc << 'EOF'
+        export ktest_kernel_source="$HOME/git/linux"
+        export ktest_lustre_source="$HOME/git/lustre-release"
+        EOF
+
+    - name: Clone Linux kernel
+      run: |
+        mkdir -p ~/git
+        git clone --depth 1 --branch v6.14 \
+          https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+          ~/git/linux
+
+    - name: Clone Lustre
+      run: |
+        git clone --depth 1 \
+          git://git.whamcloud.com/fs/lustre-release.git \
+          ~/git/lustre-release
+
+    - name: Build ktest-runner container image
+      run: |
+        ./podman-ktest build
+
+    - name: Run lustre-ci-short
+      run: |
+        ./podman-ktest job lustre-ci-short --stdout
