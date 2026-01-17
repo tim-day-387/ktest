@@ -13,6 +13,10 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    - name: Free disk space
+      run: |
+        ./ci-selftest/util_free_space.sh
+
     - name: Install dependencies
       run: |
         sudo apt-get update
@@ -44,12 +48,19 @@ jobs:
 
     - name: Build ktest-runner container image
       run: |
+        df -h
         ./podman-ktest build --ci-only
+        podman system prune -f
 
     - name: Build root image for ktest
       run: |
+        df -h
         sudo ./root_image init
         sudo ./root_image create
+
+    - name: Enable KVM
+      run: |
+        sudo chmod 777 /dev/kvm
 
     - name: Run lustre-ci-short
       run: |
