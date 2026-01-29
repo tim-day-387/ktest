@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Copyright (c) 2025, Amazon and/or its affiliates. All rights reserved.
+# Use is subject to license terms.
+#
+
+#
+# Run a simple boot test (client and server). The backing OSD is
+# specified with FSTYPE.
+#
+# Author: Timothy Day <timday@amazon.com>
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
+
+require-lustre-kernel-config
+require-lustre-debug-kernel-config
+require-kernel-config LNET=y
+require-kernel-config LUSTRE=y
+require-kernel-config ZFS=y
+require-kernel-config ROOT_LUSTRE=y
+
+# USB boot requires these drivers built-in (no initramfs available)
+require-kernel-config USB=y
+require-kernel-config USB_XHCI_HCD=y
+require-kernel-config USB_XHCI_PCI=y
+require-kernel-config USB_EHCI_HCD=y
+require-kernel-config USB_EHCI_PCI=y
+require-kernel-config USB_STORAGE=y
+require-kernel-config SCSI=y
+require-kernel-config BLK_DEV_SD=y
+
+config-mem 10G
+config-timeout 60
+
+test_llmount()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Show mounts..."
+    mount
+
+    echo "Show space..."
+    df -h
+
+    echo "FIO!"
+    cd ~
+    fio --name=bulk_write_test \
+	--size=100M \
+	--bs=1M \
+	--rw=write \
+	--iodepth=32 \
+	--numjobs=$(nproc) \
+	--direct=1 \
+	--time_based \
+	--runtime=30 \
+	--group_reporting
+}
+
+main "$@"

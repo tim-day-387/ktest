@@ -20,7 +20,15 @@ fi
 
 checkdep fallocate util-linux
 checkdep mkfs.ext4 e2fsprogs
-checkdep curl 
+checkdep curl
+
+# ZFS pool and dataset names for Lustre
+LUSTRE_POOL="lustre_pool"
+LUSTRE_MGS_DS="mgs_mdt"
+LUSTRE_OST0_DS="ost0"
+LUSTRE_OST1_DS="ost1"
+LUSTRE_FSNAME="lustre"
+LUSTRE_CLIENT_MNT="/mnt/lustre" 
 
 IMAGE_SIZE="16G"
 MIRROR=https://deb.debian.org/debian/
@@ -31,14 +39,19 @@ usage()
     echo "root_image: create/update virtual machine root images for ktest"
     echo "Usage: root_image cmd [options]"
     echo "  create		Create a new image"
+    echo "  create_lustre	Create a new image on Lustre (ZFS backend)"
+    echo "  create_usb		Create a bootable USB image (EFI/GRUB)"
     echo "  update		Update an existing image"
     echo "  sync		Copy directory to an existing image"
+    echo "  mount_lustre	Mount an existing Lustre image"
+    echo "  umount_lustre	Unmount a Lustre image"
     echo
     echo "options:"
     echo "  -h			Display this help and exit"
     echo "  -a <arch>		Architecture for vm image"
     echo "  -m <mirror>		Debian mirror"
     echo '  -i <image>		Image to create/update, defaults to /var/lib/ktest/root.$arch'
+    echo "  -k <dir>		Directory containing kernel .deb packages (for create_usb)"
 }
 
 if [[ $# = 0 ]]; then
@@ -47,10 +60,11 @@ if [[ $# = 0 ]]; then
 fi
 
 ktest_image=""
+ktest_kernel_debs=""
 CMD="cmd_$1"
 shift
 
-while getopts "ha:m:i:" arg; do
+while getopts "ha:m:i:k:" arg; do
     case $arg in
 	h)
 	    usage
@@ -64,6 +78,9 @@ while getopts "ha:m:i:" arg; do
 	    ;;
 	i)
 	    ktest_image=$OPTARG
+	    ;;
+	k)
+	    ktest_kernel_debs=$OPTARG
 	    ;;
     esac
 done
@@ -378,6 +395,517 @@ cmd_create()
     update_packages
     update_files
     umount_image
+}
+
+# Unmount all Lustre targets and export the pool (non-destructive)
+_umount_lustre_client()
+{
+    sync
+
+    if umount --recursive "$LUSTRE_CLIENT_MNT" 2>/dev/null; then
+    	  return 0
+    fi
+
+    if umount -f --recursive "$LUSTRE_CLIENT_MNT" 2>/dev/null; then
+    	  return 0
+    fi
+
+    return 1
+}
+
+_export_lustre()
+{
+    set +e
+    zpool export "$LUSTRE_POOL" 2>/dev/null
+    set -e
+}
+
+_clean_lustre()
+{
+    set +e
+
+    if ! _umount_lustre_client; then
+	set -e
+	return 1
+    fi
+
+    sync
+    umount /mnt/lustre-ost1 2>/dev/null
+    umount /mnt/lustre-ost0 2>/dev/null
+    umount /mnt/lustre-mgs 2>/dev/null
+
+    _export_lustre
+    set -e
+}
+
+# Non-destructive cleanup for failed mount operations
+_cleanup_lustre_mount()
+{
+    _clean_lustre
+    rm -f "$ktest_image".new
+}
+
+umount_lustre_image()
+{
+    _clean_lustre
+    trap '' EXIT
+    mv "$ktest_image".new "$ktest_image"
+}
+
+mount_lustre_image()
+{
+    if [[ ! -e $ktest_image ]]; then
+	echo "$ktest_image does not exist"
+	exit 1
+    fi
+
+    # Check for ZFS and Lustre tools
+    if ! command -v zpool &>/dev/null; then
+	echo "zpool command not found - install ZFS"
+	exit 1
+    fi
+
+    # Clean up any leftover pool from a previous failed run
+    if zpool list "$LUSTRE_POOL" &>/dev/null; then
+	echo "Cleaning up existing ZFS pool '$LUSTRE_POOL' from previous run..."
+	_export_lustre
+    fi
+
+    trap '_cleanup_lustre_mount' EXIT
+
+    # Load modules
+    modprobe lustre
+    modprobe zfs
+
+    cp "$ktest_image" "$ktest_image".new
+
+    # Import the ZFS pool from the image file
+    zpool import -d "$(dirname "$ktest_image".new)" "$LUSTRE_POOL"
+
+    # Mount Lustre servers
+    mkdir -p /mnt/lustre-mgs /mnt/lustre-ost0 /mnt/lustre-ost1
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_MGS_DS" /mnt/lustre-mgs
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_OST0_DS" /mnt/lustre-ost0
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_OST1_DS" /mnt/lustre-ost1
+
+    # Mount Lustre client
+    local mgs_nid=$(lnetctl net show | grep 'nid:.*@tcp' | head -1 | awk '{print $NF}')
+    mkdir -p "$LUSTRE_CLIENT_MNT"
+    mount -t lustre "$mgs_nid:/$LUSTRE_FSNAME" "$LUSTRE_CLIENT_MNT"
+
+    MNT="$LUSTRE_CLIENT_MNT"
+}
+
+cmd_mount_lustre()
+{
+    mount_lustre_image
+    echo "Lustre image mounted at $LUSTRE_CLIENT_MNT"
+    echo "Servers mounted at /mnt/lustre-mgs, /mnt/lustre-ost0, /mnt/lustre-ost1"
+    trap '' EXIT
+}
+
+cmd_umount_lustre()
+{
+    if ! zpool list "$LUSTRE_POOL" &>/dev/null; then
+	echo "ZFS pool '$LUSTRE_POOL' is not imported"
+	exit 1
+    fi
+
+    umount_lustre_image
+    echo "Lustre image unmounted and exported"
+}
+
+cmd_create_lustre()
+{
+    if ! [[ -f $debootstrap ]]; then
+	echo "Run root_image init to prep debootstrap"
+	exit 1
+    fi
+
+    if [[ -e $ktest_image ]]; then
+	echo "$ktest_image already exists"
+	exit 1
+    fi
+
+    # Check for ZFS and Lustre tools
+    if ! command -v zpool &>/dev/null; then
+	echo "zpool command not found - install ZFS"
+	exit 1
+    fi
+
+    if ! command -v mkfs.lustre &>/dev/null; then
+	echo "mkfs.lustre command not found - install Lustre"
+	exit 1
+    fi
+
+    # Clean up any leftover pool from a previous failed run
+    if zpool list "$LUSTRE_POOL" &>/dev/null; then
+	echo "Cleaning up existing ZFS pool '$LUSTRE_POOL' from previous run..."
+	_export_lustre
+    fi
+
+    MNT=$(mktemp --tmpdir -d $(basename "$0")-XXXXXXXXXX)
+    trap '_cleanup_lustre_mount' EXIT
+
+    # Install modules
+    modprobe lustre
+    modprobe zfs
+
+    # Create sparse file for ZFS pool
+    fallocate -l "$IMAGE_SIZE" "$ktest_image".new
+    chmod 644 "$ktest_image".new
+
+    # Create ZFS pool on the file
+    zpool create -f "$LUSTRE_POOL" "$ktest_image".new
+
+    # Create three ZFS datasets for Lustre (with mountpoint=none to prevent auto-mount)
+    # One for MGS/MDS combined
+    zfs create -o mountpoint=none "$LUSTRE_POOL/$LUSTRE_MGS_DS"
+    # Two for OSS
+    zfs create -o mountpoint=none "$LUSTRE_POOL/$LUSTRE_OST0_DS"
+    zfs create -o mountpoint=none "$LUSTRE_POOL/$LUSTRE_OST1_DS"
+
+    # Format Lustre targets on ZFS datasets
+    # MGS/MDS combined target
+    mkfs.lustre --mgs --mdt --reformat --fsname="$LUSTRE_FSNAME" --index=0 \
+	"$LUSTRE_POOL/$LUSTRE_MGS_DS"
+
+    # OST targets
+    local mgs_nid=$(lnetctl net show | grep 'nid:.*@tcp' | head -1 | awk '{print $NF}')
+    mkfs.lustre --ost --reformat --fsname="$LUSTRE_FSNAME" --index=0 \
+	--mgsnode="$mgs_nid" "$LUSTRE_POOL/$LUSTRE_OST0_DS"
+    mkfs.lustre --ost --reformat --fsname="$LUSTRE_FSNAME" --index=1 \
+	--mgsnode="$mgs_nid" "$LUSTRE_POOL/$LUSTRE_OST1_DS"
+
+    # Mount Lustre servers
+    mkdir -p /mnt/lustre-mgs /mnt/lustre-ost0 /mnt/lustre-ost1
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_MGS_DS" /mnt/lustre-mgs
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_OST0_DS" /mnt/lustre-ost0
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_OST1_DS" /mnt/lustre-ost1
+
+    # Performance tunings: increase in-flight RPCs
+    # MDT must be set first, otherwise MDC tuning will be rejected
+    lctl set_param mdt.*.max_mod_rpcs_in_flight=128
+
+    # Mount Lustre client
+    mkdir -p "$LUSTRE_CLIENT_MNT"
+    mount -t lustre "$mgs_nid:/$LUSTRE_FSNAME" "$LUSTRE_CLIENT_MNT"
+
+    # Disable hybrid IO to avoid issues during debootstrap
+    lctl set_param llite.*.hybrid_io=0
+
+    # Performance tunings: increase in-flight RPCs
+    lctl set_param mdc.*.max_rpcs_in_flight=256
+    lctl set_param mdc.*.max_mod_rpcs_in_flight=128
+    lctl set_param osc.*.max_rpcs_in_flight=256
+
+    # Use Lustre mount as target for debootstrap
+    MNT="$LUSTRE_CLIENT_MNT"
+
+    mkdir -p "$MNT"/etc/dpkg/dpkg.cfg.d/
+    echo force-unsafe-io > "$MNT"/etc/dpkg/dpkg.cfg.d/dpkg-unsafe
+
+    echo "Debootstrap first stage..."
+    DEBOOTSTRAP_DIR=$ktest_dir/debootstrap $debootstrap	\
+	--no-check-gpg					\
+	--arch="$DEBIAN_ARCH"				\
+	--exclude=$(join_by , "${EXCLUDE[@]}")		\
+	--no-merged-usr					\
+	--foreign					\
+	$RELEASE "$MNT" "$MIRROR"
+    mkdir -p "$MNT"/etc/dpkg/dpkg.cfg.d/
+    echo force-unsafe-io > "$MNT"/etc/dpkg/dpkg.cfg.d/dpkg-unsafe
+
+    # Disable man-db cache rebuilds - it's slow and unnecessary for test VMs
+    echo "man-db man-db/auto-update boolean false" | _chroot "$MNT" debconf-set-selections
+
+    echo "Debootstrap second stage..."
+    _chroot "$MNT" /debootstrap/debootstrap --second-stage
+    _chroot "$MNT" dpkg --configure -a
+
+    echo "Update packages..."
+    update_packages
+    echo "Update files..."
+    update_files
+    echo "Umount Lustre..."
+    umount_lustre_image
+}
+
+USB_IMAGE_SIZE="16G"
+USB_EFI_SIZE="512MiB"
+USB_BOOT_SIZE="1GiB"
+
+_cleanup_usb_lustre()
+{
+    set +e
+
+    _clean_lustre
+    rmdir "$LUSTRE_CLIENT_MNT" 2>/dev/null
+
+    # Detach loop device
+    if [[ -n "${USB_LOOP_DEV:-}" ]]; then
+	losetup -d "$USB_LOOP_DEV" 2>/dev/null
+    fi
+
+    rm -f "$ktest_image".new
+    set -e
+}
+
+cmd_create_usb()
+{
+    if ! [[ -f $debootstrap ]]; then
+	echo "Run root_image init to prep debootstrap"
+	exit 1
+    fi
+
+    if [[ -e $ktest_image ]]; then
+	echo "$ktest_image already exists"
+	exit 1
+    fi
+
+    if [[ -z $ktest_kernel_debs ]]; then
+	echo "Must specify kernel debs directory with -k"
+	exit 1
+    fi
+
+    if [[ ! -d $ktest_kernel_debs ]]; then
+	echo "Kernel debs directory does not exist: $ktest_kernel_debs"
+	exit 1
+    fi
+
+    # Check for kernel debs
+    local kernel_debs=("$ktest_kernel_debs"/*.deb)
+    if [[ ${#kernel_debs[@]} -eq 0 || ! -f "${kernel_debs[0]}" ]]; then
+	echo "No .deb files found in $ktest_kernel_debs"
+	exit 1
+    fi
+
+    # Check for required tools
+    checkdep parted parted
+    checkdep mkfs.vfat dosfstools
+    checkdep losetup util-linux
+    checkdep grub-install grub-efi-amd64-bin
+
+    if ! command -v zpool &>/dev/null; then
+	echo "zpool command not found - install ZFS"
+	exit 1
+    fi
+
+    if ! command -v mkfs.lustre &>/dev/null; then
+	echo "mkfs.lustre command not found - install Lustre"
+	exit 1
+    fi
+
+    # Clean up any leftover pool from a previous failed run
+    USB_POOL="lustre_pool"
+    if zpool list "$USB_POOL" &>/dev/null; then
+	echo "Cleaning up existing ZFS pool '$USB_POOL' from previous run..."
+	zpool export "$USB_POOL" 2>/dev/null || true
+    fi
+
+    trap '_cleanup_usb_lustre' EXIT
+
+    # Load modules
+    modprobe lustre
+    modprobe zfs
+
+    echo "Creating USB image ($USB_IMAGE_SIZE)..."
+    fallocate -l "$USB_IMAGE_SIZE" "$ktest_image".new
+    chmod 644 "$ktest_image".new
+
+    echo "Creating GPT partition table..."
+    parted -s "$ktest_image".new mklabel gpt
+    parted -s "$ktest_image".new mkpart ESP fat32 1MiB "$USB_EFI_SIZE"
+    parted -s "$ktest_image".new set 1 esp on
+    parted -s "$ktest_image".new mkpart boot ext4 "$USB_EFI_SIZE" "$USB_BOOT_SIZE"
+    parted -s "$ktest_image".new mkpart zfs "$USB_BOOT_SIZE" 100%
+
+    echo "Setting up loop device..."
+    USB_LOOP_DEV=$(losetup --find --show --partscan "$ktest_image".new)
+
+    # Wait for partition devices to appear
+    sleep 1
+    udevadm settle || true
+
+    local efi_part="${USB_LOOP_DEV}p1"
+    local boot_part="${USB_LOOP_DEV}p2"
+    local zfs_part="${USB_LOOP_DEV}p3"
+
+    echo "Formatting EFI and boot partitions..."
+    mkfs.vfat -F 32 -n EFI "$efi_part"
+    mkfs.ext4 -F -L boot "$boot_part"
+
+    echo "Creating ZFS pool on partition..."
+    zpool create -f -o ashift=12 "$USB_POOL" "$zfs_part"
+
+    # Create Lustre datasets (same as create_lustre)
+    echo "Creating Lustre datasets..."
+    zfs create -o mountpoint=none "$USB_POOL/$LUSTRE_MGS_DS"
+    zfs create -o mountpoint=none "$USB_POOL/$LUSTRE_OST0_DS"
+    zfs create -o mountpoint=none "$USB_POOL/$LUSTRE_OST1_DS"
+
+    # Format Lustre targets on ZFS datasets
+    echo "Formatting Lustre targets..."
+    mkfs.lustre --mgs --mdt --reformat --fsname="$LUSTRE_FSNAME" --index=0 \
+	"$USB_POOL/$LUSTRE_MGS_DS"
+
+    local mgs_nid=$(lnetctl net show | grep 'nid:.*@tcp' | head -1 | awk '{print $NF}')
+    mkfs.lustre --ost --reformat --fsname="$LUSTRE_FSNAME" --index=0 \
+	--mgsnode="$mgs_nid" "$USB_POOL/$LUSTRE_OST0_DS"
+    mkfs.lustre --ost --reformat --fsname="$LUSTRE_FSNAME" --index=1 \
+	--mgsnode="$mgs_nid" "$USB_POOL/$LUSTRE_OST1_DS"
+
+    # Mount Lustre servers
+    echo "Mounting Lustre servers..."
+    mkdir -p /mnt/lustre-mgs /mnt/lustre-ost0 /mnt/lustre-ost1
+    mount -t lustre "$USB_POOL/$LUSTRE_MGS_DS" /mnt/lustre-mgs
+    mount -t lustre "$USB_POOL/$LUSTRE_OST0_DS" /mnt/lustre-ost0
+    mount -t lustre "$USB_POOL/$LUSTRE_OST1_DS" /mnt/lustre-ost1
+
+    # Performance tunings
+    lctl set_param mdt.*.max_mod_rpcs_in_flight=128
+
+    # Mount Lustre client
+    USB_LUSTRE_MNT=$(mktemp --tmpdir -d $(basename "$0")-lustre-XXXXXXXXXX)
+    LUSTRE_CLIENT_MNT="$USB_LUSTRE_MNT"
+    mkdir -p "$LUSTRE_CLIENT_MNT"
+    mount -t lustre "$mgs_nid:/$LUSTRE_FSNAME" "$LUSTRE_CLIENT_MNT"
+
+    # Disable hybrid IO
+    lctl set_param llite.*.hybrid_io=0
+
+    # Performance tunings
+    lctl set_param mdc.*.max_rpcs_in_flight=256
+    lctl set_param mdc.*.max_mod_rpcs_in_flight=128
+    lctl set_param osc.*.max_rpcs_in_flight=256
+
+    MNT="$USB_LUSTRE_MNT"
+
+    # Mount boot partition inside Lustre root
+    USB_BOOT_MNT="$USB_LUSTRE_MNT/boot"
+    mkdir -p "$USB_BOOT_MNT"
+    mount "$boot_part" "$USB_BOOT_MNT"
+    mkdir -p "$USB_BOOT_MNT/efi"
+    mount "$efi_part" "$USB_BOOT_MNT/efi"
+
+    mkdir -p "$MNT"/etc/dpkg/dpkg.cfg.d/
+    echo force-unsafe-io > "$MNT"/etc/dpkg/dpkg.cfg.d/dpkg-unsafe
+
+    echo "Debootstrap first stage..."
+    DEBOOTSTRAP_DIR=$ktest_dir/debootstrap $debootstrap	\
+	--no-check-gpg					\
+	--arch="$DEBIAN_ARCH"				\
+	--exclude=$(join_by , "${EXCLUDE[@]}")		\
+	--no-merged-usr					\
+	--foreign					\
+	$RELEASE "$MNT" "$MIRROR"
+    mkdir -p "$MNT"/etc/dpkg/dpkg.cfg.d/
+    echo force-unsafe-io > "$MNT"/etc/dpkg/dpkg.cfg.d/dpkg-unsafe
+
+    # Disable man-db cache rebuilds
+    echo "man-db man-db/auto-update boolean false" | _chroot "$MNT" debconf-set-selections 2>/dev/null || true
+
+    echo "Debootstrap second stage..."
+    _chroot "$MNT" /debootstrap/debootstrap --second-stage
+    _chroot "$MNT" dpkg --configure -a
+
+    echo "Installing packages..."
+    update_packages
+
+    # Install GRUB packages
+    echo "Installing GRUB..."
+    _chroot "$MNT" apt-get -qq install --no-install-recommends grub-efi-amd64 efibootmgr
+
+    echo "Installing kernel packages..."
+    mkdir -p "$MNT/tmp/kernel-debs"
+    cp "$ktest_kernel_debs"/*.deb "$MNT/tmp/kernel-debs/"
+    _chroot "$MNT" bash -c 'dpkg -i /tmp/kernel-debs/*.deb' || _chroot "$MNT" apt-get -qq -f install
+    rm -rf "$MNT/tmp/kernel-debs"
+
+    echo "Updating files..."
+    update_files
+
+    # For USB boot: unmask getty so we get a login prompt, and disable
+    # testrunner (it requires a 9p-mounted host which doesn't exist on
+    # real hardware)
+    rm -f "$MNT/etc/systemd/system/getty.target"
+    rm -f "$MNT/etc/systemd/system/getty-static.service"
+    rm -f "$MNT/etc/systemd/system/multi-user.target.wants/testrunner.service"
+
+    # Enable autologin on tty1
+    mkdir -p "$MNT/etc/systemd/system/getty@tty1.service.d"
+    cat > "$MNT/etc/systemd/system/getty@tty1.service.d/autologin.conf" <<-ZZ
+	[Service]
+	ExecStart=
+	ExecStart=-/sbin/agetty --autologin root --noclear %I \$TERM
+	ZZ
+
+    # Allow root login with empty password on console
+    _chroot "$MNT" passwd -d root
+
+    echo "Configuring fstab..."
+    local boot_uuid=$(blkid -s UUID -o value "$boot_part")
+    local efi_uuid=$(blkid -s UUID -o value "$efi_part")
+
+    cat > "$MNT/etc/fstab" <<-EOF
+	# Root is on Lustre - mounted by kernel (CONFIG_ROOT_LUSTRE)
+	# <file system>		<mount point>	<type>	<options>		<dump>	<pass>
+	UUID=$boot_uuid		/boot		ext4	defaults		0	2
+	UUID=$efi_uuid		/boot/efi	vfat	umask=0077		0	1
+	EOF
+
+    echo "Installing GRUB to EFI partition..."
+    mount --bind /dev "$MNT/dev"
+    mount --bind /sys "$MNT/sys"
+    _chroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+	--boot-directory=/boot --bootloader-id=GRUB --removable --no-nvram
+    umount "$MNT/sys"
+    umount "$MNT/dev"
+
+    # Configure GRUB
+    cat > "$MNT/etc/default/grub" <<-EOF
+	GRUB_DEFAULT=0
+	GRUB_TIMEOUT=5
+	GRUB_DISTRIBUTOR="ktest-lustre"
+	GRUB_CMDLINE_LINUX_DEFAULT=""
+	GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200n8"
+	GRUB_TERMINAL="console serial"
+	GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1"
+	EOF
+
+    echo "Generating GRUB config..."
+    # Can't use update-grub: grub-probe fails on Lustre root filesystem.
+    # Generate grub.cfg manually with Lustre root boot parameters.
+    local kver=$(_chroot "$MNT" bash -c 'ls /boot/vmlinuz-* | sed "s|/boot/vmlinuz-||" | sort -V | tail -1')
+    local boot_uuid=$(blkid -s UUID -o value "$boot_part")
+    cat > "$MNT/boot/grub/grub.cfg" <<-GRUBEOF
+	serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1
+	terminal_input console serial
+	terminal_output console serial
+	set timeout=5
+	set default=0
+
+	search --no-floppy --fs-uuid --set=root $boot_uuid
+
+	menuentry "ktest-lustre ($kver)" {
+	    linux /vmlinuz-$kver root=/dev/lustre rw lustreroot=$USB_POOL,device=PARTLABEL=zfs,fsname=$LUSTRE_FSNAME console=tty0 console=ttyS0,115200n8
+	}
+	GRUBEOF
+
+    echo "Unmounting and exporting..."
+    _clean_lustre
+    rmdir "$LUSTRE_CLIENT_MNT" 2>/dev/null
+
+    # Detach loop device
+    losetup -d "$USB_LOOP_DEV"
+    USB_LOOP_DEV=""
+
+    trap '' EXIT
+    mv "$ktest_image".new "$ktest_image"
+
+    echo ""
+    echo "USB image created: $ktest_image"
+    echo "To write to USB drive: dd if=$ktest_image of=/dev/sdX bs=4M status=progress oflag=direct"
 }
 
 if [[ $(type -t "$CMD") != function ]]; then

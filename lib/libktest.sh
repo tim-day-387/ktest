@@ -34,6 +34,11 @@ ktest_nice=0
 ktest_no_kbuild=false
 ktest_no_vm=false
 
+# Lustre root filesystem support
+ktest_lustre_root=0		# if true, boot from Lustre root filesystem
+ktest_lustre_root_pool="lustre_pool"	# ZFS pool name for Lustre root
+ktest_lustre_root_fsname="lustre"	# Lustre filesystem name
+
 checkdep socat
 checkdep brotli
 
@@ -302,13 +307,30 @@ start_vm()
 	    ;;
     esac
 
-    kernelargs+=(root=$ktest_root_dev rw log_buf_len=8M)
+    # Set up root filesystem kernel arguments
+    if [[ $ktest_lustre_root == 1 ]]; then
+	# Lustre root filesystem - boot from Lustre mounted via loopback
+	kernelargs+=(root=/dev/lustre rw log_buf_len=8M)
+	kernelargs+=("lustreroot=$ktest_lustre_root_pool,device=$ktest_root_dev,fsname=$ktest_lustre_root_fsname")
+    else
+	# Standard block device root filesystem
+	kernelargs+=(root=$ktest_root_dev rw log_buf_len=8M)
+    fi
     kernelargs+=(mitigations=off)
     kernelargs+=("ktest.dir=$ktest_dir")
     kernelargs+=(ktest.env=$(readlink -f "$ktest_out/vm/env"))
-    $ktest_kgdb		&& kernelargs+=(kgdboc=ttyS0,115200 nokaslr)
+    $ktest_kgdb		&& kernelargs+=(kgdboc=ttyS1,115200 nokaslr)
     $ktest_verbose	|| kernelargs+=(quiet systemd.show_status=0 systemd.log-target=null)
     $ktest_crashdump	&& kernelargs+=(crashkernel=128M)
+
+    case $ktest_arch in
+	x86|x86_64)
+	    kernelargs+=(earlycon=uart8250,io,0x3f8,115200n8)
+	    ;;
+	aarch64)
+	    kernelargs+=(earlycon=pl011,0x09000000)
+	    ;;
+    esac
 
     kernelargs+=("${ktest_kernel_append[@]}")
 
@@ -337,8 +359,9 @@ start_vm()
 	-kernel		"$ktest_kernel_binary/vmlinuz"			\
 	-append		"$(join_by " " ${kernelargs[@]})"		\
 	-device		virtio-serial					\
-	-chardev	stdio,id=console				\
+	-chardev	stdio,mux=on,id=console				\
 	-device		virtconsole,chardev=console			\
+	-serial		chardev:console					\
 	-serial		"unix:$ktest_out/vm/kgdb,server,nowait"		\
 	-monitor	"unix:$ktest_out/vm/mon,server,nowait"		\
 	-gdb		"unix:$ktest_out/vm/gdb,server,nowait"		\
@@ -559,7 +582,7 @@ configure_kernel()
 
     log_verbose "kernel_config_require: ${ktest_kernel_config_require[@]}  ${ktest_kernel_config_require_soft[@]}"
 
-    MAKEARGS+=("LOCALVERSION=-ktest")
+    MAKEARGS+=("LOCALVERSION=${KTEST_LOCALVERSION:--ktest}")
 
     for opt in "${ktest_kernel_config_require[@]}"; do
 	[[ -n $opt ]] && kernel_opt set "$opt"
@@ -636,11 +659,11 @@ configure_kernel_rpm()
 {
     local kconfig="$ktest_kernel_build/.config"
 
-    cp "$ktest_dir/debian.config" "$kconfig"
+    cp "$ktest_dir/config/debian.config" "$kconfig"
 
     log_verbose "kernel_config_require: ${ktest_kernel_config_require[@]}  ${ktest_kernel_config_require_soft[@]}"
 
-    MAKEARGS+=("LOCALVERSION=-ktest")
+    MAKEARGS+=("LOCALVERSION=${KTEST_LOCALVERSION:--ktest}")
 
     for opt in "${ktest_kernel_config_require[@]}"; do
 	[[ -n $opt ]] && kernel_opt set "$opt"

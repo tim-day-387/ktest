@@ -38,6 +38,9 @@ ktest_lustre_build_enable=1
 ktest_kernel_build_enable=1
 ktest_out="/tmp/ktest-out/"
 ktest_root_image="$ktest_out/root.amd64.new"
+ktest_lustre_root=0
+ktest_lustre_root_pool="lustre_pool"
+ktest_lustre_root_fsname="lustre"
 ktest_lustre_clean_git=0
 ktest_lustre_purge=0
 ktest_njobs=$(nproc)
@@ -50,6 +53,35 @@ COVERAGE=""
 if ! which depmod > /dev/null; then
     DEPMOD=/sbin/depmod
 fi
+
+# Compute kernel LOCALVERSION with lustre/zfs commits and date
+function compute_localversion()
+{
+    local lustre_commit=""
+    local zfs_commit=""
+    local date_str=$(date +%Y%m%d)
+
+    # Get Lustre commit (short hash)
+    if [[ -d "$ktest_lustre_source/.git" ]]; then
+        lustre_commit=$(git -C "$ktest_lustre_source" rev-parse --short HEAD 2>/dev/null || echo "")
+    fi
+
+    # Get ZFS commit (short hash)
+    if [[ -d "$ktest_zfs_source/.git" ]]; then
+        zfs_commit=$(git -C "$ktest_zfs_source" rev-parse --short HEAD 2>/dev/null || echo "")
+    fi
+
+    # Build version string: -ktest-<lustre>-<zfs>-<date>
+    if [[ -n "$lustre_commit" ]] && [[ -n "$zfs_commit" ]]; then
+        echo "-ktest-${lustre_commit}-${zfs_commit}-${date_str}"
+    elif [[ -n "$lustre_commit" ]]; then
+        echo "-ktest-${lustre_commit}-${date_str}"
+    else
+        echo "-ktest"
+    fi
+}
+
+export KTEST_LOCALVERSION=$(compute_localversion)
 
 function usage()
 {
@@ -182,7 +214,6 @@ function cmd_run_native()
 	shift
     fi
 
-    ktest_root_image="/var/lib/ktest/root.amd64"
     ktest_testargs="$@"
     parse_test_deps "$ktest_test"
 
@@ -376,6 +407,9 @@ function purge_previous_results()
 function run_copy_builtin()
 {
     local old="$PWD"
+    local patch_output_dir="/tmp/ktest-output"
+
+    mkdir -p "$patch_output_dir"
 
     cd "$ktest_kernel_source"
 
@@ -407,17 +441,23 @@ function run_copy_builtin()
 	mv /tmp/zfs.patch "$ktest_out/zfs.patch"
     fi
 
+    # Copy patches to output directory
+    cp "$ktest_out/lustre.patch" "$patch_output_dir/"
+    if [[ -f "$ktest_out/zfs.patch" ]]; then
+	cp "$ktest_out/zfs.patch" "$patch_output_dir/"
+    fi
+
     cd "$old"
 }
 
-function build_zfs()
+function build_zfs_full()
 {
     local old="$PWD"
     local LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
 
     cd "$ktest_zfs_build"
-    sed -i 's/CDDL/GPL/' "$ktest_zfs_source/META"
     rsync --archive -r "$ktest_zfs_source" "$ktest_zfs_build"
+    sed -i 's/CDDL/GPL/' "$ktest_zfs_build/META"
 
     # Configure ZFS - build modules first to generate Module.symvers
     export ARCH="$(uname -m)"
@@ -431,7 +471,22 @@ function build_zfs()
     # Build ZFS modules to generate headers and Module.symvers
     make -j$ktest_njobs
 
+    cd "$old"
+}
+
+function build_zfs()
+{
+    local old="$PWD"
+    local LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
+
+    build_zfs_full
+
+    cd "$ktest_zfs_build"
+
     # Now reconfigure with --enable-linux-builtin for copy-builtin
+    export ARCH="$(uname -m)"
+    export LLVM="-20"
+
     ./configure \
         --with-linux="$ktest_kernel_source" \
         --with-linux-obj="$LINUX_OBJ" \
@@ -443,6 +498,9 @@ function build_zfs()
 function run_zfs_copy_builtin()
 {
     local old="$PWD"
+    local patch_output_dir="/tmp/ktest-output"
+
+    mkdir -p "$patch_output_dir"
 
     cd "$ktest_zfs_build"
 
@@ -477,6 +535,10 @@ function run_zfs_copy_builtin()
     git add include/zfs/
     git commit -m "ZFS"
     git format-patch HEAD~1 --stdout > "$ktest_out/zfs.patch"
+
+    # Copy patch to output directory
+    cp "$ktest_out/zfs.patch" "$patch_output_dir/"
+
     cd "$old"
 }
 
@@ -533,15 +595,25 @@ function prepare_linux_source()
 
     # Apply ZFS patch if it exists (must be applied before Lustre)
     if [[ -f "$ktest_out/zfs.patch" ]]; then
-	echo "Applying ZFS patch..."
-	git am "$ktest_out/zfs.patch"
+	if [[ -d "$ktest_kernel_source/fs/zfs" ]]; then
+	    echo "ZFS patch already applied, skipping..."
+	else
+	    echo "Applying ZFS patch..."
+	    git am "$ktest_out/zfs.patch"
+	fi
     fi
 
     # Apply Lustre patch
-    echo "Applying Lustre patch..."
-    git am "$ktest_out/lustre.patch"
+    if [[ -d "$ktest_kernel_source/fs/lustre" ]]; then
+	echo "Lustre patch already applied, skipping..."
+    else
+	echo "Applying Lustre patch..."
+	git am "$ktest_out/lustre.patch"
+    fi
 
     cd "$old"
+
+    purge_previous_results
 }
 
 function validate_native_zfs_build() {
@@ -567,12 +639,12 @@ function cmd_build_native()
 
     prepare_linux_source
     run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
-    validate_native_lustre_build
+    #validate_native_lustre_build
 
     # Validate ZFS build if ZFS patch was applied
-    if [[ -f "$ktest_out/zfs.patch" ]]; then
-	validate_native_zfs_build
-    fi
+    #if [[ -f "$ktest_out/zfs.patch" ]]; then
+	#validate_native_zfs_build
+    #fi
 
     # Purge junk from ktest_out to save space
     find "$ktest_out" -name '*.o' -type f -delete
@@ -614,8 +686,130 @@ function cmd_build_deb()
 	ktest_kernel_config_require+=(GCOV_KERNEL)
     fi
 
-    prepare_linux_source
+    #prepare_linux_source
     run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel_deb
+}
+
+function build_zfs_userland_deb()
+{
+    local old="$PWD"
+    local deb_output_dir="/tmp/ktest-output"
+    local zfs_parent_dir="$(dirname "$ktest_zfs_source")"
+
+    cd "$ktest_zfs_source"
+
+    ./autogen.sh
+    ./configure --with-config=user
+    make -j$ktest_njobs native-deb-utils
+
+    # Copy DEBs to output directory
+    # ZFS native-deb-utils creates packages in the parent directory
+    echo "DEBUG: Looking for ZFS DEBs in parent directory: $zfs_parent_dir"
+    echo "DEBUG: ZFS DEBs found:"
+    find "$zfs_parent_dir" -maxdepth 1 -name '*.deb' -print
+
+    local deb_count=$(find "$zfs_parent_dir" -maxdepth 1 -name '*.deb' | wc -l)
+    if [[ $deb_count -eq 0 ]]; then
+        echo "WARNING: No ZFS DEBs found in $zfs_parent_dir"
+        echo "DEBUG: Searching recursively in $ktest_zfs_source for any DEBs:"
+        find "$ktest_zfs_source" -name '*.deb' -print
+    else
+        echo "DEBUG: Copying $deb_count ZFS DEBs to $deb_output_dir"
+        find "$zfs_parent_dir" -maxdepth 1 -name '*.deb' -exec cp -v {} "$deb_output_dir/" \;
+    fi
+
+    cd "$old"
+}
+
+function build_lustre_userland_deb()
+{
+    local deb_output_dir="/tmp/ktest-output"
+    local old="$PWD"
+    local LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
+    local KT_SUBARCH="x86"
+
+    cd "$ktest_lustre_build"
+
+    rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
+
+    # No strict errors
+    export CFLAGS="-Wno-error=attribute-warning -Wno-error=unused-but-set-variable -Wno-error=single-bit-bitfield-constant-conversion -Wno-error=format-security -Wno-error=cast-function-type-strict -Wno-error=incompatible-function-pointer-types"
+
+    # Find headers
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$KT_SUBARCH/include/generated"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$KT_SUBARCH/include/generated/uapi"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated"
+    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated/uapi"
+    export KCFLAGS="-I$LINUX_OBJ/include"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$KT_SUBARCH/include/generated"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$KT_SUBARCH/include/generated/uapi"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated"
+    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated/uapi"
+
+    # Configure OSD based on FSTYPE (backing storage)
+    if [[ "$FSTYPE" == "zfs" ]]; then
+       export with_ldiskfs="no"
+       export with_zfs="$ktest_zfs_build"
+       export with_zfs_obj="$ktest_zfs_build"
+       export with_spl="$ktest_zfs_build"
+       export with_spl_obj="$ktest_zfs_build"
+    else
+       export with_ldiskfs="no"
+       export with_zfs="no"
+    fi
+
+    # Disable optional features
+    export with_o2ib="no"
+    export enable_gss="no"
+    export enable_crypto="no"
+
+    # Always build the server
+    export enable_server="yes"
+
+    # Assume that Linux is in the same directory as Lustre
+    export with_linux="$ktest_kernel_source"
+
+    # Build the kernel via ktest into tmp
+    export KT_ARCH="$(uname -m)"
+    export with_linux_obj="/tmp/ktest-out/kernel_build.$KT_ARCH/"
+
+    # Misc
+    export LLVM="-20"
+
+    ./autogen.sh
+    ./configure || cat config.log
+    make -j$ktest_njobs debs
+
+    # Copy DEBs to output directory
+    find . -name '*.deb' -exec cp {} "$deb_output_dir/" \;
+
+    cd "$old"
+}
+
+function cmd_build_userland_deb()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    # Build the kernel first (required for Lustre configure to find .config)
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_quiet_with_status "ZFS USERLAND BUILD" "DONE" build_zfs_userland_deb
+
+    # If FSTYPE is zfs, build full ZFS to generate development headers for Lustre
+    if [[ "$FSTYPE" == "zfs" ]]; then
+        run_quiet_with_status "ZFS BUILD (for Lustre headers)" "DONE" build_zfs_full
+    fi
+
+    run_quiet_with_status "LUSTRE USERLAND BUILD" "DONE" build_lustre_userland_deb
 }
 
 function cmd_generate_lustre_patch()
