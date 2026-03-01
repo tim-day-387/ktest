@@ -45,15 +45,16 @@ RUN mkdir -p /home/ktest/git && \
 RUN mkdir -p /var/cache/nginx && \
     chown -R www-data:www-data /var/cache/nginx
 
+# Receive git version info from the build host
+ARG GIT_TAG=unknown
+ARG GIT_COMMIT=unknown
+
 # Copy entire ktest repository
 COPY --chown=ktest:ktest . /home/ktest/ktest/
 
 # Bake git version info into the static site at build time
-RUN cd /home/ktest/ktest && \
-    GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "unknown") && \
-    GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown") && \
-    printf '{"tag":"%s","commit":"%s"}\n' "$GIT_TAG" "$GIT_COMMIT" \
-        > ci-lustre/static-site/version.json
+RUN printf '{"tag":"%s","commit":"%s"}\n' "$GIT_TAG" "$GIT_COMMIT" \
+        > /home/ktest/ktest/ci-lustre/static-site/version.json
 
 # Copy ktestrc configuration for container
 COPY --chown=ktest:ktest containers/ktestrc.container /home/ktest/.ktestrc

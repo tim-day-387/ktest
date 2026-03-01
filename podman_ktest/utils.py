@@ -268,6 +268,40 @@ def get_git_hash(repo_path):
         return None
 
 
+def get_git_version_info(repo_path):
+    """Get git tag and short commit hash from a repository.
+
+    Args:
+        repo_path: Path to the git repository
+
+    Returns:
+        Tuple of (tag, short_commit), falling back to "unknown" on failure
+    """
+    try:
+        tag = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError:
+        tag = "unknown"
+
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError:
+        commit = "unknown"
+
+    return tag, commit
+
+
 class TeeWriter:
     """Write to multiple streams simultaneously."""
 

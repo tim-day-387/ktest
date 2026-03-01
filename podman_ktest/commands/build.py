@@ -16,10 +16,10 @@ from pathlib import Path
 import podman
 
 from ..config import IMAGES
-from ..utils import get_podman_socket
+from ..utils import get_git_version_info, get_podman_socket
 
 
-def _build_image(dockerfile, tag, name, ktest_dir, podman_socket=None):
+def _build_image(dockerfile, tag, name, ktest_dir, podman_socket=None, buildargs=None):
     """Build a single container image."""
     socket_url = get_podman_socket(podman_socket)
     with podman.PodmanClient(base_url=socket_url) as client:
@@ -32,6 +32,7 @@ def _build_image(dockerfile, tag, name, ktest_dir, podman_socket=None):
             layers=True,
             outputformat="application/vnd.oci.image.manifest.v1+json",
             rm=False,
+            buildargs=buildargs or {},
         )
         runtime = int(time.time() - start_time)
         print(f"END building {name} {runtime}s")
@@ -48,6 +49,10 @@ def cmd_build(args, ktest_dir, podman_socket=None):
         ]
     else:
         images_to_build = IMAGES
+
+    # Fetch git version info from the host repo for the ci-lustre build arg
+    git_tag, git_commit = get_git_version_info(ktest_dir)
+    ci_buildargs = {"GIT_TAG": git_tag, "GIT_COMMIT": git_commit}
 
     # Build ktest-runner first since ci-lustre depends on it
     base_images = [img for img in images_to_build if img["name"] == "ktest-runner"]
@@ -74,6 +79,7 @@ def cmd_build(args, ktest_dir, podman_socket=None):
                     img["name"],
                     ktest_dir,
                     podman_socket,
+                    ci_buildargs if img["name"] == "ci-lustre" else None,
                 ): img["name"]
                 for img in dependent_images
             }
