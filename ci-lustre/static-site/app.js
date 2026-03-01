@@ -16,11 +16,27 @@ const app = {
   async init() {
     try {
       await this.loadMetadata();
+      this.loadVersion();
       this.handleRoute();
       // Listen for hash changes
       window.addEventListener("hashchange", () => this.handleRoute());
     } catch (error) {
       this.showError("Failed to initialize application: " + error.message);
+    }
+  },
+
+  // Load and display git version info from version.json
+  async loadVersion() {
+    try {
+      const response = await fetch("version.json");
+      if (!response.ok) return;
+      const version = await response.json();
+      const el = document.getElementById("version-info");
+      if (el && version.tag && version.commit) {
+        el.textContent = `${version.tag} (${version.commit})`;
+      }
+    } catch (e) {
+      // Version info is optional
     }
   },
 

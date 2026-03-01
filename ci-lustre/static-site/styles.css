@@ -47,6 +47,14 @@ header a:hover {
     text-decoration: underline;
 }
 
+#version-info {
+    margin-left: auto;
+    font-size: 0.75em;
+    font-family: monospace;
+    color: #aaa;
+    white-space: nowrap;
+}
+
 h1 {
     border-bottom: 2px solid #ae0c00;
     padding-bottom: 0.5rem;
