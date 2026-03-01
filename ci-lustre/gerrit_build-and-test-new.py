@@ -290,7 +290,7 @@ class Reviewer(object):
         output_args = f"--output {OUTPUT_DIR} --git-hash {git_hash} --change-id {change_id} --subject '{escaped_subject}'"
         command = f"cd {KTEST_DIR} && ./podman-ktest {socket_arg} --shared-filesystem /tmp --tarball-input job {job_name} {output_args}"
 
-        Reviewer.run_script(command, timeout_seconds=800)
+        Reviewer.run_script(command, timeout_seconds=1200)
 
     def checkout_patch(self, change):
         revision = change.get("current_revision")
