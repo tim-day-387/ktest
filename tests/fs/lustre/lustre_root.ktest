@@ -15,7 +15,10 @@
 
 . "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
 
-require-lustre-kernel-config
+config-kernel-base "$ktest_dir/config/debian.config"
+config-lustre-root
+
+require-lustre-base-kernel-config
 require-lustre-debug-kernel-config
 require-kernel-config LNET=y
 require-kernel-config LUSTRE=y

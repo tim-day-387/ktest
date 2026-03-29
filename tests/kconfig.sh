@@ -84,9 +84,6 @@ require-kernel-config HIGH_RES_TIMERS
 require-kernel-config SYSVIPC
 require-kernel-config CGROUPS
 require-kernel-config SWAP		# systemd segfaults if you don't have swap support...
-# FIXME: should be specified by subtest...
-# require-kernel-config MODULES,MODULE_UNLOAD
-require-kernel-config MODULES,MODULE_UNLOAD
 require-kernel-config DEVTMPFS
 require-kernel-config DEVTMPFS_MOUNT
 require-kernel-config BINFMT_ELF

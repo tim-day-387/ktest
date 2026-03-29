@@ -42,6 +42,8 @@ if [[ ! -v ktest_cpus ]]; then
     ktest_kconfig_base=
     ktest_no_kbuild=false
     ktest_no_vm=false
+    ktest_lustre_root=0
+    ktest_root_image=
 
     BUILD_ON_HOST=""
 fi
@@ -231,6 +233,22 @@ config-arch()
 config-compiler()
 {
     ktest_compiler=$1
+}
+
+config-kernel-base()
+{
+    ktest_kconfig_base=$1
+}
+
+config-lustre-root()
+{
+    ktest_lustre_root=1
+    ktest_root_image="/var/lib/ktest/lustre_root.amd64"
+}
+
+config-root-image()
+{
+    ktest_root_image=$1
 }
 
 config-no-kbuild()
@@ -424,6 +442,8 @@ main()
 	    echo "ktest_no_kbuild=$ktest_no_kbuild"
 	    echo "ktest_no_vm=$ktest_no_vm"
 	    echo "ktest_lustre_allow_warnings=$ktest_lustre_allow_warnings"
+	    echo "ktest_lustre_root=$ktest_lustre_root"
+	    [[ -n $ktest_root_image ]] && echo "ktest_root_image=$ktest_root_image"
 	    ;;
 	init)
 	    create_ktest_user

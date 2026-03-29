@@ -146,7 +146,7 @@ function load_zfs_modules()
     insmod "$zfs_pkg_path/module/zfs.ko" || true
 }
 
-function require-lustre-kernel-config()
+function require-lustre-base-kernel-config()
 {
     # Minimal config required for Lustre to build
     require-kernel-config TRANSPARENT_HUGEPAGE
@@ -169,6 +169,17 @@ function require-lustre-kernel-config()
     # Profiling
     # TODO: Fix me!
     # require-kernel-config CONFIG_MEM_ALLOC_PROFILING
+}
+
+function require-lustre-modules-kernel-config()
+{
+    require-kernel-config MODULES,MODULE_UNLOAD
+}
+
+function require-lustre-kernel-config()
+{
+    require-lustre-base-kernel-config
+    require-lustre-modules-kernel-config
 }
 
 function require-lustre-debug-kernel-config()

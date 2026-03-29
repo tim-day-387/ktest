@@ -38,12 +38,6 @@ ktest_lustre_build_enable=1
 ktest_kernel_build_enable=1
 ktest_out="/tmp/ktest-out/"
 ktest_root_image="$ktest_out/root.amd64.new"
-ktest_lustre_root=0
-# FIXME: should be specified by subtest...
-# ktest_root_image="/var/lib/ktest/lustre_root.amd64"
-# ktest_lustre_root=1
-ktest_lustre_root_pool="lustre_pool"
-ktest_lustre_root_fsname="lustre"
 ktest_lustre_clean_git=0
 ktest_lustre_purge=0
 ktest_njobs=$(nproc)
@@ -283,7 +277,7 @@ function build_lustre_intree()
     export enable_crypto="no"
 
     # FIXME: should be specified by subtest...
-    # export enable_libcfs_cdebug="no"
+    export enable_libcfs_cdebug="no"
 
     # Always build the server
     export enable_server="yes"
@@ -357,9 +351,6 @@ function build_lustre()
     export with_o2ib="no"
     export enable_gss="no"
     export enable_crypto="no"
-
-    # FIXME: should be specified by subtest...
-    # export enable_libcfs_cdebug="no"
 
     # Always build the server
     export enable_server="yes"
@@ -830,9 +821,6 @@ function build_lustre_userland_deb()
     export with_o2ib="no"
     export enable_gss="no"
     export enable_crypto="no"
-
-    # FIXME: should be specified by subtest...
-    # export enable_libcfs_cdebug="no"
 
     # Always build the server
     export enable_server="yes"
