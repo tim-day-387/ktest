@@ -1,0 +1,44 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+#
+# mk-lustreroot-initramfs - Build a minimal initramfs for Lustre root boot
+#
+# Compiles mount.lustreroot.c and packages it into an initramfs image.
+# mount.lustreroot serves as /init: it mounts essential pseudo-filesystems,
+# sleeps 5 seconds (to allow devices to settle), then mounts the Lustre root
+# and pivots into it.
+#
+# Usage: mk-lustreroot-initramfs [output-path]
+#   output-path  path for the resulting initramfs image (default: lustreroot-initramfs)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(readlink -e "$0")")"
+OUTPUT="${1:-lustreroot-initramfs}"
+OUTPUT="$(readlink -f "$OUTPUT")"
+
+FIRMWARE_DIR="$SCRIPT_DIR/../linux-firmware"
+
+TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR"' EXIT
+
+INITRAMFS="$TMPDIR/initramfs"
+mkdir -p "$INITRAMFS"/{dev,proc,sys,tmp,newroot}
+
+# Compile mount.lustreroot statically as /init so it runs without shared libs
+echo "Compiling mount.lustreroot..."
+cc -Wall -static -o "$INITRAMFS/init" "$SCRIPT_DIR/mount.lustreroot.c"
+
+# Populate firmware from linux-firmware if available
+if [ -d "$FIRMWARE_DIR" ]; then
+	echo "Copying firmware from $FIRMWARE_DIR..."
+	mkdir -p "$INITRAMFS/lib/firmware"
+	cp -a "$FIRMWARE_DIR/i915" "$INITRAMFS/lib/firmware/" 2>/dev/null || true
+	find "$FIRMWARE_DIR" -name 'iwlwifi-*.ucode' -o -name 'iwlwifi-*.pnvm' | xargs -r cp -t "$INITRAMFS/lib/firmware/" 2>/dev/null || true
+fi
+
+# Pack into a compressed cpio archive
+echo "Packing initramfs..."
+(cd "$INITRAMFS" && find . | cpio -H newc -o --quiet) | gzip -9 > "$OUTPUT"
+
+echo "Initramfs written to: $OUTPUT"

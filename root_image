@@ -297,6 +297,7 @@ USB_PACKAGES+=(wireless-tools wpasupplicant iw rfkill)
 USB_PACKAGES+=(linux-firmware pciutils)
 USB_PACKAGES+=(netcat-openbsd iperf3 socat)
 USB_PACKAGES+=(nfs-common samba-client emacs)
+USB_PACKAGES+=(ubuntu-desktop-minimal)
 
 update_packages_usb()
 {
