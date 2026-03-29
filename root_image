@@ -693,6 +693,9 @@ _cleanup_usb_lustre()
     set -e
 }
 
+USB_MIRROR=https://archive.ubuntu.com/ubuntu/
+USB_RELEASE=noble
+
 cmd_create_usb()
 {
     if ! [[ -f $debootstrap ]]; then
@@ -842,10 +845,10 @@ cmd_create_usb()
     DEBOOTSTRAP_DIR=$ktest_dir/debootstrap $debootstrap	\
 	--no-check-gpg					\
 	--arch="$DEBIAN_ARCH"				\
-	--exclude=$(join_by , "${EXCLUDE[@]}")		\
+	--components=main,restricted,universe		\
 	--no-merged-usr					\
 	--foreign					\
-	$RELEASE "$MNT" "$MIRROR"
+	$USB_RELEASE "$MNT" "$USB_MIRROR"
     mkdir -p "$MNT"/etc/dpkg/dpkg.cfg.d/
     echo force-unsafe-io > "$MNT"/etc/dpkg/dpkg.cfg.d/dpkg-unsafe
 
@@ -865,15 +868,12 @@ cmd_create_usb()
 
     install_kernel
 
-    echo "Updating files..."
-    update_files
-
-    # For USB boot: unmask getty so we get a login prompt, and disable
-    # testrunner (it requires a 9p-mounted host which doesn't exist on
-    # real hardware)
-    rm -f "$MNT/etc/systemd/system/getty.target"
-    rm -f "$MNT/etc/systemd/system/getty-static.service"
-    rm -f "$MNT/etc/systemd/system/multi-user.target.wants/testrunner.service"
+    # Basic system setup
+    cp /etc/resolv.conf "$MNT/etc/resolv.conf"
+    echo "ktest-lustre" > "$MNT/etc/hostname"
+    mkdir -p "$MNT/root/"
+    install -m0644 "$MNT/etc/skel/.bashrc" "$MNT/root/"
+    install -m0644 "$MNT/etc/skel/.profile" "$MNT/root/"
 
     # Enable autologin on tty1
     mkdir -p "$MNT/etc/systemd/system/getty@tty1.service.d"
