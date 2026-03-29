@@ -765,6 +765,9 @@ cmd_create_usb()
 	exit 1
     fi
 
+    local LUSTRE_FSNAME
+    LUSTRE_FSNAME=$(tr -dc 'a-z' < /dev/urandom | head -c 8)
+
     # Check for required tools
     checkdep parted parted
     checkdep mkfs.vfat dosfstools
@@ -825,27 +828,27 @@ cmd_create_usb()
 
     # Create Lustre datasets (same as create_lustre)
     echo "Creating Lustre datasets..."
-    zfs create -o mountpoint=none "$USB_POOL/$LUSTRE_MGS_DS"
-    zfs create -o mountpoint=none "$USB_POOL/$LUSTRE_OST0_DS"
-    zfs create -o mountpoint=none "$USB_POOL/$LUSTRE_OST1_DS"
+    zfs create -o mountpoint=none "$USB_POOL/$LUSTRE_FSNAME-$LUSTRE_MGS_DS"
+    zfs create -o mountpoint=none "$USB_POOL/$LUSTRE_FSNAME-$LUSTRE_OST0_DS"
+    zfs create -o mountpoint=none "$USB_POOL/$LUSTRE_FSNAME-$LUSTRE_OST1_DS"
 
     # Format Lustre targets on ZFS datasets
     echo "Formatting Lustre targets..."
     mkfs.lustre --mgs --mdt --reformat --fsname="$LUSTRE_FSNAME" --index=0 \
-	"$USB_POOL/$LUSTRE_MGS_DS"
+	"$USB_POOL/$LUSTRE_FSNAME-$LUSTRE_MGS_DS"
 
     local mgs_nid=$(lnetctl net show | grep 'nid:.*@tcp' | head -1 | awk '{print $NF}')
     mkfs.lustre --ost --reformat --fsname="$LUSTRE_FSNAME" --index=0 \
-	--mgsnode="$mgs_nid" "$USB_POOL/$LUSTRE_OST0_DS"
+	--mgsnode="$mgs_nid" "$USB_POOL/$LUSTRE_FSNAME-$LUSTRE_OST0_DS"
     mkfs.lustre --ost --reformat --fsname="$LUSTRE_FSNAME" --index=1 \
-	--mgsnode="$mgs_nid" "$USB_POOL/$LUSTRE_OST1_DS"
+	--mgsnode="$mgs_nid" "$USB_POOL/$LUSTRE_FSNAME-$LUSTRE_OST1_DS"
 
     # Mount Lustre servers
     echo "Mounting Lustre servers..."
     mkdir -p /mnt/lustre-mgs /mnt/lustre-ost0 /mnt/lustre-ost1
-    mount -t lustre "$USB_POOL/$LUSTRE_MGS_DS" /mnt/lustre-mgs
-    mount -t lustre "$USB_POOL/$LUSTRE_OST0_DS" /mnt/lustre-ost0
-    mount -t lustre "$USB_POOL/$LUSTRE_OST1_DS" /mnt/lustre-ost1
+    mount -t lustre "$USB_POOL/$LUSTRE_FSNAME-$LUSTRE_MGS_DS" /mnt/lustre-mgs
+    mount -t lustre "$USB_POOL/$LUSTRE_FSNAME-$LUSTRE_OST0_DS" /mnt/lustre-ost0
+    mount -t lustre "$USB_POOL/$LUSTRE_FSNAME-$LUSTRE_OST1_DS" /mnt/lustre-ost1
 
     # Performance tunings
     lctl set_param mdt.*.max_mod_rpcs_in_flight=128
@@ -918,6 +921,7 @@ cmd_create_usb()
     cat > "$MNT/usr/local/sbin/lustre-tune.sh" <<-'EOF'
 	#!/bin/sh
 	lctl set_param mdt.*.max_mod_rpcs_in_flight=128
+	sleep 1
 	lctl set_param mdc.*.max_rpcs_in_flight=256
 	lctl set_param mdc.*.max_mod_rpcs_in_flight=128
 	lctl set_param osc.*.max_rpcs_in_flight=256
@@ -928,7 +932,7 @@ cmd_create_usb()
     cat > "$MNT/etc/systemd/system/lustre-tune.service" <<-'EOF'
 	[Unit]
 	Description=Lustre performance tuning
-	After=lustre.service network.target
+	After=lustre.service network.target multi-user.target
 	ConditionPathExists=/usr/sbin/lctl
 
 	[Service]
