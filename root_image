@@ -285,6 +285,30 @@ update_packages()
     rm -f "$MNT/var/cache/apt/archives/*.deb"
 }
 
+USB_PACKAGES+=(net-tools iproute2 iputils-ping curl wget)
+USB_PACKAGES+=(openssh-server network-manager)
+USB_PACKAGES+=(ethtool nmap tcpdump traceroute dnsutils)
+USB_PACKAGES+=(wireless-tools wpasupplicant iw rfkill)
+USB_PACKAGES+=(linux-firmware pciutils)
+USB_PACKAGES+=(netcat-openbsd iperf3 socat)
+USB_PACKAGES+=(nfs-common samba-client)
+
+update_packages_usb()
+{
+    # systemd... !?
+    mkdir -p "$MNT"/run/user/0
+    cp /etc/resolv.conf "$MNT/etc/resolv.conf"
+
+    mkdir -p "$MNT"/etc/dpkg/dpkg.cfg.d/
+    echo force-unsafe-io > "$MNT"/etc/dpkg/dpkg.cfg.d/dpkg-unsafe
+
+    _chroot "$MNT" mount -t proc none /proc
+    _chroot "$MNT" apt-get -qq update
+    _chroot "$MNT" apt-get -qq upgrade
+    _chroot "$MNT" apt-get -qq install "${USB_PACKAGES[@]}"
+    rm -f "$MNT/var/cache/apt/archives/*.deb"
+}
+
 _umount_image()
 {
     umount --recursive "$MNT"
@@ -845,7 +869,7 @@ cmd_create_usb()
     DEBOOTSTRAP_DIR=$ktest_dir/debootstrap $debootstrap	\
 	--no-check-gpg					\
 	--arch="$DEBIAN_ARCH"				\
-	--components=main,restricted,universe		\
+	--components=main,restricted,universe,multiverse	\
 	--no-merged-usr					\
 	--foreign					\
 	$USB_RELEASE "$MNT" "$USB_MIRROR"
@@ -860,7 +884,7 @@ cmd_create_usb()
     _chroot "$MNT" dpkg --configure -a
 
     echo "Installing packages..."
-    update_packages
+    update_packages_usb
 
     # Install GRUB packages
     echo "Installing GRUB..."
