@@ -26,8 +26,8 @@ RUN apt-get update && apt-get install -y \
     libkeyutils-dev libyaml-dev libreadline-dev \
     module-assistant debhelper libsnmp-dev \
     mpi-default-dev curl libguestfs-tools \
-    qemu-utils linux-image-generic ccache \
-    linux-headers-generic-hwe-24.04
+    qemu-utils linux-image-6.14.0-37-generic ccache \
+    linux-headers-6.14.0-37-generic
 
 # Purge this stuff
 RUN rm -rf /var/lib/apt/lists/*
