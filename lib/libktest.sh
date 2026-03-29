@@ -566,7 +566,10 @@ configure_kernel()
 {
     local kconfig="$ktest_kernel_build/.config"
 
-    cp "$ktest_dir/config/debian.config" "$kconfig"
+    new_config
+
+    # FIXME: should be specified by subtest...
+    # cp "$ktest_dir/config/debian.config" "$kconfig"
 
     log_verbose "kernel_config_require: ${ktest_kernel_config_require[@]}  ${ktest_kernel_config_require_soft[@]}"
 
