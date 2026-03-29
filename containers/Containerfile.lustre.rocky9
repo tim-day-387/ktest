@@ -23,19 +23,10 @@ RUN dnf install -y gcc autoconf libtool which make patch diffutils file \
 	kernel-abi-stablelists kernel-rpm-macros kmod pkgconfig
 RUN dnf install -y --enablerepo=*debug* kernel-debuginfo
 
-# Build and install latest e2fsprogs
-ARG E2FSPROGS_GIT=git://review.whamcloud.com/tools/e2fsprogs.git
-ENV _E2GIT=${E2FSPROGS_GIT}
-RUN /bin/bash -c \
-	"git clone $_E2GIT e2fsprogs && \
-	cd e2fsprogs && \
-	git checkout -b v1.47.2-wc2 v1.47.2-wc2 && \
-	./configure --with-root-prefix=/usr --enable-elf-shlibs \
-		--disable-uuidd --disable-fsck \
-		--disable-e2initrd-helper \
-		--disable-libblkid --disable-libuuid \
-		--enable-quota --disable-fuse2fs && \
-	make -j && make install && cd .. && rm -rf e2fsprogs"
+# Install latest e2fsprogs from Lustre mirror
+RUN printf '[e2fsprogs]\nname=e2fsprogs Mirror - el9\nbaseurl=https://lustre.software/mirror/e2fsprogs/latest/el9/\nenabled=1\ngpgcheck=0\n' \
+	> /etc/yum.repos.d/e2fsprogs.repo
+RUN dnf update -y && dnf install -y e2fsprogs
 
 # Git config
 RUN git config --global safe.directory '*'

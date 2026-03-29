@@ -116,11 +116,11 @@ make --quiet -j$(nproc) rpms
         "build_script": """
 ./autogen.sh
 ./configure --enable-server
-make --quiet -j$(nproc) rpms
+make --quiet -j$(nproc)
 """,
         "package_script": """
 ./autogen.sh
-./configure --enable-server
+./configure --disable-server
 make --quiet -j$(nproc) rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
