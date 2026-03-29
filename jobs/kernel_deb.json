@@ -16,7 +16,7 @@
     {
       "name": "kernel_deb",
       "platform": "kernel_deb",
-      "build": "tests/fs/lustre/inkernel.ktest",
+      "package": "tests/fs/lustre/inkernel.ktest",
       "backing_storage": "zfs",
       "depends_on": ["lustre_patch"]
     },

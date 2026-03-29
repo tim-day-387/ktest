@@ -1,0 +1,5 @@
+{
+  "name": "al2-pkg",
+  "platform": "al2",
+  "package": "tests/fs/lustre/boot.ktest"
+}

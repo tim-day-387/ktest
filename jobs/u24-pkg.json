@@ -1,0 +1,5 @@
+{
+  "name": "u24-pkg",
+  "platform": "u24",
+  "package": "tests/fs/lustre/boot.ktest"
+}

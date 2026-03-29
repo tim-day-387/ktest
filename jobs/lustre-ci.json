@@ -8,14 +8,14 @@
       "description": "Run checkpatch.pl from the given mainline kernel"
     },
     {
-      "name": "lustre_u24",
+      "name": "u24",
       "platform": "u24",
       "build": "tests/fs/lustre/boot.ktest",
       "optional": false,
       "description": "Build Lustre (U24/OutOfTree)"
     },
     {
-      "name": "lustre_al2023",
+      "name": "al2023",
       "platform": "al2023",
       "build": "tests/fs/lustre/boot.ktest",
       "optional": false,

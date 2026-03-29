@@ -231,7 +231,7 @@ def run_build_lustre(
     # Get backing storage (default: wbcfs)
     backing_storage = job_config.get("backing_storage", "wbcfs")
 
-    if job_config["platform"] in ("mainline", "kernel_deb", "kernel_rpm", "native_2"):
+    if job_config["platform"] in ("mainline", "native_2"):
         command = build_config["build_script"] + " " + job_config.get("build", "")
     else:
         command = build_config["build_script"]
@@ -247,15 +247,11 @@ def run_build_lustre(
             or job_config["platform"] == "native_1"
             or job_config["platform"] == "native_2"
             or job_config["platform"] == "zfs_patch"
-            or job_config["platform"] == "userland_deb"
         )
 
-        # Use direct mount for RPM/DEB output instead of tarball
+        # Use direct mount for patch output instead of tarball
         should_mount_output = (
-            job_config["platform"] == "kernel_rpm"
-            or job_config["platform"] == "kernel_deb"
-            or job_config["platform"] == "userland_deb"
-            or job_config["platform"] == "native_1"
+            job_config["platform"] == "native_1"
             or job_config["platform"] == "zfs_patch"
         )
 
@@ -279,6 +275,59 @@ def run_build_lustre(
             log_path=log_path,
             get_ktest_out_archive=should_get_archive,
             mount_ktest_out=should_mount_output,
+        )
+        with job:
+            return_code = job.run(client)
+
+    runtime = int(time.time() - start_time)
+    return return_code, runtime, task_name
+
+
+def run_package(
+    job_config,
+    build_config,
+    dirs,
+    log_path,
+    ktest_out_dir=None,
+    tarball_paths=None,
+    podman_socket=None,
+    use_tarball_input=False,
+    ccache_dir=None,
+):
+    """Run a package build job."""
+    task_name = get_task_name(job_config, "package")
+
+    backing_storage = job_config.get("backing_storage", "wbcfs")
+
+    if job_config["platform"] in ("kernel_rpm", "kernel_deb", "userland_deb"):
+        command = build_config["package_script"] + " " + job_config.get("package", "")
+    else:
+        command = build_config["package_script"]
+
+    command = f"export BACKING_STORAGE={backing_storage} && {command}"
+
+    sync_zfs = build_config.get("sync_zfs", False)
+
+    start_time = time.time()
+    socket_url = get_podman_socket(podman_socket)
+    with podman.PodmanClient(base_url=socket_url) as client:
+        job = ContainerJob(
+            image=build_config["image"],
+            command=["bash", "-c", command],
+            working_dir=build_config["working_dir"],
+            ktest_out_dir=ktest_out_dir,
+            tarball_paths=tarball_paths,
+            sync_kernel=True,
+            sync_lustre=True,
+            sync_zfs=sync_zfs,
+            sync_ktest_out=True,
+            podman_socket=None,
+            dirs=dirs,
+            use_tarball_input=use_tarball_input,
+            ccache_dir=ccache_dir,
+            log_path=log_path,
+            get_ktest_out_archive=False,
+            mount_ktest_out=True,
         )
         with job:
             return_code = job.run(client)
@@ -360,6 +409,18 @@ def run_job_config(
         )
     elif job_config.get("build", False):
         return_code, runtime, task_name = run_build_lustre(
+            job_config,
+            build_config,
+            dirs,
+            log_path,
+            ktest_out_dir,
+            tarball_paths,
+            podman_socket,
+            use_tarball_input,
+            ccache_dir,
+        )
+    elif job_config.get("package", False):
+        return_code, runtime, task_name = run_package(
             job_config,
             build_config,
             dirs,

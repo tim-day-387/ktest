@@ -383,6 +383,8 @@ def cmd_job(
             return get_task_name(job, "run")
         elif job.get("build", False):
             return get_task_name(job, "build")
+        elif job.get("package", False):
+            return get_task_name(job, "package")
         elif job.get("tool", False):
             return get_task_name(job, "tool")
         return job["name"]

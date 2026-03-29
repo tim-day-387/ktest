@@ -1,0 +1,5 @@
+{
+  "name": "rocky9-pkg",
+  "platform": "rocky9",
+  "package": "tests/fs/lustre/boot.ktest"
+}

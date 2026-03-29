@@ -76,6 +76,11 @@ CONFIGS = {
 ./configure --disable-server
 make --quiet -j$(nproc)
 """,
+        "package_script": """
+./autogen.sh
+./configure --disable-server
+make --quiet -j$(nproc) debs
+""",
         "working_dir": "/home/ktest/git/lustre-release/",
     },
     "al2023": {
@@ -84,6 +89,11 @@ make --quiet -j$(nproc)
 ./autogen.sh
 ./configure --enable-efa
 make --quiet -j$(nproc)
+""",
+        "package_script": """
+./autogen.sh
+./configure --enable-efa
+make --quiet -j$(nproc) rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
     },
@@ -94,6 +104,11 @@ make --quiet -j$(nproc)
 ./configure
 make --quiet -j$(nproc)
 """,
+        "package_script": """
+./autogen.sh
+./configure
+make --quiet -j$(nproc) rpms
+""",
         "working_dir": "/home/ktest/git/lustre-release/",
     },
     "rocky9": {
@@ -103,23 +118,31 @@ make --quiet -j$(nproc)
 ./configure --enable-server
 make --quiet -j$(nproc) rpms
 """,
+        "package_script": """
+./autogen.sh
+./configure --enable-server
+make --quiet -j$(nproc) rpms
+""",
         "working_dir": "/home/ktest/git/lustre-release/",
     },
     "kernel_rpm": {
         "image": "ktest-runner:latest",
         "build_script": "./qlkbuild build_rpm",
+        "package_script": "./qlkbuild build_rpm",
         "working_dir": "/home/ktest/ktest/",
         "output_files": ["*.rpm"],
     },
     "kernel_deb": {
         "image": "ktest-runner:latest",
         "build_script": "./qlkbuild build_deb",
+        "package_script": "./qlkbuild build_deb",
         "working_dir": "/home/ktest/ktest/",
         "output_files": ["*.deb"],
     },
     "userland_deb": {
         "image": "ktest-runner:latest",
         "build_script": "./qlkbuild build_userland_deb",
+        "package_script": "./qlkbuild build_userland_deb",
         "working_dir": "/home/ktest/ktest/",
         "output_files": ["*.deb"],
         "sync_zfs": True,

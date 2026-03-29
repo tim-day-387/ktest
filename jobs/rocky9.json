@@ -1,5 +1,5 @@
 {
-  "name": "lustre_rocky9",
+  "name": "rocky9",
   "platform": "rocky9",
   "build": "tests/fs/lustre/boot.ktest"
 }

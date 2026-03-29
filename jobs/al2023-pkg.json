@@ -1,0 +1,5 @@
+{
+  "name": "al2023-pkg",
+  "platform": "al2023",
+  "package": "tests/fs/lustre/boot.ktest"
+}

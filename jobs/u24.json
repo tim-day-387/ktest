@@ -1,5 +1,5 @@
 {
-  "name": "lustre_u24",
+  "name": "u24",
   "platform": "u24",
   "build": "tests/fs/lustre/boot.ktest"
 }
