@@ -182,9 +182,6 @@ int main(void)
 	kmsg_open();
 	kmsg_log(KMSG_INFO, "waiting for devices to settle\n");
 
-	/* Wait for devices to settle before probing */
-	sleep(5);
-
 	/* Read kernel command line */
 	f = fopen(CMDLINE_PATH, "r");
 	if (!f) {
@@ -219,7 +216,7 @@ int main(void)
 	 * string (0@lo:/<fsname>) is auto-derived by the kernel.
 	 */
 	rc = snprintf(mount_data, sizeof(mount_data),
-		      "lustreroot=%s:%s/%s", device, pool, fsname);
+		      "lustreroot=%s:%s/%s,user_xattr", device, pool, fsname);
 	if (rc < 0 || (size_t)rc >= sizeof(mount_data)) {
 		kmsg_log(KMSG_ERR, "mount data too long\n");
 		return 1;
@@ -227,8 +224,6 @@ int main(void)
 
 	kmsg_log(KMSG_INFO, "mounting lustre (device=%s pool=%s fsname=%s) on %s\n",
 		 device, pool, fsname, MOUNTPOINT);
-
-	sleep(15);
 
 	if (mount("none", MOUNTPOINT, "lustre", 0, mount_data) < 0) {
 		kmsg_log(KMSG_ERR, "mount failed: %s\n", strerror(errno));
