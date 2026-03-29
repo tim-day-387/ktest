@@ -296,7 +296,7 @@ USB_PACKAGES+=(ethtool nmap tcpdump traceroute dnsutils)
 USB_PACKAGES+=(wireless-tools wpasupplicant iw rfkill)
 USB_PACKAGES+=(linux-firmware pciutils)
 USB_PACKAGES+=(netcat-openbsd iperf3 socat)
-USB_PACKAGES+=(nfs-common samba-client)
+USB_PACKAGES+=(nfs-common samba-client emacs)
 
 update_packages_usb()
 {
@@ -766,7 +766,7 @@ cmd_create_usb()
     fi
 
     local LUSTRE_FSNAME
-    LUSTRE_FSNAME=$(tr -dc 'a-z' < /dev/urandom | head -c 8)
+    LUSTRE_FSNAME=$(set +o pipefail; tr -dc 'a-z' < /dev/urandom | head -c 8)
 
     # Check for required tools
     checkdep parted parted
@@ -880,15 +880,12 @@ cmd_create_usb()
     echo force-unsafe-io > "$MNT"/etc/dpkg/dpkg.cfg.d/dpkg-unsafe
 
     echo "Debootstrap first stage..."
-    DEBOOTSTRAP_DIR=$ktest_dir/debootstrap $debootstrap	\
-	--no-check-gpg					\
-	--arch="$DEBIAN_ARCH"				\
+    DEBOOTSTRAP_DIR=$ktest_dir/debootstrap $debootstrap		\
+	--no-check-gpg						\
+	--arch="$DEBIAN_ARCH"					\
 	--components=main,restricted,universe,multiverse	\
-	--no-merged-usr					\
-	--foreign					\
+	--foreign						\
 	$USB_RELEASE "$MNT" "$USB_MIRROR"
-    mkdir -p "$MNT"/etc/dpkg/dpkg.cfg.d/
-    echo force-unsafe-io > "$MNT"/etc/dpkg/dpkg.cfg.d/dpkg-unsafe
 
     # Disable man-db cache rebuilds
     echo "man-db man-db/auto-update boolean false" | _chroot "$MNT" debconf-set-selections 2>/dev/null || true
@@ -909,54 +906,10 @@ cmd_create_usb()
     # Basic system setup
     cp /etc/resolv.conf "$MNT/etc/resolv.conf"
     echo "ktest-lustre" > "$MNT/etc/hostname"
-    mkdir -p "$MNT/root/"
-    install -m0644 "$MNT/etc/skel/.bashrc" "$MNT/root/"
-    install -m0644 "$MNT/etc/skel/.profile" "$MNT/root/"
 
     # Create user account
     _chroot "$MNT" useradd -m -s /bin/bash -G sudo "$usb_username"
     _chroot "$MNT" passwd -d "$usb_username"
-
-    # Install a service to apply Lustre tuning parameters on every boot
-    cat > "$MNT/usr/local/sbin/lustre-tune.sh" <<-'EOF'
-	#!/bin/sh
-	lctl set_param mdt.*.max_mod_rpcs_in_flight=128
-	sleep 1
-	lctl set_param mdc.*.max_rpcs_in_flight=256
-	lctl set_param mdc.*.max_mod_rpcs_in_flight=128
-	lctl set_param osc.*.max_rpcs_in_flight=256
-	lctl set_param llite.*.hybrid_io=0
-	EOF
-    chmod +x "$MNT/usr/local/sbin/lustre-tune.sh"
-
-    cat > "$MNT/etc/systemd/system/lustre-tune.service" <<-'EOF'
-	[Unit]
-	Description=Lustre performance tuning
-	After=lustre.service network.target multi-user.target
-	ConditionPathExists=/usr/sbin/lctl
-
-	[Service]
-	Type=oneshot
-	RemainAfterExit=yes
-	ExecStart=/usr/local/sbin/lustre-tune.sh
-
-	[Install]
-	WantedBy=multi-user.target
-	EOF
-
-    ln -sf /etc/systemd/system/lustre-tune.service \
-	"$MNT/etc/systemd/system/multi-user.target.wants/lustre-tune.service"
-
-    echo "Configuring fstab..."
-    local boot_uuid=$(blkid -s UUID -o value "$boot_part")
-    local efi_uuid=$(blkid -s UUID -o value "$efi_part")
-
-    cat > "$MNT/etc/fstab" <<-EOF
-	# Root is on Lustre - mounted by kernel (CONFIG_ROOT_LUSTRE)
-	# <file system>		<mount point>	<type>	<options>		<dump>	<pass>
-	UUID=$boot_uuid		/boot		ext4	defaults		0	2
-	UUID=$efi_uuid		/boot/efi	vfat	umask=0077		0	1
-	EOF
 
     echo "Installing GRUB to EFI partition..."
     mount --bind /dev "$MNT/dev"
@@ -967,31 +920,23 @@ cmd_create_usb()
     umount "$MNT/dev"
 
     # Configure GRUB
+    echo "Generating GRUB config..."
     cat > "$MNT/etc/default/grub" <<-EOF
 	GRUB_DEFAULT=0
-	GRUB_TIMEOUT=5
+	GRUB_TIMEOUT=15
 	GRUB_DISTRIBUTOR="ktest-lustre"
 	GRUB_CMDLINE_LINUX_DEFAULT=""
-	GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200n8"
-	GRUB_TERMINAL="console serial"
-	GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1"
+	GRUB_CMDLINE_LINUX="console=tty0"
+	GRUB_TERMINAL="console"
 	EOF
-
-    echo "Generating GRUB config..."
-    # Can't use update-grub: grub-probe fails on Lustre root filesystem.
-    # Generate grub.cfg manually with Lustre root boot parameters.
-    local boot_uuid=$(blkid -s UUID -o value "$boot_part")
     cat > "$MNT/boot/grub/grub.cfg" <<-GRUBEOF
-	serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1
-	terminal_input console serial
-	terminal_output console serial
-	set timeout=5
+	terminal_input console
+	terminal_output console
+	set timeout=15
 	set default=0
 
-	search --no-floppy --fs-uuid --set=root $boot_uuid
-
 	menuentry "ktest-lustre ($KTEST_BOOT_KERNEL)" {
-	    linux /$KTEST_BOOT_KERNEL root=/dev/lustre rw lustreroot=$USB_POOL,device=PARTLABEL=zfs,fsname=$LUSTRE_FSNAME console=tty0 console=ttyS0,115200n8
+	    linux /$KTEST_BOOT_KERNEL root=/dev/lustre rw lustreroot=$USB_POOL,device=PARTLABEL=zfs,fsname=$LUSTRE_FSNAME console=tty0
 	}
 	GRUBEOF
 
