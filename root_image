@@ -337,18 +337,27 @@ cmd_update_files()
 }
 
 cmd_sync() {
-    local source="${1:-$(pwd)/}"
-    local source_dir="$(basename "$source")"
+    local dest="$(basename "$(pwd)")"
+    local source="$(pwd)/"
     local new_img="/tmp/ktest-out/$(basename $ktest_image).new"
 
-    cp "$ktest_image" "$new_img"
+    # Start from pristine image only if new_img doesn't exist yet.
+    # Multiple syncs (e.g. lustre-release then zfs) build on the same image.
+    if [[ ! -f "$new_img" ]]; then
+        cp "$ktest_image" "$new_img"
+    fi
 
-    # Remove old directory
-    guestfish -a "$new_img" -m /dev/sda:/ rm-rf "/workspace/"
-    guestfish -a "$new_img" -m /dev/sda:/ mkdir-p "/workspace/lustre-release"
+    # Remove only the specific destination directory, not all of /workspace/
+    guestfish -a "$new_img" -m /dev/sda:/ rm-rf "/workspace/$dest"
+    guestfish -a "$new_img" -m /dev/sda:/ mkdir-p "/workspace/$dest"
 
-    # Copy new directory in
-    virt-copy-in -a "$new_img" "$source/." /workspace/lustre-release
+    # Use tar + guestfish tar-in instead of virt-copy-in to ensure hidden
+    # directories (e.g. .libs/ containing ZFS shared libs) are included.
+    local tmp_tar
+    tmp_tar=$(mktemp /tmp/ktest-sync-XXXXXX.tar)
+    tar -C "$source" -c . -f "$tmp_tar"
+    guestfish -a "$new_img" -m /dev/sda:/ tar-in "$tmp_tar" "/workspace/$dest"
+    rm -f "$tmp_tar"
 }
 
 cmd_init()

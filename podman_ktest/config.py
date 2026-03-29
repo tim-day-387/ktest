@@ -68,6 +68,7 @@ CONFIGS = {
         "build_script": "./qlkbuild build",
         "working_dir": "/home/ktest/ktest/",
         "run_script": "./qlkbuild run",
+        "sync_zfs": True,
     },
     "u24": {
         "image": "lustre-u24:latest",

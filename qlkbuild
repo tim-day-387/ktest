@@ -26,7 +26,7 @@ export CC="${CC:-clang-20}"
 export FSTYPE="${BACKING_STORAGE:-wbcfs}"
 
 # Ktest parameters
-ktest_kernel_source="$(realpath ~/git/linux/ 2>/dev/null || true)"
+ktest_kernel_source="$(realpath -e ~/git/linux/ 2>/dev/null || true)"
 ktest_lustre_source="$ktest_kernel_source/../lustre-release/"
 ktest_zfs_source="$ktest_kernel_source/../zfs/"
 ktest_boot_test="$ktest_dir/tests/fs/lustre/boot.ktest"
@@ -129,8 +129,8 @@ fi
 ktest_kernel_source=$(readlink -e "$ktest_kernel_source")
 
 ktest_kernel_build="$ktest_out/kernel_build.$ktest_arch"
-ktest_lustre_build="$ktest_out/lustre_build.$ktest_arch"
-ktest_zfs_build="$ktest_out/zfs_build.$ktest_arch"
+ktest_lustre_build="$ktest_out/lustre-release"
+ktest_zfs_build="$ktest_out/zfs"
 mkdir -p "$ktest_kernel_build"
 mkdir -p "$ktest_lustre_build"
 if [[ -d "$ktest_zfs_source" ]]; then
@@ -186,6 +186,12 @@ function create_root_image() {
     cd "$ktest_lustre_build"
     run_quiet_with_status "UPDATE ROOT IMAGE" "DONE" sync_root_image
     cd "$old"
+
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	cd "$ktest_zfs_build"
+	run_quiet_with_status "UPDATE ROOT IMAGE" "DONE" sync_root_image
+	cd "$old"
+    fi
 }
 
 function cmd_run()
@@ -325,9 +331,21 @@ function build_lustre()
     export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated"
     export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated/uapi"
 
-    # Disable persistent OSDs
-    export with_ldiskfs="no"
-    export with_zfs="no"
+    # Configure OSD based on FSTYPE (backing storage)
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	export with_ldiskfs="no"
+	export with_zfs="$ktest_zfs_build"
+	export with_zfs_obj="$ktest_zfs_build"
+	export with_spl="$ktest_zfs_build"
+	export with_spl_obj="$ktest_zfs_build"
+	# Embed VM-accessible RPATH so mkfs.lustre finds ZFS libs at runtime.
+	# The build path (/tmp/ktest-out/zfs) differs from the VM path (/workspace/zfs),
+	# so the RPATH embedded by the linker won't work in the VM without this.
+	export LDFLAGS="-Wl,-rpath,/workspace/zfs/.libs"
+    else
+	export with_ldiskfs="no"
+	export with_zfs="no"
+    fi
 
     # Disable optional features
     export with_o2ib="no"
@@ -471,6 +489,8 @@ function build_zfs_full()
     # Build ZFS modules to generate headers and Module.symvers
     make -j$ktest_njobs
 
+    validate_zfs_build
+
     cd "$old"
 }
 
@@ -581,6 +601,10 @@ function cmd_build()
     fi
 
     run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	 run_quiet_with_status "ZFS BUILD [$(basename "$ktest_test")]" "DONE" build_zfs_full
+    fi
     run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
 
     # Purge junk from ktest_out to save space
@@ -614,6 +638,39 @@ function prepare_linux_source()
     cd "$old"
 
     purge_previous_results
+}
+
+function validate_zfs_build() {
+    local lib_dirs=(
+	"$ktest_zfs_build/.libs"
+	"$ktest_zfs_build/lib/libzfs/.libs"
+	"$ktest_zfs_build/lib/libzfs_core/.libs"
+	"$ktest_zfs_build/lib/libnvpair/.libs"
+	"$ktest_zfs_build/lib/libzpool/.libs"
+    )
+
+    local found=0
+    for dir in "${lib_dirs[@]}"; do
+	[[ -d "$dir" ]] || continue
+	for lib in "$dir"/*.so*; do
+	    [[ -e "$lib" ]] || continue
+	    found=1
+	    break 2
+	done
+    done
+
+    if [[ $found -eq 0 ]]; then
+	echo "ZFS shared libraries not found in $ktest_zfs_build!"
+	exit 1
+    fi
+
+    # Check for ZFS kernel module (post-2.3.0 layout)
+    if [[ -f "$ktest_zfs_build/module/zfs.ko" ]]; then
+	return 0
+    fi
+
+    # Check for ZFS kernel module (pre-2.3.0 layout)
+    check_file "$ktest_zfs_build/module/zfs/zfs.ko"
 }
 
 function validate_native_zfs_build() {

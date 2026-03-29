@@ -189,6 +189,9 @@ def run_ktest(
     task_name = get_task_name(job_config, "run")
     command = build_config["run_script"] + " " + job_config.get("run", "")
 
+    backing_storage = job_config.get("backing_storage", "wbcfs")
+    command = f"export BACKING_STORAGE={backing_storage} && {command}"
+
     start_time = time.time()
     socket_url = get_podman_socket(podman_socket)
     with podman.PodmanClient(base_url=socket_url) as client:
@@ -200,6 +203,7 @@ def run_ktest(
             tarball_paths=tarball_paths,
             sync_kernel=False,
             sync_lustre=False,
+            sync_zfs=False,
             sync_ktest_out=True,
             podman_socket=None,
             dirs=dirs,

@@ -39,6 +39,7 @@ set +u
 export PATH="$zfs_pkg_path:$zfs_pkg_path/cmd/zpool:$zfs_pkg_path/cmd/zfs:$PATH"
 export LD_LIBRARY_PATH="$zfs_pkg_path/lib/libzfs/.libs:$zfs_pkg_path/lib/libzfs_core/.libs:$LD_LIBRARY_PATH"
 export LD_LIBRARY_PATH="$zfs_pkg_path/lib/libuutil/.libs:$zfs_pkg_path/lib/libnvpair/.libs:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$zfs_pkg_path/lib/libzpool/.libs:$LD_LIBRARY_PATH"
 set -u
 
 # Dump out all of the special Lustre variables
@@ -210,9 +211,34 @@ function require-lustre-efa-kernel-config()
     require-kernel-config AMAZON_EFA_INFINIBAND
 }
 
+function setup_zfs_shared_libs()
+{
+    local canonical_path="/usr/lib"
+    local lib_dirs=(
+	"$zfs_pkg_path/.libs"
+	"$zfs_pkg_path/lib/libzfs/.libs"
+	"$zfs_pkg_path/lib/libzfs_core/.libs"
+	"$zfs_pkg_path/lib/libnvpair/.libs"
+	"$zfs_pkg_path/lib/libzpool/.libs"
+    )
+
+    local found=0
+    for dir in "${lib_dirs[@]}"; do
+	[[ -d "$dir" ]] || continue
+	for lib in "$dir"/*.so*; do
+	    [[ -e "$lib" ]] || continue
+	    ln -sf "$(realpath "$lib")" "$canonical_path/$(basename "$lib")"
+	    found=1
+	done
+    done
+
+    [[ $found -eq 1 ]] && ldconfig
+}
+
 function load_lustre_modules()
 {
     if [[ "$FSTYPE" =~ "zfs" ]]; then
+	setup_zfs_shared_libs
 	load_zfs_modules
     fi
 
