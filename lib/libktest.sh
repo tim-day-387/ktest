@@ -566,19 +566,7 @@ configure_kernel()
 {
     local kconfig="$ktest_kernel_build/.config"
 
-    if [[ -f "$kconfig" ]]; then
-	cp "$kconfig" "$kconfig".bak
-    fi
-
-    if [[ -z $ktest_kconfig_base ]]; then
-	if $ktest_precise; then
-	    rm -f "$kconfig"
-	fi
-
-	new_config
-    else
-	cp "$ktest_kconfig_base" "$kconfig"
-    fi
+    cp "$ktest_dir/config/debian.config" "$kconfig"
 
     log_verbose "kernel_config_require: ${ktest_kernel_config_require[@]}  ${ktest_kernel_config_require_soft[@]}"
 
@@ -597,11 +585,6 @@ configure_kernel()
     for opt in "${ktest_kernel_config_require[@]}"; do
 	[[ -n $opt ]] && kernel_opt check "$opt"
     done
-
-    # Preserve timestamp if config didn't change:
-    if [[ -f "$kconfig".bak ]] && diff -q "$kconfig" "$kconfig".bak; then
-	mv "$kconfig".bak "$kconfig"
-    fi
 }
 
 build_kernel()
@@ -609,9 +592,7 @@ build_kernel()
     rm -rf "$ktest_kernel_binary"
     mkdir -p "$ktest_kernel_binary"
 
-    if ! $ktest_skip_kernel_config; then
-	configure_kernel
-    fi
+    configure_kernel
 
     case $KERNEL_ARCH in
 	mips)

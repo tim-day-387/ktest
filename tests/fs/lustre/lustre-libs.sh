@@ -163,7 +163,7 @@ function require-lustre-kernel-config()
     # More tracing support!
     require-kernel-config BPF_SYSCALL
     require-kernel-config DEBUG_INFO_BTF
-    require-kernel-config DEBUG_INFO_BTF_MODULES
+    # require-kernel-config DEBUG_INFO_BTF_MODULES
     require-kernel-config BPF_JIT
 
     # Profiling

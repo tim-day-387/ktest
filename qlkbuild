@@ -37,8 +37,8 @@ ktest_lustre_allow_warnings=0
 ktest_lustre_build_enable=1
 ktest_kernel_build_enable=1
 ktest_out="/tmp/ktest-out/"
-ktest_root_image="$ktest_out/root.amd64.new"
-ktest_lustre_root=0
+ktest_root_image="/var/lib/ktest/lustre_root.amd64"
+ktest_lustre_root=1
 ktest_lustre_root_pool="lustre_pool"
 ktest_lustre_root_fsname="lustre"
 ktest_lustre_clean_git=0
@@ -227,7 +227,7 @@ function cmd_run_native()
 	ktest_kernel_config_require+=(GCOV_KERNEL)
     fi
 
-    create_root_image
+    # create_root_image
 
     start_vm
 }
@@ -278,6 +278,7 @@ function build_lustre_intree()
     export with_o2ib="no"
     export enable_gss="no"
     export enable_crypto="no"
+    export enable_libcfs_cdebug="no"
 
     # Always build the server
     export enable_server="yes"
@@ -351,6 +352,7 @@ function build_lustre()
     export with_o2ib="no"
     export enable_gss="no"
     export enable_crypto="no"
+    export enable_libcfs_cdebug="no"
 
     # Always build the server
     export enable_server="yes"
@@ -821,6 +823,7 @@ function build_lustre_userland_deb()
     export with_o2ib="no"
     export enable_gss="no"
     export enable_crypto="no"
+    export enable_libcfs_cdebug="no"
 
     # Always build the server
     export enable_server="yes"
@@ -867,6 +870,30 @@ function cmd_build_userland_deb()
     fi
 
     run_quiet_with_status "LUSTRE USERLAND BUILD" "DONE" build_lustre_userland_deb
+}
+
+function cmd_package_native()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_dir/tests/fs/lustre/lustre_root.ktest"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    prepare_linux_source
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+
+    # Copy kernel image to output directory
+    local output_dir="/tmp/ktest-output"
+    cp "$ktest_kernel_binary/vmlinuz" "$output_dir/"
+    cp "$ktest_kernel_binary/config" "$output_dir/"
+
+    # Purge junk from ktest_out to save space
+    find "$ktest_out" -name '*.o' -type f -delete
 }
 
 function cmd_generate_lustre_patch()

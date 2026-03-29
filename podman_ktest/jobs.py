@@ -303,7 +303,7 @@ def run_package(
 
     backing_storage = job_config.get("backing_storage", "wbcfs")
 
-    if job_config["platform"] in ("kernel_rpm", "kernel_deb", "userland_deb"):
+    if job_config["platform"] in ("kernel_rpm", "kernel_deb", "userland_deb", "native_2"):
         command = build_config["package_script"] + " " + job_config.get("package", "")
     else:
         command = build_config["package_script"]

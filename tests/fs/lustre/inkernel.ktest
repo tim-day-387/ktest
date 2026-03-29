@@ -17,7 +17,6 @@
 
 require-lustre-kernel-config
 require-lustre-debug-kernel-config
-require-kernel-config LIBCFS=m
 require-kernel-config LNET=m
 require-kernel-config LUSTRE=m
 require-kernel-config ZFS=m

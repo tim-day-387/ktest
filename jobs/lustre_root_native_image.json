@@ -1,0 +1,10 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_native_zfs",
+      "platform": "native_2",
+      "package": "tests/fs/lustre/lustre_root.ktest",
+      "backing_storage": "zfs"
+    }
+  ]
+}

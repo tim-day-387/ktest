@@ -60,6 +60,7 @@ CONFIGS = {
     "native_2": {
         "image": "ktest-runner:latest",
         "build_script": "./qlkbuild build_native",
+        "package_script": "./qlkbuild package_native",
         "working_dir": "/home/ktest/ktest/",
         "run_script": "./qlkbuild run_native",
     },

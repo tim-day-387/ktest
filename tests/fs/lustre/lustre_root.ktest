@@ -21,6 +21,7 @@ require-kernel-config LNET=y
 require-kernel-config LUSTRE=y
 require-kernel-config ZFS=y
 require-kernel-config ROOT_LUSTRE=y
+require-kernel-config MODULES=n
 
 # USB boot requires these drivers built-in (no initramfs available)
 require-kernel-config USB=y

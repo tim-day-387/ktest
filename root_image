@@ -51,7 +51,7 @@ usage()
     echo "  -a <arch>		Architecture for vm image"
     echo "  -m <mirror>		Debian mirror"
     echo '  -i <image>		Image to create/update, defaults to /var/lib/ktest/root.$arch'
-    echo "  -k <dir>		Directory containing kernel .deb packages (for create_usb)"
+    echo "  -k <dir>		Directory containing kernel .deb packages and/or a vmlinuz file (for create_usb)"
 }
 
 if [[ $# = 0 ]]; then
@@ -644,6 +644,39 @@ USB_IMAGE_SIZE="16G"
 USB_EFI_SIZE="512MiB"
 USB_BOOT_SIZE="1GiB"
 
+# Sets KTEST_BOOT_KERNEL to the vmlinuz filename (relative to /boot) to boot.
+# Installs debs from $ktest_kernel_debs and/or copies a vmlinuz file found there.
+# Initramfs generation is suppressed — we boot without initramfs.
+install_kernel()
+{
+    # Suppress initramfs generation
+    mkdir -p "$MNT/usr/local/sbin"
+    printf '#!/bin/sh\nexit 0\n' > "$MNT/usr/local/sbin/update-initramfs"
+    chmod +x "$MNT/usr/local/sbin/update-initramfs"
+
+    local debs=("$ktest_kernel_debs"/*.deb)
+    local vmlinuz_files=("$ktest_kernel_debs"/vmlinuz*)
+
+    if [[ -f "${debs[0]}" ]]; then
+	echo "Installing kernel packages..."
+	mkdir -p "$MNT/tmp/kernel-debs"
+	cp "$ktest_kernel_debs"/*.deb "$MNT/tmp/kernel-debs/"
+	_chroot "$MNT" bash -c 'dpkg -i /tmp/kernel-debs/*.deb' || _chroot "$MNT" apt-get -qq -f install
+	rm -rf "$MNT/tmp/kernel-debs"
+    fi
+
+    if [[ -f "${vmlinuz_files[0]}" ]]; then
+	echo "Installing vmlinuz manually..."
+	cp "${vmlinuz_files[0]}" "$MNT/boot/vmlinuz"
+	KTEST_BOOT_KERNEL="vmlinuz"
+    else
+	# No manual vmlinuz; pick the one installed by the debs
+	KTEST_BOOT_KERNEL=$(_chroot "$MNT" bash -c \
+	    'ls /boot/vmlinuz-* 2>/dev/null | sed "s|/boot/vmlinuz-||" | sort -V | tail -1')
+	KTEST_BOOT_KERNEL="vmlinuz-$KTEST_BOOT_KERNEL"
+    fi
+}
+
 _cleanup_usb_lustre()
 {
     set +e
@@ -673,19 +706,24 @@ cmd_create_usb()
     fi
 
     if [[ -z $ktest_kernel_debs ]]; then
-	echo "Must specify kernel debs directory with -k"
+	echo "Must specify kernel directory with -k"
 	exit 1
     fi
 
     if [[ ! -d $ktest_kernel_debs ]]; then
-	echo "Kernel debs directory does not exist: $ktest_kernel_debs"
+	echo "Kernel directory does not exist: $ktest_kernel_debs"
 	exit 1
     fi
 
-    # Check for kernel debs
-    local kernel_debs=("$ktest_kernel_debs"/*.deb)
-    if [[ ${#kernel_debs[@]} -eq 0 || ! -f "${kernel_debs[0]}" ]]; then
-	echo "No .deb files found in $ktest_kernel_debs"
+    local _kernel_debs=("$ktest_kernel_debs"/*.deb)
+    local _kernel_vmlinuz=("$ktest_kernel_debs"/vmlinuz*)
+    local _has_debs=false
+    local _has_vmlinuz=false
+    [[ -f "${_kernel_debs[0]}" ]]   && _has_debs=true
+    [[ -f "${_kernel_vmlinuz[0]}" ]] && _has_vmlinuz=true
+
+    if ! $_has_debs && ! $_has_vmlinuz; then
+	echo "No .deb files or vmlinuz found in $ktest_kernel_debs"
 	exit 1
     fi
 
@@ -825,11 +863,7 @@ cmd_create_usb()
     echo "Installing GRUB..."
     _chroot "$MNT" apt-get -qq install --no-install-recommends grub-efi-amd64 efibootmgr
 
-    echo "Installing kernel packages..."
-    mkdir -p "$MNT/tmp/kernel-debs"
-    cp "$ktest_kernel_debs"/*.deb "$MNT/tmp/kernel-debs/"
-    _chroot "$MNT" bash -c 'dpkg -i /tmp/kernel-debs/*.deb' || _chroot "$MNT" apt-get -qq -f install
-    rm -rf "$MNT/tmp/kernel-debs"
+    install_kernel
 
     echo "Updating files..."
     update_files
@@ -885,7 +919,6 @@ cmd_create_usb()
     echo "Generating GRUB config..."
     # Can't use update-grub: grub-probe fails on Lustre root filesystem.
     # Generate grub.cfg manually with Lustre root boot parameters.
-    local kver=$(_chroot "$MNT" bash -c 'ls /boot/vmlinuz-* | sed "s|/boot/vmlinuz-||" | sort -V | tail -1')
     local boot_uuid=$(blkid -s UUID -o value "$boot_part")
     cat > "$MNT/boot/grub/grub.cfg" <<-GRUBEOF
 	serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1
@@ -896,8 +929,8 @@ cmd_create_usb()
 
 	search --no-floppy --fs-uuid --set=root $boot_uuid
 
-	menuentry "ktest-lustre ($kver)" {
-	    linux /vmlinuz-$kver root=/dev/lustre rw lustreroot=$USB_POOL,device=PARTLABEL=zfs,fsname=$LUSTRE_FSNAME console=tty0 console=ttyS0,115200n8
+	menuentry "ktest-lustre ($KTEST_BOOT_KERNEL)" {
+	    linux /$KTEST_BOOT_KERNEL root=/dev/lustre rw lustreroot=$USB_POOL,device=PARTLABEL=zfs,fsname=$LUSTRE_FSNAME console=tty0 console=ttyS0,115200n8
 	}
 	GRUBEOF
 
