@@ -1,0 +1,339 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Run overlayfs tests on Lustre (root filesystem).
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
+
+require-lustre-kernel-config
+require-lustre-debug-kernel-config
+require-kernel-config LNET=y
+require-kernel-config LUSTRE=y
+require-kernel-config ZFS=y
+require-kernel-config ROOT_LUSTRE=y
+require-kernel-config USER_NS
+require-kernel-config OVERLAY_FS
+
+config-mem 10G
+config-timeout 60
+
+OVERLAY_BASE="/ktest_overlay"
+
+validate_lustre_mount()
+{
+    local mountpoint="$1"
+    local fstype
+
+    fstype=$(findmnt -n -o FSTYPE "$mountpoint")
+    if [[ "$fstype" != "lustre" ]]; then
+	echo "ERROR: $mountpoint is not Lustre (got '$fstype')"
+	return 1
+    fi
+}
+
+setup_overlay_dirs()
+{
+    mkdir -p "$OVERLAY_BASE/lower" "$OVERLAY_BASE/upper" \
+	     "$OVERLAY_BASE/work" "$OVERLAY_BASE/merged"
+}
+
+cleanup_overlay()
+{
+    umount "$OVERLAY_BASE/merged" 2>/dev/null || true
+    rm -rf "$OVERLAY_BASE"
+}
+
+# Basic: mount overlayfs on Lustre dirs and verify the mount
+test_overlay_basic()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    cleanup_overlay
+    setup_overlay_dirs
+
+    mount -t overlay overlay \
+	  -o "lowerdir=$OVERLAY_BASE/lower,upperdir=$OVERLAY_BASE/upper,workdir=$OVERLAY_BASE/work" \
+	  "$OVERLAY_BASE/merged"
+
+    fstype=$(findmnt -n -o FSTYPE "$OVERLAY_BASE/merged")
+    if [[ "$fstype" != "overlay" ]]; then
+	echo "ERROR: merged dir is not overlayfs (got '$fstype')"
+	cleanup_overlay
+	exit 1
+    fi
+
+    cleanup_overlay
+    echo "basic overlay mount on Lustre: OK"
+}
+
+# Copy-up: modify a lower-layer file, verify it is copied to upper
+test_overlay_copyup()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    cleanup_overlay
+    setup_overlay_dirs
+
+    echo "lower data" > "$OVERLAY_BASE/lower/file.txt"
+
+    mount -t overlay overlay \
+	  -o "lowerdir=$OVERLAY_BASE/lower,upperdir=$OVERLAY_BASE/upper,workdir=$OVERLAY_BASE/work" \
+	  "$OVERLAY_BASE/merged"
+
+    python3 - <<'EOF'
+import os, sys
+
+merged = "/ktest_overlay/merged"
+upper  = "/ktest_overlay/upper"
+
+path = os.path.join(merged, "file.txt")
+
+# Overwrite via merged view — triggers copy-up
+with open(path, "w") as f:
+    f.write("upper data\n")
+
+# The upper dir must now contain the file
+upper_path = os.path.join(upper, "file.txt")
+if not os.path.exists(upper_path):
+    print("ERROR: copy-up did not create file in upper layer")
+    sys.exit(1)
+
+with open(upper_path) as f:
+    content = f.read()
+if content != "upper data\n":
+    print(f"ERROR: upper file has wrong content: {content!r}")
+    sys.exit(1)
+
+# Original lower file must be unchanged
+lower_path = "/ktest_overlay/lower/file.txt"
+with open(lower_path) as f:
+    content = f.read()
+if content != "lower data\n":
+    print(f"ERROR: lower file was modified: {content!r}")
+    sys.exit(1)
+
+print("copy-up: OK")
+EOF
+
+    cleanup_overlay
+}
+
+# Whiteout: delete a lower-layer file, verify whiteout in upper
+test_overlay_whiteout()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    cleanup_overlay
+    setup_overlay_dirs
+
+    echo "to be deleted" > "$OVERLAY_BASE/lower/delete_me.txt"
+
+    mount -t overlay overlay \
+	  -o "lowerdir=$OVERLAY_BASE/lower,upperdir=$OVERLAY_BASE/upper,workdir=$OVERLAY_BASE/work" \
+	  "$OVERLAY_BASE/merged"
+
+    python3 - <<'EOF'
+import os, sys, stat
+
+merged = "/ktest_overlay/merged"
+upper  = "/ktest_overlay/upper"
+
+# Delete the file via the merged view
+os.unlink(os.path.join(merged, "delete_me.txt"))
+
+# File must be gone from the merged view
+if os.path.exists(os.path.join(merged, "delete_me.txt")):
+    print("ERROR: deleted file still visible in merged view")
+    sys.exit(1)
+
+# A whiteout character device (0:0) must appear in upper
+wo = os.path.join(upper, "delete_me.txt")
+if not os.path.lexists(wo):
+    print("ERROR: no whiteout entry in upper layer")
+    sys.exit(1)
+
+st = os.lstat(wo)
+if not stat.S_ISCHR(st.st_mode):
+    print(f"ERROR: whiteout is not a character device (mode=0o{st.st_mode:o})")
+    sys.exit(1)
+if os.major(st.st_rdev) != 0 or os.minor(st.st_rdev) != 0:
+    print(f"ERROR: whiteout rdev {os.major(st.st_rdev)}:{os.minor(st.st_rdev)}, expected 0:0")
+    sys.exit(1)
+
+print("whiteout after delete: OK")
+EOF
+
+    cleanup_overlay
+}
+
+# New file: create a file only in upper; must be visible in merged
+test_overlay_upper_new_file()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    cleanup_overlay
+    setup_overlay_dirs
+
+    mount -t overlay overlay \
+	  -o "lowerdir=$OVERLAY_BASE/lower,upperdir=$OVERLAY_BASE/upper,workdir=$OVERLAY_BASE/work" \
+	  "$OVERLAY_BASE/merged"
+
+    python3 - <<'EOF'
+import os, sys
+
+merged = "/ktest_overlay/merged"
+upper  = "/ktest_overlay/upper"
+data   = b"new upper file content\n"
+
+new_path = os.path.join(merged, "new_file.txt")
+with open(new_path, "wb") as f:
+    f.write(data)
+
+# Must be visible in merged
+if not os.path.exists(new_path):
+    print("ERROR: new file not visible in merged view")
+    sys.exit(1)
+
+# Must appear in upper
+upper_path = os.path.join(upper, "new_file.txt")
+if not os.path.exists(upper_path):
+    print("ERROR: new file not present in upper layer")
+    sys.exit(1)
+
+with open(new_path, "rb") as f:
+    readback = f.read()
+if readback != data:
+    print(f"ERROR: data mismatch in merged view: {readback!r}")
+    sys.exit(1)
+
+print("new upper-layer file: OK")
+EOF
+
+    cleanup_overlay
+}
+
+# Opaque directory: upper dir shadows lower dir of same name
+test_overlay_opaque_dir()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    cleanup_overlay
+    setup_overlay_dirs
+
+    mkdir -p "$OVERLAY_BASE/lower/subdir"
+    echo "lower only" > "$OVERLAY_BASE/lower/subdir/lower_file.txt"
+
+    mount -t overlay overlay \
+	  -o "lowerdir=$OVERLAY_BASE/lower,upperdir=$OVERLAY_BASE/upper,workdir=$OVERLAY_BASE/work" \
+	  "$OVERLAY_BASE/merged"
+
+    python3 - <<'EOF'
+import os, sys
+
+merged = "/ktest_overlay/merged"
+
+# Lower-layer file must be visible through merged/subdir
+lower_via_merged = os.path.join(merged, "subdir", "lower_file.txt")
+if not os.path.exists(lower_via_merged):
+    print("ERROR: lower-layer file not visible through merged subdir")
+    sys.exit(1)
+
+# Create a new file inside the subdir — triggers copy-up of the dir
+new_path = os.path.join(merged, "subdir", "upper_file.txt")
+with open(new_path, "w") as f:
+    f.write("upper only\n")
+
+# Both files must now be visible
+for name in ("lower_file.txt", "upper_file.txt"):
+    p = os.path.join(merged, "subdir", name)
+    if not os.path.exists(p):
+        print(f"ERROR: {name} not visible in merged subdir after copy-up")
+        sys.exit(1)
+
+print("opaque directory / subdir copy-up: OK")
+EOF
+
+    cleanup_overlay
+}
+
+# Rename within overlayfs merged view
+test_overlay_rename()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    cleanup_overlay
+    setup_overlay_dirs
+
+    echo "rename me" > "$OVERLAY_BASE/lower/src.txt"
+
+    mount -t overlay overlay \
+	  -o "lowerdir=$OVERLAY_BASE/lower,upperdir=$OVERLAY_BASE/upper,workdir=$OVERLAY_BASE/work" \
+	  "$OVERLAY_BASE/merged"
+
+    python3 - <<'EOF'
+import os, sys, stat
+
+merged = "/ktest_overlay/merged"
+upper  = "/ktest_overlay/upper"
+
+src = os.path.join(merged, "src.txt")
+dst = os.path.join(merged, "dst.txt")
+
+os.rename(src, dst)
+
+if os.path.exists(src):
+    print("ERROR: source still exists after rename")
+    sys.exit(1)
+if not os.path.exists(dst):
+    print("ERROR: destination missing after rename")
+    sys.exit(1)
+
+with open(dst) as f:
+    content = f.read()
+if content != "rename me\n":
+    print(f"ERROR: renamed file has wrong content: {content!r}")
+    sys.exit(1)
+
+# src must have a whiteout in upper (it came from lower)
+wo = os.path.join(upper, "src.txt")
+if not os.path.lexists(wo):
+    print("ERROR: no whiteout for renamed-away lower file")
+    sys.exit(1)
+st = os.lstat(wo)
+if not stat.S_ISCHR(st.st_mode):
+    print(f"ERROR: whiteout for src is not a char device (mode=0o{st.st_mode:o})")
+    sys.exit(1)
+
+print("rename within overlay: OK")
+EOF
+
+    cleanup_overlay
+}
+
+main "$@"
