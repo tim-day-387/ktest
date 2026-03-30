@@ -1,0 +1,25 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_patch",
+      "platform": "native_1",
+      "build": "tests/fs/lustre/overlayfs_lower_idmap.ktest",
+      "backing_storage": "zfs"
+    },
+    {
+      "name": "lustre_native_zfs",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/overlayfs_lower_idmap.ktest",
+      "backing_storage": "zfs",
+      "depends_on": ["lustre_patch"]
+    },
+    {
+      "name": "boot",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/overlayfs_lower_idmap.ktest",
+      "run": "tests/fs/lustre/overlayfs_lower_idmap.ktest",
+      "backing_storage": "zfs",
+      "depends_on": ["lustre_native_zfs"]
+    }
+  ]
+}

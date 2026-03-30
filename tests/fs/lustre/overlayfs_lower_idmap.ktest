@@ -1,0 +1,450 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Build uutils/coreutils on overlayfs whose lower layer is an idmapped
+# mount of a Lustre directory. The git clone is owned by user1 on the
+# underlying Lustre fs; an idmapped bind-mount remaps user1 -> user2
+# so the overlayfs build runs entirely as user2 (non-root). Exercises
+# overlayfs copy-up over an idmapped lower from an unprivileged user.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
+
+config-kernel-base "$ktest_dir/config/debian.config"
+config-lustre-root
+
+require-lustre-base-kernel-config
+require-kernel-config LNET=y
+require-kernel-config LUSTRE=y
+require-kernel-config ZFS=y
+require-kernel-config MODULES=n
+
+# USB boot requires these drivers built-in (no initramfs available)
+require-kernel-config USB=y
+require-kernel-config USB_XHCI_HCD=y
+require-kernel-config USB_XHCI_PCI=y
+require-kernel-config USB_EHCI_HCD=y
+require-kernel-config USB_EHCI_PCI=y
+require-kernel-config USB_STORAGE=y
+require-kernel-config SCSI=y
+require-kernel-config BLK_DEV_SD=y
+require-kernel-config PINCTRL_METEORLAKE=y
+
+require-kernel-config USER_NS
+require-kernel-config OVERLAY_FS
+
+config-networking tap
+config-mem 10G
+config-timeout 180
+
+OVERLAY_BASE="/ktest_overlay_idmap_lower"
+USER1="ktuser1"
+USER2="ktuser2"
+USER1_UID=2001
+USER2_UID=2002
+IDMAP_HELPER="/tmp/idmap_mount"
+
+validate_lustre_mount()
+{
+    local mountpoint="$1"
+    local fstype
+
+    fstype=$(findmnt -n -o FSTYPE "$mountpoint")
+    if [[ "$fstype" != "lustre" ]]; then
+	echo "ERROR: $mountpoint is not Lustre (got '$fstype')"
+	return 1
+    fi
+}
+
+# Pick a switch-user wrapper that exists in the test image.
+pick_runas()
+{
+    local user="$1"
+    if command -v runuser &>/dev/null; then
+	echo "runuser -u $user --"
+    elif command -v sudo &>/dev/null; then
+	echo "sudo -u $user --"
+    else
+	echo "ERROR: no runuser/sudo available" >&2
+	exit 1
+    fi
+}
+
+# Compile a small helper that creates an idmapped bind-mount of <src>
+# at <dst>, mapping host_uid -> mount_uid (size 1, both uid and gid).
+# Uses open_tree(CLONE) + mount_setattr(IDMAP) + move_mount, taking the
+# userns from a paused child that unshare()d CLONE_NEWUSER.
+build_idmap_helper()
+{
+    if [[ -x "$IDMAP_HELPER" ]]; then
+	return 0
+    fi
+
+    cat > /tmp/idmap_mount.c <<'EOF'
+#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <sched.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#ifndef OPEN_TREE_CLONE
+#define OPEN_TREE_CLONE 1
+#endif
+#ifndef AT_RECURSIVE
+#define AT_RECURSIVE 0x8000
+#endif
+#ifndef MOUNT_ATTR_IDMAP
+#define MOUNT_ATTR_IDMAP 0x00100000
+#endif
+#ifndef MOVE_MOUNT_F_EMPTY_PATH
+#define MOVE_MOUNT_F_EMPTY_PATH 0x00000004
+#endif
+
+struct mattr {
+	unsigned long long attr_set, attr_clr, propagation, userns_fd;
+};
+
+static int sys_open_tree(int dfd, const char *path, unsigned int flags)
+{
+	return syscall(SYS_open_tree, dfd, path, flags);
+}
+static int sys_mount_setattr(int dfd, const char *path, unsigned int flags,
+			     struct mattr *a, size_t size)
+{
+	return syscall(SYS_mount_setattr, dfd, path, flags, a, size);
+}
+static int sys_move_mount(int from_dfd, const char *from_path, int to_dfd,
+			  const char *to_path, unsigned int flags)
+{
+	return syscall(SYS_move_mount, from_dfd, from_path, to_dfd, to_path,
+		       flags);
+}
+
+static int wf(const char *path, const char *data)
+{
+	int fd = open(path, O_WRONLY);
+	if (fd < 0)
+		return -1;
+	int n = write(fd, data, strlen(data));
+	int e = errno;
+	close(fd);
+	errno = e;
+	return n < 0 ? -1 : 0;
+}
+
+int main(int argc, char **argv)
+{
+	if (argc != 5) {
+		fprintf(stderr,
+			"usage: %s <src> <dst> <host_uid> <mnt_uid>\n",
+			argv[0]);
+		return 2;
+	}
+	/* /proc/<kid>/uid_map line format is "inside outside count".
+	 * For an idmapped mount the kernel calls make_kuid(idmap_ns,
+	 * file_kuid), which looks up file_kuid in the *inside* column
+	 * and returns the *outside* value as the user-visible kuid.
+	 * So: inside = on-disk uid (host_uid), outside = mount-visible
+	 * uid (mnt_uid). */
+
+	/* rdy: child -> parent ("unshare done"); go: parent -> child
+	 * ("maps written, you may exit"). Two pipes so the parent does
+	 * NOT touch /proc/<kid>/uid_map until the child has actually
+	 * entered its new userns -- otherwise the write hits the init
+	 * userns and fails EPERM. */
+	int rdy[2], go[2];
+	if (pipe(rdy) < 0 || pipe(go) < 0) {
+		perror("pipe");
+		return 1;
+	}
+
+	pid_t kid = fork();
+	if (kid < 0) {
+		perror("fork");
+		return 1;
+	}
+	if (kid == 0) {
+		close(rdy[0]);
+		close(go[1]);
+		if (unshare(CLONE_NEWUSER) < 0) {
+			perror("unshare");
+			_exit(1);
+		}
+		(void)write(rdy[1], "r", 1);
+		char b;
+		(void)read(go[0], &b, 1);
+		_exit(0);
+	}
+	close(rdy[1]);
+	close(go[0]);
+
+	char b;
+	if (read(rdy[0], &b, 1) != 1) {
+		fprintf(stderr, "child never signalled ready (unshare failed?)\n");
+		waitpid(kid, NULL, 0);
+		return 1;
+	}
+
+	char path[128], line[64];
+	snprintf(path, sizeof(path), "/proc/%d/setgroups", kid);
+	wf(path, "deny");
+	snprintf(line, sizeof(line), "%s %s 1\n", argv[3], argv[4]);
+	snprintf(path, sizeof(path), "/proc/%d/uid_map", kid);
+	if (wf(path, line) < 0) {
+		perror("write uid_map");
+		goto fail;
+	}
+	snprintf(path, sizeof(path), "/proc/%d/gid_map", kid);
+	if (wf(path, line) < 0) {
+		perror("write gid_map");
+		goto fail;
+	}
+
+	snprintf(path, sizeof(path), "/proc/%d/ns/user", kid);
+	int unsfd = open(path, O_RDONLY | O_CLOEXEC);
+	if (unsfd < 0) {
+		perror("open ns/user");
+		goto fail;
+	}
+
+	int tfd = sys_open_tree(-1, argv[1],
+				OPEN_TREE_CLONE | O_CLOEXEC | AT_RECURSIVE);
+	if (tfd < 0) {
+		perror("open_tree");
+		goto fail;
+	}
+
+	struct mattr a = {
+		.attr_set = MOUNT_ATTR_IDMAP,
+		.userns_fd = unsfd,
+	};
+	if (sys_mount_setattr(tfd, "", AT_EMPTY_PATH | AT_RECURSIVE, &a,
+			      sizeof(a)) < 0) {
+		perror("mount_setattr");
+		goto fail;
+	}
+	if (sys_move_mount(tfd, "", -1, argv[2],
+			   MOVE_MOUNT_F_EMPTY_PATH) < 0) {
+		perror("move_mount");
+		goto fail;
+	}
+
+	(void)write(go[1], "g", 1);
+	waitpid(kid, NULL, 0);
+	return 0;
+fail:
+	(void)write(go[1], "x", 1);
+	waitpid(kid, NULL, 0);
+	return 1;
+}
+EOF
+    gcc -O2 -Wall -o "$IDMAP_HELPER" /tmp/idmap_mount.c
+}
+
+cleanup_overlay()
+{
+    umount "$OVERLAY_BASE/merged"      2>/dev/null || true
+    umount "$OVERLAY_BASE/lower-idmap" 2>/dev/null || true
+    rm -rf "$OVERLAY_BASE"
+}
+
+test_overlay_build_coreutils_lower_idmap()
+{
+    dmesg --console-level 8
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    build_idmap_helper
+
+    # Create users; -m so each gets a $HOME (cargo writes to ~/.cargo)
+    groupadd -g "$USER1_UID" "$USER1" 2>/dev/null || true
+    useradd -m -u "$USER1_UID" -g "$USER1_UID" -s /bin/bash "$USER1" \
+	2>/dev/null || true
+    groupadd -g "$USER2_UID" "$USER2" 2>/dev/null || true
+    useradd -m -u "$USER2_UID" -g "$USER2_UID" -s /bin/bash "$USER2" \
+	2>/dev/null || true
+
+    local runas1 runas2
+    runas1=$(pick_runas "$USER1")
+    runas2=$(pick_runas "$USER2")
+    echo "user-switch wrappers: user1=[$runas1] user2=[$runas2]"
+
+    cleanup_overlay
+    mkdir -p "$OVERLAY_BASE/lower" "$OVERLAY_BASE/lower-idmap" \
+	     "$OVERLAY_BASE/upper" "$OVERLAY_BASE/work" \
+	     "$OVERLAY_BASE/merged"
+
+    # Lower is owned by user1; upper/work/merged by user2.
+    chown "$USER1:$USER1" "$OVERLAY_BASE/lower"
+    chown "$USER2:$USER2" "$OVERLAY_BASE/upper" "$OVERLAY_BASE/work" \
+			   "$OVERLAY_BASE/merged"
+
+    echo "=== git clone into lower as $USER1 ==="
+    $runas1 git clone --depth 1 \
+	https://github.com/uutils/coreutils.git \
+	"$OVERLAY_BASE/lower/coreutils"
+
+    # Defensive chown — ensure nothing slipped in as root.
+    chown -R "$USER1:$USER1" "$OVERLAY_BASE/lower"
+
+    echo "=== files in lower (should be $USER1) ==="
+    ls -ln "$OVERLAY_BASE/lower/coreutils" | head -5
+
+    echo "=== creating idmapped mount: host $USER1_UID -> mnt $USER2_UID ==="
+    "$IDMAP_HELPER" "$OVERLAY_BASE/lower" "$OVERLAY_BASE/lower-idmap" \
+	"$USER1_UID" "$USER2_UID"
+
+    echo "=== files via idmapped view (should be $USER2) ==="
+    ls -ln "$OVERLAY_BASE/lower-idmap/coreutils" | head -5
+    local idmap_uid
+    idmap_uid=$(stat -c %u "$OVERLAY_BASE/lower-idmap/coreutils/Cargo.toml")
+    if [[ "$idmap_uid" != "$USER2_UID" ]]; then
+	echo "ERROR: idmapped view shows uid=$idmap_uid, expected $USER2_UID"
+	cleanup_overlay
+	exit 1
+    fi
+
+    echo "=== mounting overlayfs with idmapped lower (userxattr) ==="
+    # userxattr makes overlayfs use the user.overlay.* xattr namespace
+    # (reachable without CAP_SYS_ADMIN). redirect_dir is intentionally
+    # NOT set: fs/overlayfs/params.c rejects userxattr+redirect_dir=on,
+    # and the silent default with userxattr is NOFOLLOW which neither
+    # writes nor follows redirect xattrs. So we cannot exercise
+    # user.overlay.redirect from this mount.
+    mount -t overlay overlay \
+	-o "lowerdir=$OVERLAY_BASE/lower-idmap,upperdir=$OVERLAY_BASE/upper,workdir=$OVERLAY_BASE/work,userxattr" \
+	"$OVERLAY_BASE/merged"
+
+    local fstype
+    fstype=$(findmnt -n -o FSTYPE "$OVERLAY_BASE/merged")
+    if [[ "$fstype" != "overlay" ]]; then
+	echo "ERROR: merged dir is not overlayfs (got '$fstype')"
+	cleanup_overlay
+	exit 1
+    fi
+
+    echo "=== files via overlay merged view (should be $USER2) ==="
+    ls -ln "$OVERLAY_BASE/merged/coreutils" | head -5
+
+    echo "=== building coreutils as $USER2 (non-root) ==="
+    $runas2 sh -c "cd '$OVERLAY_BASE/merged/coreutils' && \
+		   cargo build --release -j\$(nproc)"
+
+    $runas2 "$OVERLAY_BASE/merged/coreutils/target/release/coreutils" --version
+
+    echo "=== upper-layer files (copy-up should be owned by $USER2) ==="
+    find "$OVERLAY_BASE/upper" -maxdepth 4 -printf '%u %p\n' 2>/dev/null \
+	| head -10
+
+    # ----------------------------------------------------------------
+    # Overlayfs feature checks on the idmapped lower:
+    #   - whiteout    (rm of lower-only file -> upper c 0 0)
+    #   - opaque dir  (rm -rf + mkdir of lower dir -> user.overlay.opaque=y)
+    #   - dir rename  (mv of lower dir -- behaviour check only, no
+    #                  user.overlay.redirect assertion: under userxattr,
+    #                  fs/overlayfs/params.c:982 unconditionally forces
+    #                  redirect_mode=NOFOLLOW, so ovl_redirect_dir() is
+    #                  false and the xattr is never written. We still
+    #                  exercise the rename to confirm user-visible
+    #                  behaviour -- whether overlayfs gets there via a
+    #                  redirect xattr or full copy-up is an
+    #                  implementation detail we don't pin down here.)
+    # Mount uses `userxattr`, so overlayfs writes/reads its metadata in
+    # the user.overlay.* namespace (no CAP_SYS_ADMIN needed). Mutations
+    # run as $USER2 so we exercise unprivileged copy-up over the
+    # idmapped lower. Each check hard-fails on bad state.
+    # ----------------------------------------------------------------
+    if ! command -v getfattr &>/dev/null; then
+	apt-get update && apt-get install -y attr
+    fi
+
+    fail_overlay() {
+	echo "ERROR: $*"
+	cleanup_overlay
+	exit 1
+    }
+
+    echo "=== feature: whiteout (rm lower-only file as $USER2) ==="
+    local WO="LICENSE"
+    [[ -f "$OVERLAY_BASE/lower/coreutils/$WO" ]] \
+	|| fail_overlay "lower/coreutils/$WO missing in upstream layout"
+    $runas2 rm "$OVERLAY_BASE/merged/coreutils/$WO"
+    local wo_upper="$OVERLAY_BASE/upper/coreutils/$WO"
+    [[ -c "$wo_upper" ]] \
+	|| fail_overlay "expected whiteout char dev at upper/$WO; got $(ls -ld "$wo_upper" 2>&1)"
+    local wo_dev
+    wo_dev=$(stat -c '%t:%T' "$wo_upper")
+    [[ "$wo_dev" == "0:0" ]] \
+	|| fail_overlay "whiteout rdev=$wo_dev, expected 0:0"
+    [[ ! -e "$OVERLAY_BASE/merged/coreutils/$WO" ]] \
+	|| fail_overlay "merged view still shows $WO after delete"
+    echo "whiteout OK: upper/$WO is c 0 0; merged view hides it"
+
+    echo "=== feature: opaque dir (rm -rf + mkdir of lower dir as $USER2) ==="
+    local OPQ="util"
+    [[ -d "$OVERLAY_BASE/lower/coreutils/$OPQ" ]] \
+	|| fail_overlay "lower/coreutils/$OPQ missing in upstream layout"
+    $runas2 rm -rf "$OVERLAY_BASE/merged/coreutils/$OPQ"
+    $runas2 mkdir  "$OVERLAY_BASE/merged/coreutils/$OPQ"
+    local opq_upper="$OVERLAY_BASE/upper/coreutils/$OPQ"
+    [[ -d "$opq_upper" ]] \
+	|| fail_overlay "expected upper/$OPQ to be a directory; got $(ls -ld "$opq_upper" 2>&1)"
+    local opq
+    opq=$(getfattr --absolute-names --only-values \
+		   -n user.overlay.opaque "$opq_upper" 2>/dev/null || true)
+    [[ "$opq" == "y" ]] \
+	|| fail_overlay "user.overlay.opaque on upper/$OPQ = '$opq', expected 'y' (xattrs: $(getfattr -d -m '.' "$opq_upper" 2>&1))"
+    local merged_entries
+    merged_entries=$(find "$OVERLAY_BASE/merged/coreutils/$OPQ" -mindepth 1 \
+			  | wc -l)
+    [[ "$merged_entries" -eq 0 ]] \
+	|| fail_overlay "merged/$OPQ should be empty (lower hidden); has $merged_entries entries"
+    echo "opaque OK: upper/$OPQ has user.overlay.opaque=y; merged shows empty"
+
+    echo "=== feature: dir rename (mv lower dir as $USER2) ==="
+    # No user.overlay.redirect assertion: with userxattr,
+    # fs/overlayfs/params.c:982 unconditionally forces
+    # redirect_mode=NOFOLLOW, so ovl_redirect_dir() is false and the
+    # xattr is never written. We exercise the rename to confirm
+    # user-visible behaviour (whether overlayfs gets there via redirect
+    # xattr or full copy-up is an implementation detail).
+    local RDR_SRC="docs"
+    local RDR_DST="docs-renamed"
+    [[ -d "$OVERLAY_BASE/lower/coreutils/$RDR_SRC" ]] \
+	|| fail_overlay "lower/coreutils/$RDR_SRC missing in upstream layout"
+    local lower_files
+    lower_files=$(find "$OVERLAY_BASE/lower/coreutils/$RDR_SRC" -type f | wc -l)
+    $runas2 mv "$OVERLAY_BASE/merged/coreutils/$RDR_SRC" \
+	       "$OVERLAY_BASE/merged/coreutils/$RDR_DST"
+    local rdr_upper="$OVERLAY_BASE/upper/coreutils/$RDR_DST"
+    [[ -d "$rdr_upper" ]] \
+	|| fail_overlay "expected upper/$RDR_DST to be a dir after mv; got $(ls -ld "$rdr_upper" 2>&1)"
+    [[ ! -e "$OVERLAY_BASE/merged/coreutils/$RDR_SRC" ]] \
+	|| fail_overlay "old name $RDR_SRC still visible in merged after mv"
+    local merged_files
+    merged_files=$(find "$OVERLAY_BASE/merged/coreutils/$RDR_DST" -type f \
+			| wc -l)
+    [[ "$merged_files" -ge "$lower_files" ]] \
+	|| fail_overlay "merged/$RDR_DST has $merged_files files, lower had $lower_files (lower contents did not follow rename)"
+    echo "rename OK: merged/$RDR_DST has $merged_files files (lower had $lower_files)"
+    # Informational: dump xattrs on the renamed upper dir. Under
+    # userxattr we expect user.overlay.redirect to be absent; if a
+    # future kernel relaxes the params.c:982 forced-NOFOLLOW, this log
+    # is the breadcrumb that surfaces it.
+    echo "  upper xattrs on renamed dir (informational, no assertion):"
+    getfattr -d -m '.' "$rdr_upper" 2>&1 | sed 's/^/    /' || true
+
+    cleanup_overlay
+}
+
+main "$@"

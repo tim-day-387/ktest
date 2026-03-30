@@ -1,0 +1,493 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Run RENAME_WHITEOUT tests on Lustre (root filesystem).
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
+
+require-lustre-kernel-config
+require-lustre-debug-kernel-config
+require-kernel-config LNET=y
+require-kernel-config LUSTRE=y
+require-kernel-config ZFS=y
+require-kernel-config ROOT_LUSTRE=y
+require-kernel-config USER_NS
+
+config-mem 10G
+config-timeout 60
+
+validate_lustre_mount()
+{
+    local mountpoint="$1"
+    local fstype
+
+    fstype=$(findmnt -n -o FSTYPE "$mountpoint")
+    if [[ "$fstype" != "lustre" ]]; then
+	echo "ERROR: $mountpoint is not Lustre (got '$fstype')"
+	return 1
+    fi
+}
+
+# Basic: rename a file with RENAME_WHITEOUT; source becomes a whiteout entry
+test_rename_whiteout_basic()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    python3 - <<'EOF'
+import os
+import sys
+import stat
+import ctypes
+import ctypes.util
+
+NR_renameat2 = 316        # x86_64
+AT_FDCWD    = -100
+RENAME_WHITEOUT = (1 << 2)
+
+libc = ctypes.CDLL(None, use_errno=True)
+syscall = libc.syscall
+syscall.restype = ctypes.c_long
+
+def renameat2(src, dst, flags):
+    ret = syscall(
+        ctypes.c_long(NR_renameat2),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(src.encode()),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(dst.encode()),
+        ctypes.c_uint(flags),
+    )
+    if ret != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), f"{src!r} -> {dst!r}")
+
+src = "/ktest_rw_src"
+dst = "/ktest_rw_dst"
+
+try:
+    # Create source file
+    with open(src, "w") as f:
+        f.write("whiteout test\n")
+
+    renameat2(src, dst, RENAME_WHITEOUT)
+
+    # dst must exist and be a regular file
+    if not os.path.exists(dst):
+        print("ERROR: destination does not exist after rename")
+        sys.exit(1)
+
+    # src must now be a whiteout: character device with rdev == 0
+    st = os.lstat(src)
+    if not stat.S_ISCHR(st.st_mode):
+        print(f"ERROR: source is not a character device (mode=0o{st.st_mode:o})")
+        sys.exit(1)
+    if os.major(st.st_rdev) != 0 or os.minor(st.st_rdev) != 0:
+        print(f"ERROR: whiteout rdev is {os.major(st.st_rdev)}:{os.minor(st.st_rdev)}, expected 0:0")
+        sys.exit(1)
+
+    print("basic whiteout: OK")
+finally:
+    for p in (src, dst):
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+EOF
+}
+
+# Destination file retains correct data after rename with whiteout
+test_rename_whiteout_data()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    python3 - <<'EOF'
+import os
+import sys
+import ctypes
+
+NR_renameat2 = 316
+AT_FDCWD    = -100
+RENAME_WHITEOUT = (1 << 2)
+
+libc = ctypes.CDLL(None, use_errno=True)
+syscall = libc.syscall
+syscall.restype = ctypes.c_long
+
+def renameat2(src, dst, flags):
+    ret = syscall(
+        ctypes.c_long(NR_renameat2),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(src.encode()),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(dst.encode()),
+        ctypes.c_uint(flags),
+    )
+    if ret != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), f"{src!r} -> {dst!r}")
+
+src = "/ktest_rw_data_src"
+dst = "/ktest_rw_data_dst"
+data = b"RENAME_WHITEOUT data integrity\n" * 128
+
+try:
+    with open(src, "wb") as f:
+        f.write(data)
+
+    renameat2(src, dst, RENAME_WHITEOUT)
+
+    with open(dst, "rb") as f:
+        readback = f.read()
+
+    if readback != data:
+        print("ERROR: destination data mismatch after RENAME_WHITEOUT")
+        sys.exit(1)
+
+    print("destination data integrity: OK")
+finally:
+    for p in (src, dst):
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+EOF
+}
+
+# Whiteout entry has correct stat: S_IFCHR mode, rdev 0:0, nlink 1
+test_rename_whiteout_stat()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    python3 - <<'EOF'
+import os
+import sys
+import stat
+import ctypes
+
+NR_renameat2 = 316
+AT_FDCWD    = -100
+RENAME_WHITEOUT = (1 << 2)
+
+libc = ctypes.CDLL(None, use_errno=True)
+syscall = libc.syscall
+syscall.restype = ctypes.c_long
+
+def renameat2(src, dst, flags):
+    ret = syscall(
+        ctypes.c_long(NR_renameat2),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(src.encode()),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(dst.encode()),
+        ctypes.c_uint(flags),
+    )
+    if ret != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), f"{src!r} -> {dst!r}")
+
+src = "/ktest_rw_stat_src"
+dst = "/ktest_rw_stat_dst"
+
+try:
+    with open(src, "w") as f:
+        f.write("stat test\n")
+
+    renameat2(src, dst, RENAME_WHITEOUT)
+
+    st = os.lstat(src)
+
+    if not stat.S_ISCHR(st.st_mode):
+        print(f"ERROR: expected S_IFCHR, got mode 0o{st.st_mode:o}")
+        sys.exit(1)
+
+    if os.major(st.st_rdev) != 0 or os.minor(st.st_rdev) != 0:
+        print(f"ERROR: rdev {os.major(st.st_rdev)}:{os.minor(st.st_rdev)}, expected 0:0")
+        sys.exit(1)
+
+    if st.st_nlink != 1:
+        print(f"ERROR: nlink={st.st_nlink}, expected 1")
+        sys.exit(1)
+
+    print(f"whiteout stat (mode=0o{st.st_mode:o}, rdev=0:0, nlink={st.st_nlink}): OK")
+finally:
+    for p in (src, dst):
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+EOF
+}
+
+# Whiteout can be unlinked normally
+test_rename_whiteout_unlink()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    python3 - <<'EOF'
+import os
+import sys
+import ctypes
+
+NR_renameat2 = 316
+AT_FDCWD    = -100
+RENAME_WHITEOUT = (1 << 2)
+
+libc = ctypes.CDLL(None, use_errno=True)
+syscall = libc.syscall
+syscall.restype = ctypes.c_long
+
+def renameat2(src, dst, flags):
+    ret = syscall(
+        ctypes.c_long(NR_renameat2),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(src.encode()),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(dst.encode()),
+        ctypes.c_uint(flags),
+    )
+    if ret != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), f"{src!r} -> {dst!r}")
+
+src = "/ktest_rw_unlink_src"
+dst = "/ktest_rw_unlink_dst"
+
+try:
+    with open(src, "w") as f:
+        f.write("unlink test\n")
+
+    renameat2(src, dst, RENAME_WHITEOUT)
+
+    # unlink the whiteout at src
+    os.unlink(src)
+
+    if os.path.lexists(src):
+        print("ERROR: whiteout still exists after unlink")
+        sys.exit(1)
+
+    print("whiteout unlink: OK")
+finally:
+    for p in (src, dst):
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+EOF
+}
+
+# Rename over an existing destination with whiteout at source
+test_rename_whiteout_overwrite()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    python3 - <<'EOF'
+import os
+import sys
+import stat
+import ctypes
+
+NR_renameat2 = 316
+AT_FDCWD    = -100
+RENAME_WHITEOUT = (1 << 2)
+
+libc = ctypes.CDLL(None, use_errno=True)
+syscall = libc.syscall
+syscall.restype = ctypes.c_long
+
+def renameat2(src, dst, flags):
+    ret = syscall(
+        ctypes.c_long(NR_renameat2),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(src.encode()),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(dst.encode()),
+        ctypes.c_uint(flags),
+    )
+    if ret != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), f"{src!r} -> {dst!r}")
+
+src     = "/ktest_rw_overwrite_src"
+dst     = "/ktest_rw_overwrite_dst"
+src_data = b"source data\n"
+dst_data = b"pre-existing destination data\n"
+
+try:
+    with open(src, "wb") as f:
+        f.write(src_data)
+    with open(dst, "wb") as f:
+        f.write(dst_data)
+
+    renameat2(src, dst, RENAME_WHITEOUT)
+
+    # dst must now hold src_data
+    with open(dst, "rb") as f:
+        readback = f.read()
+    if readback != src_data:
+        print(f"ERROR: dst has wrong data after overwrite rename")
+        sys.exit(1)
+
+    # src must be a whiteout
+    st = os.lstat(src)
+    if not stat.S_ISCHR(st.st_mode):
+        print(f"ERROR: source is not a character device after overwrite rename")
+        sys.exit(1)
+    if os.major(st.st_rdev) != 0 or os.minor(st.st_rdev) != 0:
+        print(f"ERROR: whiteout rdev {os.major(st.st_rdev)}:{os.minor(st.st_rdev)}, expected 0:0")
+        sys.exit(1)
+
+    print("overwrite rename with whiteout: OK")
+finally:
+    for p in (src, dst):
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+EOF
+}
+
+# RENAME_WHITEOUT inside a subdirectory
+test_rename_whiteout_subdir()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    python3 - <<'EOF'
+import os
+import sys
+import stat
+import ctypes
+
+NR_renameat2 = 316
+AT_FDCWD    = -100
+RENAME_WHITEOUT = (1 << 2)
+
+libc = ctypes.CDLL(None, use_errno=True)
+syscall = libc.syscall
+syscall.restype = ctypes.c_long
+
+def renameat2(src, dst, flags):
+    ret = syscall(
+        ctypes.c_long(NR_renameat2),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(src.encode()),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(dst.encode()),
+        ctypes.c_uint(flags),
+    )
+    if ret != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), f"{src!r} -> {dst!r}")
+
+d   = "/ktest_rw_subdir"
+src = f"{d}/src"
+dst = f"{d}/dst"
+
+try:
+    os.makedirs(d, exist_ok=True)
+
+    with open(src, "w") as f:
+        f.write("subdir whiteout test\n")
+
+    renameat2(src, dst, RENAME_WHITEOUT)
+
+    st = os.lstat(src)
+    if not stat.S_ISCHR(st.st_mode):
+        print(f"ERROR: source in subdir is not a character device (mode=0o{st.st_mode:o})")
+        sys.exit(1)
+    if os.major(st.st_rdev) != 0 or os.minor(st.st_rdev) != 0:
+        print(f"ERROR: whiteout rdev {os.major(st.st_rdev)}:{os.minor(st.st_rdev)}, expected 0:0")
+        sys.exit(1)
+
+    if not os.path.exists(dst):
+        print("ERROR: destination does not exist in subdir")
+        sys.exit(1)
+
+    print("whiteout in subdirectory: OK")
+finally:
+    import shutil
+    try:
+        shutil.rmtree(d)
+    except OSError:
+        pass
+EOF
+}
+
+# RENAME_WHITEOUT combined with RENAME_EXCHANGE must be rejected (EINVAL)
+test_rename_whiteout_exchange_einval()
+{
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    python3 - <<'EOF'
+import os
+import sys
+import errno
+import ctypes
+
+NR_renameat2 = 316
+AT_FDCWD       = -100
+RENAME_EXCHANGE  = (1 << 1)
+RENAME_WHITEOUT  = (1 << 2)
+
+libc = ctypes.CDLL(None, use_errno=True)
+syscall = libc.syscall
+syscall.restype = ctypes.c_long
+
+def renameat2(src, dst, flags):
+    ret = syscall(
+        ctypes.c_long(NR_renameat2),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(src.encode()),
+        ctypes.c_int(AT_FDCWD), ctypes.c_char_p(dst.encode()),
+        ctypes.c_uint(flags),
+    )
+    if ret != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+    return 0
+
+src = "/ktest_rw_einval_src"
+dst = "/ktest_rw_einval_dst"
+
+try:
+    with open(src, "w") as f:
+        f.write("a\n")
+    with open(dst, "w") as f:
+        f.write("b\n")
+
+    try:
+        renameat2(src, dst, RENAME_EXCHANGE | RENAME_WHITEOUT)
+        print("ERROR: RENAME_EXCHANGE|RENAME_WHITEOUT should have failed with EINVAL")
+        sys.exit(1)
+    except OSError as e:
+        if e.errno != errno.EINVAL:
+            print(f"ERROR: expected EINVAL, got errno {e.errno} ({e})")
+            sys.exit(1)
+
+    print("RENAME_EXCHANGE|RENAME_WHITEOUT -> EINVAL: OK")
+finally:
+    for p in (src, dst):
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+EOF
+}
+
+main "$@"

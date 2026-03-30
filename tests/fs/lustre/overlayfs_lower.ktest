@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Build uutils/coreutils on an overlayfs mount backed by Lustre, with the
+# git repo populated in the lower (read-only) layer so the build exercises
+# overlayfs copy-up semantics.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
+
+config-kernel-base "$ktest_dir/config/debian.config"
+config-lustre-root
+
+require-lustre-base-kernel-config
+require-kernel-config LNET=y
+require-kernel-config LUSTRE=y
+require-kernel-config ZFS=y
+require-kernel-config MODULES=n
+
+# USB boot requires these drivers built-in (no initramfs available)
+require-kernel-config USB=y
+require-kernel-config USB_XHCI_HCD=y
+require-kernel-config USB_XHCI_PCI=y
+require-kernel-config USB_EHCI_HCD=y
+require-kernel-config USB_EHCI_PCI=y
+require-kernel-config USB_STORAGE=y
+require-kernel-config SCSI=y
+require-kernel-config BLK_DEV_SD=y
+require-kernel-config PINCTRL_METEORLAKE=y
+
+require-kernel-config USER_NS
+require-kernel-config OVERLAY_FS
+
+config-networking tap
+config-mem 10G
+config-timeout 120
+
+OVERLAY_BASE="/ktest_overlay"
+
+validate_lustre_mount()
+{
+    local mountpoint="$1"
+    local fstype
+
+    fstype=$(findmnt -n -o FSTYPE "$mountpoint")
+    if [[ "$fstype" != "lustre" ]]; then
+	echo "ERROR: $mountpoint is not Lustre (got '$fstype')"
+	return 1
+    fi
+}
+
+test_overlay_build_coreutils_lower()
+{
+    dmesg --console-level 8
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    umount "$OVERLAY_BASE/merged" 2>/dev/null || true
+    rm -rf "$OVERLAY_BASE"
+    mkdir -p "$OVERLAY_BASE/lower" "$OVERLAY_BASE/upper" \
+	     "$OVERLAY_BASE/work" "$OVERLAY_BASE/merged"
+
+    cd "$OVERLAY_BASE/lower"
+    git clone --depth 1 https://github.com/uutils/coreutils.git
+
+    cd /
+    mount -t overlay overlay \
+	  -o "lowerdir=$OVERLAY_BASE/lower,upperdir=$OVERLAY_BASE/upper,workdir=$OVERLAY_BASE/work" \
+	  "$OVERLAY_BASE/merged"
+
+    fstype=$(findmnt -n -o FSTYPE "$OVERLAY_BASE/merged")
+    if [[ "$fstype" != "overlay" ]]; then
+	echo "ERROR: merged dir is not overlayfs (got '$fstype')"
+	exit 1
+    fi
+
+    cd "$OVERLAY_BASE/merged/coreutils"
+    cargo build --release -j"$(nproc)"
+
+    ./target/release/coreutils --version
+
+    cd /
+    umount "$OVERLAY_BASE/merged"
+    rm -rf "$OVERLAY_BASE"
+}
+
+main "$@"
