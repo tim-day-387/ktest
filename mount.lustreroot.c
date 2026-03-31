@@ -258,6 +258,13 @@ int main(void)
 
 	kmsg_log(KMSG_INFO, "switch_root done\n");
 
+	if (mount("tmpfs", "/run", "tmpfs",
+		  MS_NODEV | MS_NOSUID | MS_STRICTATIME,
+		  "mode=0755") < 0) {
+		kmsg_log(KMSG_ERR, "mount /run: %s\n", strerror(errno));
+		return 1;
+	}
+
 	execl("/sbin/init", "init", NULL);
 	execl("/init", "init", NULL);
 	kmsg_log(KMSG_ERR, "exec init: %s\n", strerror(errno));
