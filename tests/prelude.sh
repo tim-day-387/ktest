@@ -443,7 +443,9 @@ main()
 	    echo "ktest_no_vm=$ktest_no_vm"
 	    echo "ktest_lustre_allow_warnings=$ktest_lustre_allow_warnings"
 	    echo "ktest_lustre_root=$ktest_lustre_root"
-	    [[ -n $ktest_root_image ]] && echo "ktest_root_image=$ktest_root_image"
+	    if [[ -n $ktest_root_image ]]; then
+		echo "ktest_root_image=$ktest_root_image"
+	    fi
 	    ;;
 	init)
 	    create_ktest_user
