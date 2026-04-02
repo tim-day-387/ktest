@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Run idmapped mount tests on Lustre (root filesystem). Uses vfstest
+# from xfstests.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
+
+require-git https://github.com/kdave/xfstests.git "../../xfstests"
+
+config-lustre-root
+
+require-lustre-base-kernel-config
+require-kernel-config LNET=y
+require-kernel-config LUSTRE=y
+require-kernel-config ZFS=y
+require-kernel-config ROOT_LUSTRE=y
+require-kernel-config USER_NS
+
+config-mem 10G
+config-timeout 60
+
+validate_lustre_mount()
+{
+    local mountpoint="$1"
+    local fstype
+
+    fstype=$(findmnt -n -o FSTYPE "$mountpoint")
+    if [[ "$fstype" != "lustre" ]]; then
+	echo "ERROR: $mountpoint is not Lustre (got '$fstype')"
+	return 1
+    fi
+}
+
+init_idmapped()
+{
+    run_quiet "building vfstest" make -j "$ktest_cpus" -C "$ktest_dir/tests/xfstests/src/vfs"
+
+    echo "Load Lustre (not really needed)..."
+    modprobe lustre
+
+    echo "Validating root is Lustre..."
+    validate_lustre_mount /
+
+    # Create test users required by xfstests vfstest (USER1/USER2)
+    groupadd -g 1001 fsgqa	>& /dev/null || true
+    useradd -u 1001 -g 1001 fsgqa	>& /dev/null || true
+    groupadd -g 1002 fsgqa2	>& /dev/null || true
+    useradd -u 1002 -g 1002 fsgqa2	>& /dev/null || true
+
+    mkdir -p /mnt/idmapped-test
+    mkdir -p /mnt/idmapped-scratch
+}
+
+run_vfstest()
+{
+    local device
+    device=$(findmnt -n -o SOURCE /)
+
+    "$ktest_dir/tests/xfstests/src/vfs/vfstest" \
+	--fstype lustre \
+	--device "$device" \
+	--mountpoint /mnt/idmapped-test \
+	--scratch-mountpoint /mnt/idmapped-scratch \
+	"$@"
+}
+
+test_idmapped_mounts_supported()
+{
+    run_vfstest --idmapped-mounts-supported
+}
+
+test_core()
+{
+    run_vfstest --test-core
+}
+
+test_fscaps_regression()
+{
+    run_vfstest --test-fscaps-regression
+}
+
+test_nested_userns()
+{
+    run_vfstest --test-nested-userns
+}
+
+test_setattr_fix_968219708108()
+{
+    run_vfstest --test-setattr-fix-968219708108
+}
+
+test_setxattr_fix_705191b03d50()
+{
+    run_vfstest --test-setxattr-fix-705191b03d50
+}
+
+test_setgid_create_umask()
+{
+    run_vfstest --test-setgid-create-umask
+}
+
+test_setgid_create_acl()
+{
+    run_vfstest --test-setgid-create-acl
+}
+
+main "$@"
