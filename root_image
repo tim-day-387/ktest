@@ -220,7 +220,11 @@ update_files()
 
     ln -sf /lib/systemd/system/testrunner.service "$MNT/etc/systemd/system/multi-user.target.wants/testrunner.service"
 
-    touch "$MNT/etc/resolv.conf"
+    rm -f "$MNT/etc/resolv.conf"
+    cat > "$MNT/etc/resolv.conf" <<-ZZ
+	nameserver 8.8.8.8
+	nameserver 8.8.4.4
+ZZ
     chmod 644 "$MNT/etc/resolv.conf"
 
     mkdir -p "$MNT/root/"

@@ -116,7 +116,7 @@ ktest_usage_opts()
 {
     echo "      -a <arch>       architecture"
     echo "      -o <dir>        output directory; defaults to ./ktest-out"
-    echo "      -n (user|vde)   Networking type to use"
+    echo "      -n (user|tap|vde) Networking type to use"
     echo "      -x              bash debug statements"
     echo "      -h              display this help and exit"
 }
@@ -380,6 +380,49 @@ start_vm()
 
 	    qemu_cmd+=( \
 		-nic    user,model=virtio,hostfwd=tcp:127.0.0.1:$ktest_ssh_port-:22	\
+	    )
+	    ;;
+	tap)
+	    local bridge="ktest0"
+	    local tap="ktest-tap$$"
+	    local bridge_ip="172.20.0.1"
+	    local bridge_net="172.20.0.0/24"
+
+	    # Create bridge + NAT if not already set up
+	    if ! ip link show "$bridge" &>/dev/null; then
+		ip link add "$bridge" type bridge
+		ip link set "$bridge" type bridge stp_state 0 forward_delay 0
+		ip addr add "$bridge_ip/24" dev "$bridge"
+		ip link set "$bridge" up
+
+		iptables -t nat -C POSTROUTING -s "$bridge_net" ! -o "$bridge" -j MASQUERADE 2>/dev/null || \
+		    iptables -t nat -A POSTROUTING -s "$bridge_net" ! -o "$bridge" -j MASQUERADE
+		iptables -C FORWARD -i "$bridge" -j ACCEPT 2>/dev/null || \
+		    iptables -A FORWARD -i "$bridge" -j ACCEPT
+		iptables -C FORWARD -o "$bridge" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+		    iptables -A FORWARD -o "$bridge" -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+		# dnsmasq provides DHCP + DNS on the bridge
+		dnsmasq \
+		    --interface="$bridge"			\
+		    --bind-interfaces				\
+		    --dhcp-range=172.20.0.10,172.20.0.254,1h	\
+		    --dhcp-option=6,"$bridge_ip"		\
+		    --dhcp-leasefile=/tmp/ktest-dnsmasq.leases	\
+		    --pid-file=/tmp/ktest-dnsmasq.pid		\
+		    --log-facility=/tmp/ktest-dnsmasq.log
+	    fi
+
+	    # Create TAP device for this VM
+	    ip tuntap add dev "$tap" mode tap user $(id -u)
+	    ip link set "$tap" master "$bridge"
+	    ip link set "$tap" up
+
+	    trap "ip link del $tap 2>/dev/null" EXIT
+
+	    qemu_cmd+=( \
+		-netdev	tap,id=net0,ifname="$tap",script=no,downscript=no	\
+		-device	virtio-net-pci,netdev=net0				\
 	    )
 	    ;;
 	vde)

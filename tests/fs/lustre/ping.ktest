@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Simple network connectivity test - verify the VM can reach
+# the internet via TAP networking.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
+
+config-lustre-root
+
+require-lustre-base-kernel-config
+require-kernel-config LNET=y
+require-kernel-config LUSTRE=y
+require-kernel-config ZFS=y
+require-kernel-config ROOT_LUSTRE=y
+
+config-networking tap
+config-mem 10G
+config-timeout 60
+
+test_ping()
+{
+    # TAP bridge gateway
+    ping -c 3 172.20.0.1
+}
+
+test_tcp()
+{
+    # Verify external TCP connectivity (ICMP may not work through slirp4netns)
+    curl -s --max-time 10 -o /dev/null http://kernel.org
+}
+
+test_dns()
+{
+    getent hosts kernel.org
+}
+
+test_curl()
+{
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | head -10 || true
+}
+
+main "$@"

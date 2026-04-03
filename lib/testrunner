@@ -105,8 +105,25 @@ for i in "${ktest_make_install[@]}"; do
     popd > /dev/null
 done
 
+# Wait for networking to come up (DHCP may still be in progress)
+for i in $(seq 1 300); do
+    local_ip=$(ip address show eth0 2>/dev/null | awk -F' ' '$1 == "inet" { print $2 }' | awk -F'/' '{ print $1 }')
+    [[ -n $local_ip ]] && break
+    sleep 0.1
+done
+
+if [[ -z $local_ip ]]; then
+    echo "Warning: no IP address on eth0 after 30s"
+fi
+
+# Configure DNS - use local dnsmasq for TAP networking, external for user mode
+if [[ ${ktest_networking:-user} == tap ]]; then
+    printf "nameserver 172.20.0.1\n" > /etc/resolv.conf
+else
+    printf "nameserver 8.8.8.8\nnameserver 8.8.4.4\n" > /etc/resolv.conf
+fi
+
 # Update hosts file
-local_ip=$(ip address show eth0 | awk -F' ' '$1 == "inet" { print $2 }' | awk -F'/' '{ print $1 }')
 echo "$local_ip" "$(hostname)" >> /etc/hosts
 
 get_stratch_devs()

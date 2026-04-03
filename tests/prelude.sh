@@ -43,6 +43,7 @@ if [[ ! -v ktest_cpus ]]; then
     ktest_no_kbuild=false
     ktest_no_vm=false
     ktest_lustre_root=0
+    ktest_networking=
     ktest_root_image=
 
     BUILD_ON_HOST=""
@@ -251,6 +252,11 @@ config-root-image()
     ktest_root_image=$1
 }
 
+config-networking()
+{
+    ktest_networking=$1
+}
+
 config-no-kbuild()
 {
     ktest_no_kbuild=true
@@ -443,6 +449,9 @@ main()
 	    echo "ktest_no_vm=$ktest_no_vm"
 	    echo "ktest_lustre_allow_warnings=$ktest_lustre_allow_warnings"
 	    echo "ktest_lustre_root=$ktest_lustre_root"
+	    if [[ -n $ktest_networking ]]; then
+		echo "ktest_networking=$ktest_networking"
+	    fi
 	    if [[ -n $ktest_root_image ]]; then
 		echo "ktest_root_image=$ktest_root_image"
 	    fi

@@ -31,7 +31,8 @@ RUN apt-get update && apt-get install -y \
     libtirpc-dev libblkid-dev libudev-dev \
     rpm dh-python dkms libcurl4-openssl-dev \
     libpam0g-dev python3-all-dev python3-cffi \
-    python3-setuptools python3-sphinx
+    python3-setuptools python3-sphinx \
+    iptables dnsmasq-base
 
 # Purge this stuff
 RUN rm -rf /var/lib/apt/lists/*
