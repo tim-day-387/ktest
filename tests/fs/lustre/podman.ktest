@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Simple podman build test - verify podman can build a basic
+# Ubuntu 22.04 container image.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
+
+config-kernel-base "$ktest_dir/config/debian.config"
+config-lustre-root
+
+require-lustre-base-kernel-config
+require-kernel-config LNET=y
+require-kernel-config LUSTRE=y
+require-kernel-config ZFS=y
+require-kernel-config ROOT_LUSTRE=y
+require-kernel-config FUSE_FS=y
+require-kernel-config NAMESPACES
+require-kernel-config USER_NS
+require-kernel-config PID_NS
+require-kernel-config NET_NS
+require-kernel-config IPC_NS
+require-kernel-config UTS_NS
+require-kernel-config CGROUP_PIDS
+require-kernel-config CGROUP_DEVICE
+require-kernel-config MEMCG
+require-kernel-config CPUSETS
+require-kernel-config CGROUP_BPF
+require-kernel-config POSIX_MQUEUE
+require-kernel-config BRIDGE
+require-kernel-config VETH
+require-kernel-config NF_TABLES
+require-kernel-config NFT_NAT
+require-kernel-config NFT_MASQ
+require-kernel-config NF_CONNTRACK
+
+config-networking tap
+config-mem 10G
+config-timeout 120
+
+test_podman_build()
+{
+    local builddir=$(mktemp -d)
+
+    cat > "$builddir/Containerfile" <<'EOF'
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y ssh && rm -rf /var/lib/apt/lists/*
+EOF
+
+    podman \
+	--cgroup-manager=cgroupfs \
+	--events-backend=file \
+	build -t ktest-u22-ssh "$builddir"
+    podman image exists ktest-u22-ssh
+}
+
+main "$@"
