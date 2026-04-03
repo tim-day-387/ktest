@@ -34,6 +34,7 @@ require-kernel-config USB_EHCI_PCI=y
 require-kernel-config USB_STORAGE=y
 require-kernel-config SCSI=y
 require-kernel-config BLK_DEV_SD=y
+require-kernel-config PINCTRL_METEORLAKE=y
 
 config-mem 10G
 config-timeout 60
