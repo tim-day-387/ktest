@@ -116,13 +116,15 @@ make --quiet -j$(nproc) rpms
     "rocky9": {
         "image": "lustre-rocky9:latest",
         "build_script": """
+O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
 ./autogen.sh
-./configure --enable-server
+./configure --enable-server --with-o2ib=$O2IB_PATH
 make --quiet -j$(nproc)
 """,
         "package_script": """
+O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
 ./autogen.sh
-./configure --disable-server
+./configure --disable-server --with-o2ib=$O2IB_PATH
 make --quiet -j$(nproc) rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",

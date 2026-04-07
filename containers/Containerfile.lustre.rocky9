@@ -23,6 +23,11 @@ RUN dnf install -y gcc autoconf libtool which make patch diffutils file \
 	kernel-abi-stablelists kernel-rpm-macros kmod pkgconfig
 RUN dnf install -y --enablerepo=*debug* kernel-debuginfo
 
+# DOCA-OFED
+RUN printf '[mlnx_ofed]\nname=MLNX_OFED Repository - el9\nbaseurl=https://linux.mellanox.com/public/repo/mlnx_ofed/latest/rhel9.4/x86_64/\nenabled=1\ngpgcheck=0\n' \
+	> /etc/yum.repos.d/mlnx_ofed.repo
+RUN dnf install -y mlnx-ofa_kernel-devel mlnx-ofa_kernel-source
+
 # Install latest e2fsprogs from Lustre mirror
 RUN printf '[e2fsprogs]\nname=e2fsprogs Mirror - el9\nbaseurl=https://lustre.software/mirror/e2fsprogs/latest/el9/\nenabled=1\ngpgcheck=0\n' \
 	> /etc/yum.repos.d/e2fsprogs.repo
