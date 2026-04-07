@@ -296,9 +296,15 @@ function build_lustre_intree()
     export LLVM="-20"
 
     ./autogen.sh
-    ./configure || cat config.log
+    ./configure || { cat config.log; exit 1; }
+
+    validate_lustre_intree_build
 
     cd "$old"
+}
+
+function validate_lustre_intree_build() {
+    check_file "$ktest_lustre_build/config.h"
 }
 
 function build_lustre()
