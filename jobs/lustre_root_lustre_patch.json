@@ -9,9 +9,17 @@
     {
       "name": "lustre_native_zfs",
       "platform": "native_2",
-      "package": "tests/fs/lustre/lustre_root.ktest",
+      "build": "tests/fs/lustre/lustre_root.ktest",
       "backing_storage": "zfs",
       "depends_on": ["lustre_patch"]
+    },
+    {
+      "name": "boot",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/lustre_root.ktest",
+      "run": "tests/fs/lustre/lustre_root.ktest",
+      "backing_storage": "zfs",
+      "depends_on": ["lustre_native_zfs"]
     }
   ]
 }

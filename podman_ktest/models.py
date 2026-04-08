@@ -70,6 +70,8 @@ class ContainerJob:
         ]
 
         # Add kernel and lustre as overlay volumes if not using tarballs
+        # userns_mode="keep-id" maps host UID to container UID, so files
+        # appear with correct ownership without per-mount idmap options
         if not self.use_tarball_input and self.dirs:
             if self.sync_kernel:
                 overlay_volumes.append(
@@ -99,7 +101,6 @@ class ContainerJob:
                 "source": ccache_dir,
                 "target": "/tmp/ccache",
                 "read_only": False,
-                "options": ["U"],  # chown to match container user
             },
         ]
 
@@ -112,7 +113,6 @@ class ContainerJob:
                     "source": "/tmp/ktest-packages",
                     "target": "/tmp/ktest-output",
                     "read_only": False,
-                    "options": ["U"],  # chown to match container user
                 }
             )
 
@@ -137,6 +137,7 @@ class ContainerJob:
             devices=["/dev/kvm", "/dev/net/tun"],
             cap_add=["NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"],
             sysctls={"net.ipv4.ip_forward": "1"},
+            userns_mode="keep-id",
             pids_limit=100000,
             overlay_volumes=overlay_volumes,
             mounts=mounts,
