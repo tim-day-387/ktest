@@ -14,6 +14,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$(readlink -e "$0")")"
+
+FIRMWARE=true
+while [[ $# -gt 0 ]]; do
+    case $1 in
+	--no-firmware)	FIRMWARE=false; shift ;;
+	*)		break ;;
+    esac
+done
+
 OUTPUT="${1:-lustreroot-initramfs}"
 OUTPUT="$(readlink -f "$OUTPUT")"
 
@@ -23,14 +32,14 @@ TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
 INITRAMFS="$TMPDIR/initramfs"
-mkdir -p "$INITRAMFS"/{dev,proc,sys,tmp,newroot}
+mkdir -p "$INITRAMFS"/{dev,proc,sys,tmp,mnt,newroot}
 
 # Compile mount.lustreroot statically as /init so it runs without shared libs
 echo "Compiling mount.lustreroot..."
 cc -Wall -static -o "$INITRAMFS/init" "$SCRIPT_DIR/mount.lustreroot.c"
 
 # Populate firmware from linux-firmware if available
-if [ -d "$FIRMWARE_DIR" ]; then
+if $FIRMWARE && [ -d "$FIRMWARE_DIR" ]; then
 	echo "Copying firmware from $FIRMWARE_DIR..."
 	mkdir -p "$INITRAMFS/lib/firmware"
 	cp -a "$FIRMWARE_DIR/i915" "$INITRAMFS/lib/firmware/" 2>/dev/null || true

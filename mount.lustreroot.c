@@ -6,19 +6,19 @@
  * mount.lustreroot - Mount Lustre root filesystem from kernel command line
  *
  * Reads the lustreroot= parameter from /proc/cmdline, starts local ZFS-backed
- * Lustre servers (MGS/MDT + OSTs), and mounts the Lustre client on /.
+ * Lustre servers (MGS/MDT + OSTs) via normal mount calls, then mounts the
+ * Lustre client on /newroot and pivots into it.
  *
- * Intended to be called from an initramfs init script when root=/dev/lustre
- * is specified on the kernel command line.
+ * Intended to run as /init in an initramfs when the kernel command line
+ * contains:
+ *   lustreroot=<pool>,device=<path>[,fsname=<name>]
  *
- * /proc/cmdline format:
- *   root=/dev/lustre lustreroot=<pool>,device=<path>[,fsname=<name>]
- *
- * The pool, device, and fsname are extracted and passed to the kernel as:
- *   lustreroot=<device>:<pool>[/<fsname>]
+ * The initramfs issues individual mount -t lustre_tgt calls for each server
+ * target, then mount -t lustre for the client. No custom kernel mount code
+ * is required.
  *
  * Build (standalone, outside kernel tree):
- *   cc -Wall -o mount.lustreroot mount.lustreroot.c
+ *   cc -Wall -static -o mount.lustreroot mount.lustreroot.c
  */
 
 #include <errno.h>
@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mount.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define PROG		"mount.lustreroot"
@@ -165,10 +166,53 @@ static int parse_lustreroot(const char *value,
 	return 0;
 }
 
+/*
+ * mount_lustre_target - Mount a single Lustre server target
+ *
+ * Issues a normal mount -t lustre_tgt call with the appropriate options.
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+static int mount_lustre_target(const char *dataset, const char *mntpt,
+			       const char *svname, int is_mgs)
+{
+	char mount_data[512];
+	int rc;
+
+	mkdir(mntpt, 0755);
+
+	if (is_mgs)
+		rc = snprintf(mount_data, sizeof(mount_data),
+			      "svname=%s,mgs,update,network=lo,osd=osd-zfs,device=%s",
+			      svname, dataset);
+	else
+		rc = snprintf(mount_data, sizeof(mount_data),
+			      "svname=%s,mgsnode=0@lo,update,network=lo,osd=osd-zfs,device=%s",
+			      svname, dataset);
+
+	if (rc < 0 || (size_t)rc >= sizeof(mount_data)) {
+		kmsg_log(KMSG_ERR, "mount data too long for %s\n", svname);
+		return -1;
+	}
+
+	kmsg_log(KMSG_INFO, "mounting target %s (%s) at %s%s\n",
+		 dataset, svname, mntpt, is_mgs ? " [MGS]" : "");
+
+	if (mount(dataset, mntpt, "lustre", 0, mount_data) < 0) {
+		kmsg_log(KMSG_ERR, "mount %s failed: %s\n",
+			 svname, strerror(errno));
+		return -1;
+	}
+
+	kmsg_log(KMSG_INFO, "target %s mounted successfully\n", svname);
+	return 0;
+}
+
 int main(void)
 {
 	char cmdline[CMDLINE_MAX];
 	char pool[256], device[256], fsname[64];
+	char dataset[320], svname[64], client_dev[320];
 	char mount_data[512];
 	char *lustreroot_val;
 	FILE *f;
@@ -180,7 +224,25 @@ int main(void)
 	mount("devtmpfs", "/dev",  "devtmpfs", 0, NULL);
 
 	kmsg_open();
-	kmsg_log(KMSG_INFO, "waiting for devices to settle\n");
+	kmsg_log(KMSG_INFO, "starting lustre root filesystem setup\n");
+
+	/*
+	 * Disable LNet Dynamic Peer Discovery before any Lustre mounts.
+	 * When discovery is enabled, the "network=" mount option is rejected.
+	 * Since all targets are local (loopback), discovery is not needed.
+	 */
+	{
+		int dfd = open("/sys/module/lnet/parameters/lnet_peer_discovery_disabled",
+			       O_WRONLY);
+		if (dfd >= 0) {
+			write(dfd, "1", 1);
+			close(dfd);
+			kmsg_log(KMSG_INFO, "disabled LNet peer discovery\n");
+		} else {
+			kmsg_log(KMSG_ERR, "cannot disable peer discovery: %s\n",
+				 strerror(errno));
+		}
+	}
 
 	/* Read kernel command line */
 	f = fopen(CMDLINE_PATH, "r");
@@ -210,23 +272,67 @@ int main(void)
 			     fsname, sizeof(fsname)) < 0)
 		return 1;
 
+	kmsg_log(KMSG_INFO, "pool=%s device=%s fsname=%s\n",
+		 pool, device, fsname);
+
 	/*
-	 * Build the kernel mount data string.  The kernel's lustreroot= mount
-	 * option requires "<device>:<pool>[/<fsname>]"; the client MGC device
-	 * string (0@lo:/<fsname>) is auto-derived by the kernel.
+	 * Step 1: Mount MGS/MDT (must be first - OSTs register with MGS)
+	 *
+	 * Detect dataset naming convention by trying the MGS/MDT:
+	 *   pool/fsname-mgs_mdt  (fsname-prefixed)
+	 *   pool/mgs_mdt         (plain)
+	 * Then use the same convention for all targets.
 	 */
+	{
+		const char *prefix;
+		char prefix_buf[128];
+		int use_prefix = 1;
+
+		snprintf(prefix_buf, sizeof(prefix_buf), "%s-", fsname);
+
+		snprintf(dataset, sizeof(dataset), "%s/%s-mgs_mdt", pool, fsname);
+		snprintf(svname, sizeof(svname), "%s-MDT0000", fsname);
+		if (mount_lustre_target(dataset, "/mnt/mgs", svname, 1) < 0) {
+			snprintf(dataset, sizeof(dataset), "%s/mgs_mdt", pool);
+			if (mount_lustre_target(dataset, "/mnt/mgs", svname, 1) < 0)
+				return 1;
+			use_prefix = 0;
+		}
+
+		prefix = use_prefix ? prefix_buf : "";
+
+		/* Step 2: Mount OST0 */
+		snprintf(dataset, sizeof(dataset), "%s/%sost0", pool, prefix);
+		snprintf(svname, sizeof(svname), "%s-OST0000", fsname);
+		if (mount_lustre_target(dataset, "/mnt/ost0", svname, 0) < 0)
+			return 1;
+
+		/* Step 3: Mount OST1 */
+		snprintf(dataset, sizeof(dataset), "%s/%sost1", pool, prefix);
+		snprintf(svname, sizeof(svname), "%s-OST0001", fsname);
+		if (mount_lustre_target(dataset, "/mnt/ost1", svname, 0) < 0)
+			return 1;
+	}
+
+	/*
+	 * Step 4: Mount Lustre client to the local servers via loopback.
+	 *
+	 * The device string format for Lustre client mount is:
+	 *   <mgs_nid>:/<fsname>
+	 */
+	snprintf(client_dev, sizeof(client_dev), "0@lo:/%s", fsname);
 	rc = snprintf(mount_data, sizeof(mount_data),
-		      "lustreroot=%s:%s/%s,user_xattr", device, pool, fsname);
+		      "network=lo,device=%s", client_dev);
 	if (rc < 0 || (size_t)rc >= sizeof(mount_data)) {
-		kmsg_log(KMSG_ERR, "mount data too long\n");
+		kmsg_log(KMSG_ERR, "client mount data too long\n");
 		return 1;
 	}
 
-	kmsg_log(KMSG_INFO, "mounting lustre (device=%s pool=%s fsname=%s) on %s\n",
-		 device, pool, fsname, MOUNTPOINT);
+	kmsg_log(KMSG_INFO, "mounting lustre client %s on %s\n",
+		 client_dev, MOUNTPOINT);
 
-	if (mount("none", MOUNTPOINT, "lustre", 0, mount_data) < 0) {
-		kmsg_log(KMSG_ERR, "mount failed: %s\n", strerror(errno));
+	if (mount(client_dev, MOUNTPOINT, "lustre", 0, mount_data) < 0) {
+		kmsg_log(KMSG_ERR, "client mount failed: %s\n", strerror(errno));
 		return 1;
 	}
 

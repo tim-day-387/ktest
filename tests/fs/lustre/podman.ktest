@@ -15,7 +15,6 @@ require-lustre-base-kernel-config
 require-kernel-config LNET=y
 require-kernel-config LUSTRE=y
 require-kernel-config ZFS=y
-require-kernel-config ROOT_LUSTRE=y
 require-kernel-config FUSE_FS=y
 require-kernel-config NAMESPACES
 require-kernel-config USER_NS

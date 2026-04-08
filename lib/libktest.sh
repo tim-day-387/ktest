@@ -312,6 +312,7 @@ start_vm()
 	# Lustre root filesystem - boot from Lustre mounted via loopback
 	kernelargs+=(root=/dev/lustre rw log_buf_len=8M)
 	kernelargs+=("lustreroot=$ktest_lustre_root_pool,device=$ktest_root_dev,fsname=$ktest_lustre_root_fsname")
+	kernelargs+=("osd_zfs.root_device=$ktest_root_dev")
     else
 	# Standard block device root filesystem
 	kernelargs+=(root=$ktest_root_dev rw log_buf_len=8M)
@@ -671,6 +672,10 @@ build_kernel()
 
     install -m0644 "$ktest_kernel_build/vmlinux" "$ktest_kernel_binary/vmlinux"
     install -m0644 "$ktest_kernel_build/.config" "$ktest_kernel_binary/config"
+
+    if [[ $ktest_lustre_root == 1 ]]; then
+	"$ktest_dir/mk-lustreroot-initramfs" --no-firmware "$ktest_kernel_binary/initramfs"
+    fi
 
     # if there weren't actually any modules selected, make modules_install gets
     # confused:
