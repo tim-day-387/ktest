@@ -10,12 +10,17 @@
 #
 
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 
 from .utils import put_archive, get_archive, log_container
+
+# Serialize container creation to avoid podman user namespace race condition
+# when multiple keep-id containers are created concurrently
+_create_lock = threading.Lock()
 
 
 @dataclass
@@ -130,20 +135,22 @@ class ContainerJob:
 
         # Create container (but don't start it yet)
         # Remove auto-remove so we can extract archives after completion
-        self._container = client.containers.create(
-            image=self.image,
-            command=self.command,
-            stdin_open=False,
-            devices=["/dev/kvm", "/dev/net/tun"],
-            cap_add=["NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"],
-            sysctls={"net.ipv4.ip_forward": "1"},
-            userns_mode="keep-id",
-            pids_limit=100000,
-            overlay_volumes=overlay_volumes,
-            mounts=mounts,
-            remove=False,
-            working_dir=self.working_dir,
-        )
+        # Serialize creation to avoid podman keep-id user namespace race
+        with _create_lock:
+            self._container = client.containers.create(
+                image=self.image,
+                command=self.command,
+                stdin_open=False,
+                devices=["/dev/kvm", "/dev/net/tun"],
+                cap_add=["NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"],
+                sysctls={"net.ipv4.ip_forward": "1"},
+                userns_mode="keep-id",
+                pids_limit=100000,
+                overlay_volumes=overlay_volumes,
+                mounts=mounts,
+                remove=False,
+                working_dir=self.working_dir,
+            )
         container = self._container
 
         try:
