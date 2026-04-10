@@ -118,13 +118,13 @@ make --quiet -j$(nproc) rpms
         "build_script": """
 O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
 ./autogen.sh
-./configure --enable-server --with-o2ib=$O2IB_PATH
+./configure --enable-server
 make --quiet -j$(nproc)
 """,
         "package_script": """
 O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
 ./autogen.sh
-./configure --disable-server --with-o2ib=$O2IB_PATH
+./configure --disable-server
 make --quiet -j$(nproc) rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
