@@ -13,10 +13,8 @@ import os
 from pathlib import Path
 from typing import Optional, List
 
-import podman
-
 from .models import ValidationError
-from .utils import get_podman_socket, get_ccache_dir, is_in_home
+from .utils import get_podman_client, get_ccache_dir, is_in_home
 
 
 def _run_validation_container(client, command, devices=None, mounts=None):
@@ -136,11 +134,10 @@ def valid_env(podman_socket=None, shared_filesystem=None):
     Returns True if environment is valid, False otherwise.
     """
     ccache_dir = get_ccache_dir(shared_filesystem)
-    socket_url = get_podman_socket(podman_socket)
     errors: List[ValidationError] = []
 
     try:
-        with podman.PodmanClient(base_url=socket_url) as client:
+        with get_podman_client(podman_socket) as client:
             # Run each validation in its own container
             validations = [
                 ("Checking /dev/kvm exists", lambda: _validate_kvm_exists(client)),

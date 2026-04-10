@@ -16,11 +16,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 
-from .utils import put_archive, get_archive, log_container
+import podman
+
+from .utils import put_archive, get_archive, log_container, get_podman_socket
 
 # Serialize container creation to avoid podman user namespace race condition
 # when multiple keep-id containers are created concurrently
 _create_lock = threading.Lock()
+
+# Short timeout for container creation API calls, so we detect socket
+# deadlocks quickly and can retry instead of hanging forever
+_CREATE_TIMEOUT = 30
 
 
 @dataclass
@@ -58,7 +64,7 @@ class ContainerJob:
     _started: bool = field(default=False, init=False)
     _container: Any = field(default=None, init=False)
 
-    def _execute(self, client) -> int:
+    def _execute(self, client, podman_socket=None) -> int:
         """Internal execution logic - runs container and manages lifecycle."""
         ktest_out_host = self.ktest_out_dir if self.ktest_out_dir else "/tmp/ktest-out"
         ccache_dir = self.ccache_dir if self.ccache_dir else "/tmp/ccache"
@@ -135,22 +141,43 @@ class ContainerJob:
 
         # Create container (but don't start it yet)
         # Remove auto-remove so we can extract archives after completion
-        # Serialize creation to avoid podman keep-id user namespace race
-        with _create_lock:
-            self._container = client.containers.create(
-                image=self.image,
-                command=self.command,
-                stdin_open=False,
-                devices=["/dev/kvm", "/dev/net/tun"],
-                cap_add=["NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"],
-                sysctls={"net.ipv4.ip_forward": "1"},
-                userns_mode="keep-id",
-                pids_limit=100000,
-                overlay_volumes=overlay_volumes,
-                mounts=mounts,
-                remove=False,
-                working_dir=self.working_dir,
-            )
+        # Serialize creation to avoid podman keep-id user namespace race,
+        # and retry on transient socket errors (e.g. timeout under load).
+        # Uses a short-timeout client so we detect deadlocks quickly
+        # instead of hanging forever.
+        create_kwargs = dict(
+            image=self.image,
+            command=self.command,
+            stdin_open=False,
+            devices=["/dev/kvm", "/dev/net/tun"],
+            cap_add=["NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"],
+            sysctls={"net.ipv4.ip_forward": "1"},
+            userns_mode="keep-id",
+            pids_limit=100000,
+            overlay_volumes=overlay_volumes,
+            mounts=mounts,
+            remove=False,
+            working_dir=self.working_dir,
+        )
+        socket_url = get_podman_socket(podman_socket)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with _create_lock:
+                    with podman.PodmanClient(
+                        base_url=socket_url, timeout=_CREATE_TIMEOUT
+                    ) as create_client:
+                        container = create_client.containers.create(**create_kwargs)
+                        container_id = container.id
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    raise
+        # Look up the container via the caller's client (which has no timeout)
+        # so that long-running operations like wait() and logs() work normally
+        self._container = client.containers.get(container_id)
         container = self._container
 
         try:
@@ -196,14 +223,14 @@ class ContainerJob:
 
             self._container = None
 
-    def run(self, client) -> int:
+    def run(self, client, podman_socket=None) -> int:
         """Synchronous execution - runs container and returns exit code."""
         if self._started:
             raise RuntimeError("Job already started")
         self._started = True
 
         try:
-            return_code = self._execute(client)
+            return_code = self._execute(client, podman_socket=podman_socket)
             return return_code
         except Exception as e:
             raise

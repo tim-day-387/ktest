@@ -16,11 +16,9 @@ import tempfile
 import time
 from pathlib import Path
 
-import podman
-
 from .config import CONFIGS
 from .models import ContainerJob
-from .utils import get_podman_socket, get_task_name
+from .utils import get_podman_client, get_task_name
 
 
 VALID_BACKING_STORAGE = ["wbcfs", "zfs"]
@@ -193,8 +191,7 @@ def run_ktest(
     command = f"export BACKING_STORAGE={backing_storage} && {command}"
 
     start_time = time.time()
-    socket_url = get_podman_socket(podman_socket)
-    with podman.PodmanClient(base_url=socket_url) as client:
+    with get_podman_client(podman_socket) as client:
         job = ContainerJob(
             image=build_config["image"],
             command=["bash", "-c", command],
@@ -212,7 +209,7 @@ def run_ktest(
             log_path=log_path,
         )
         with job:
-            return_code = job.run(client)
+            return_code = job.run(client, podman_socket=podman_socket)
 
     runtime = int(time.time() - start_time)
     return return_code, runtime, task_name
@@ -244,8 +241,7 @@ def run_build_lustre(
     command = f"export BACKING_STORAGE={backing_storage} && {command}"
 
     start_time = time.time()
-    socket_url = get_podman_socket(podman_socket)
-    with podman.PodmanClient(base_url=socket_url) as client:
+    with get_podman_client(podman_socket) as client:
         should_get_archive = (
             job_config["platform"] == "mainline"
             or job_config["platform"] == "native_1"
@@ -281,7 +277,7 @@ def run_build_lustre(
             mount_ktest_out=should_mount_output,
         )
         with job:
-            return_code = job.run(client)
+            return_code = job.run(client, podman_socket=podman_socket)
 
     runtime = int(time.time() - start_time)
     return return_code, runtime, task_name
@@ -313,8 +309,7 @@ def run_package(
     sync_zfs = build_config.get("sync_zfs", False)
 
     start_time = time.time()
-    socket_url = get_podman_socket(podman_socket)
-    with podman.PodmanClient(base_url=socket_url) as client:
+    with get_podman_client(podman_socket) as client:
         job = ContainerJob(
             image=build_config["image"],
             command=["bash", "-c", command],
@@ -357,8 +352,7 @@ def run_tool(
     command = "/home/ktest/ktest/tools/" + tool_name
 
     start_time = time.time()
-    socket_url = get_podman_socket(podman_socket)
-    with podman.PodmanClient(base_url=socket_url) as client:
+    with get_podman_client(podman_socket) as client:
         job = ContainerJob(
             image=build_config["image"],
             command=[command],
@@ -375,7 +369,7 @@ def run_tool(
             log_path=log_path,
         )
         with job:
-            return_code = job.run(client)
+            return_code = job.run(client, podman_socket=podman_socket)
 
     runtime = int(time.time() - start_time)
     return return_code, runtime, task_name

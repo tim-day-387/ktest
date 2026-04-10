@@ -9,13 +9,10 @@
 # Author: Timothy Day <timday@amazon.com>
 #
 
-import podman
-
-from ..utils import get_podman_socket
+from ..utils import get_podman_client
 
 
 def cmd_info(args, podman_socket=None):
     """Display podman info."""
-    socket_url = get_podman_socket(podman_socket)
-    with podman.PodmanClient(base_url=socket_url) as client:
+    with get_podman_client(podman_socket) as client:
         print(client.info())

@@ -33,6 +33,14 @@ def get_podman_socket(custom_socket=None):
     return f"unix:///run/user/{os.getuid()}/podman/podman.sock"
 
 
+def get_podman_client(podman_socket=None):
+    """Create a PodmanClient for long-running operations (no timeout)."""
+    import podman
+
+    socket_url = get_podman_socket(podman_socket)
+    return podman.PodmanClient(base_url=socket_url)
+
+
 def put_archive(container, tarball_path, archive_path):
     """Put a tarball archive into a container."""
     start_time = time.time()

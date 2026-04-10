@@ -16,7 +16,7 @@ from pathlib import Path
 import podman
 
 from ..config import DEPLOY_CONTAINER_NAME, DEPLOY_NGINX_PORT
-from ..utils import get_podman_socket
+from ..utils import get_podman_client, get_podman_socket
 
 
 def cmd_deploy(args, podman_socket=None):
@@ -74,7 +74,7 @@ def cmd_deploy(args, podman_socket=None):
         print("Error: --github-token is required for github-pages hosting mode")
         return 1
 
-    with podman.PodmanClient(base_url=socket_url) as client:
+    with get_podman_client(podman_socket) as client:
         try:
             client.images.get("ci-lustre:latest")
             print("Found ci-lustre:latest image")

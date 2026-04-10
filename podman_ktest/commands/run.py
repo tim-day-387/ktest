@@ -9,10 +9,8 @@
 # Author: Timothy Day <timday@amazon.com>
 #
 
-import podman
-
 from ..models import ContainerJob
-from ..utils import get_podman_socket, get_ccache_dir, create_source_tarballs
+from ..utils import get_podman_client, get_ccache_dir, create_source_tarballs
 
 
 def cmd_run(
@@ -27,8 +25,7 @@ def cmd_run(
     # Resolve ccache directory
     ccache_dir = get_ccache_dir(shared_filesystem)
 
-    socket_url = get_podman_socket(podman_socket)
-    with podman.PodmanClient(base_url=socket_url) as client:
+    with get_podman_client(podman_socket) as client:
         job = ContainerJob(
             image="ktest-runner:latest",
             command=args.command,

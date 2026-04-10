@@ -9,21 +9,17 @@
 # Author: Timothy Day <timday@amazon.com>
 #
 
-import podman
-
 from ..config import IMAGES
-from ..utils import get_podman_socket
+from ..utils import get_podman_client
 
 
 def cmd_stop(args, podman_socket=None):
     """Stop all running ktest-related containers."""
-    socket_url = get_podman_socket(podman_socket)
-
     # Build set of image name prefixes from IMAGES list
     # Extract base names without :latest suffix for matching
     image_prefixes = {img["name"] for img in IMAGES}
 
-    with podman.PodmanClient(base_url=socket_url) as client:
+    with get_podman_client(podman_socket) as client:
         # Get all running containers
         containers = client.containers.list(all=False)
 

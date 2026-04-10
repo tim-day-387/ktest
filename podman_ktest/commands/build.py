@@ -13,16 +13,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-import podman
-
 from ..config import IMAGES
-from ..utils import get_git_version_info, get_podman_socket
+from ..utils import get_git_version_info, get_podman_client
 
 
 def _build_image(dockerfile, tag, name, ktest_dir, podman_socket=None, buildargs=None):
     """Build a single container image."""
-    socket_url = get_podman_socket(podman_socket)
-    with podman.PodmanClient(base_url=socket_url) as client:
+    with get_podman_client(podman_socket) as client:
         start_time = time.time()
         print(f"START building {name}")
         client.images.build(
