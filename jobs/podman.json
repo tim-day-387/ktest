@@ -1,10 +1,17 @@
 {
   "jobs": [
     {
+      "name": "lustre_patch",
+      "platform": "native_1",
+      "build": "tests/fs/lustre/podman.ktest",
+      "backing_storage": "zfs"
+    },
+    {
       "name": "kernel_build",
       "platform": "native_2",
       "build": "tests/fs/lustre/podman.ktest",
-      "backing_storage": "zfs"
+      "backing_storage": "zfs",
+      "depends_on": ["lustre_patch"]
     },
     {
       "name": "boot",

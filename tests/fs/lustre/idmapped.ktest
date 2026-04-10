@@ -10,6 +10,7 @@
 
 require-git https://github.com/kdave/xfstests.git "../../xfstests"
 
+config-kernel-base "$ktest_dir/config/debian.config"
 config-lustre-root
 
 require-lustre-base-kernel-config
@@ -17,6 +18,7 @@ require-kernel-config LNET=y
 require-kernel-config LUSTRE=y
 require-kernel-config ZFS=y
 require-kernel-config USER_NS
+require-kernel-config MODULES=n
 
 config-mem 10G
 config-timeout 60

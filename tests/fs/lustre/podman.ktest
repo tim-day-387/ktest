@@ -39,6 +39,13 @@ config-networking tap
 config-mem 10G
 config-timeout 120
 
+init_podman()
+{
+    useradd -m -s /bin/bash poduser 2>/dev/null || true
+    echo "poduser:100000:65536" > /etc/subuid
+    echo "poduser:100000:65536" > /etc/subgid
+}
+
 test_podman_build()
 {
     local builddir=$(mktemp -d)
@@ -48,11 +55,15 @@ FROM ubuntu:22.04
 RUN apt-get update && apt-get install -y ssh && rm -rf /var/lib/apt/lists/*
 EOF
 
-    podman \
+    chmod 755 "$builddir"
+
+    cd "$builddir"
+
+    runuser -u poduser -- podman \
 	--cgroup-manager=cgroupfs \
 	--events-backend=file \
 	build -t ktest-u22-ssh "$builddir"
-    podman image exists ktest-u22-ssh
+    runuser -u poduser -- podman image exists ktest-u22-ssh
 }
 
 main "$@"
