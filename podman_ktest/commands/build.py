@@ -44,6 +44,9 @@ def cmd_build(args, ktest_dir, podman_socket=None):
         images_to_build = [
             img for img in IMAGES if img["name"] in ("ktest-runner", "ci-lustre")
         ]
+    elif args.local_only:
+        # Only build ktest-runner
+        images_to_build = [img for img in IMAGES if img["name"] == "ktest-runner"]
     else:
         images_to_build = IMAGES
 

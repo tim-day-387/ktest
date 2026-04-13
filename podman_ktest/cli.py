@@ -64,6 +64,11 @@ def main():
         action="store_true",
         help="Only build ktest-runner and ci-lustre containers",
     )
+    build_parser.add_argument(
+        "--local-only",
+        action="store_true",
+        help="Only build ktest-runner container",
+    )
 
     # Stop command - stop running containers
     stop_parser = subparsers.add_parser(
