@@ -673,10 +673,6 @@ build_kernel()
     install -m0644 "$ktest_kernel_build/vmlinux" "$ktest_kernel_binary/vmlinux"
     install -m0644 "$ktest_kernel_build/.config" "$ktest_kernel_binary/config"
 
-    if [[ $ktest_lustre_root == 1 ]]; then
-	"$ktest_dir/mk-lustreroot-initramfs" --no-firmware "$ktest_kernel_binary/initramfs"
-    fi
-
     # if there weren't actually any modules selected, make modules_install gets
     # confused:
     touch "$ktest_kernel_build/modules.order"
@@ -686,6 +682,12 @@ build_kernel()
 
     local kernel_version=$(cat "$ktest_kernel_build/include/config/kernel.release")
     $DEPMOD -b "$ktest_kernel_binary/" -v $kernel_version
+
+    if [[ $ktest_lustre_root == 1 ]]; then
+	"$ktest_dir/mk-lustreroot-initramfs" --no-firmware \
+	    --modules "$ktest_kernel_binary/lib/modules" \
+	    "$ktest_kernel_binary/initramfs"
+    fi
 }
 
 configure_kernel_rpm()

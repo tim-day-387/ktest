@@ -894,6 +894,9 @@ function cmd_package_native()
     local output_dir="/tmp/ktest-output"
     cp "$ktest_kernel_binary/vmlinuz" "$output_dir/"
     cp "$ktest_kernel_binary/config" "$output_dir/"
+    if [[ -f "$ktest_kernel_binary/initramfs" ]]; then
+	cp "$ktest_kernel_binary/initramfs" "$output_dir/"
+    fi
 
     # Purge junk from ktest_out to save space
     find "$ktest_out" -name '*.o' -type f -delete

@@ -8,7 +8,9 @@
 # sleeps 5 seconds (to allow devices to settle), then mounts the Lustre root
 # and pivots into it.
 #
-# Usage: mk-lustreroot-initramfs [output-path]
+# Usage: mk-lustreroot-initramfs [--no-firmware] [--base <initramfs>] [--modules <path>] [output-path]
+#   --base       path to an existing initramfs to use as a base (optional)
+#   --modules    path to a modules directory (e.g. $ktest_kernel_binary/lib/modules) to include (optional)
 #   output-path  path for the resulting initramfs image (default: lustreroot-initramfs)
 
 set -euo pipefail
@@ -16,9 +18,13 @@ set -euo pipefail
 SCRIPT_DIR="$(dirname "$(readlink -e "$0")")"
 
 FIRMWARE=true
+BASE_INITRAMFS=""
+MODULES_DIR=""
 while [[ $# -gt 0 ]]; do
     case $1 in
 	--no-firmware)	FIRMWARE=false; shift ;;
+	--base)		BASE_INITRAMFS="$(readlink -f "$2")"; shift 2 ;;
+	--modules)	MODULES_DIR="$(readlink -f "$2")"; shift 2 ;;
 	*)		break ;;
     esac
 done
@@ -34,6 +40,19 @@ trap 'rm -rf "$TMPDIR"' EXIT
 INITRAMFS="$TMPDIR/initramfs"
 mkdir -p "$INITRAMFS"/{dev,proc,sys,tmp,mnt,newroot}
 
+# Unpack base initramfs if provided
+if [[ -n "$BASE_INITRAMFS" ]]; then
+    echo "Unpacking base initramfs: $BASE_INITRAMFS"
+    zcat "$BASE_INITRAMFS" | (cd "$INITRAMFS" && cpio -H newc -i --quiet --make-directories)
+fi
+
+# Copy kernel modules if provided
+if [[ -n "$MODULES_DIR" ]]; then
+    echo "Copying modules from $MODULES_DIR..."
+    mkdir -p "$INITRAMFS/lib/modules"
+    cp -a "$MODULES_DIR/." "$INITRAMFS/lib/modules/"
+fi
+
 # Compile mount.lustreroot statically as /init so it runs without shared libs
 echo "Compiling mount.lustreroot..."
 cc -Wall -static -o "$INITRAMFS/init" "$SCRIPT_DIR/mount.lustreroot.c"
@@ -44,6 +63,9 @@ if $FIRMWARE && [ -d "$FIRMWARE_DIR" ]; then
 	mkdir -p "$INITRAMFS/lib/firmware"
 	cp -a "$FIRMWARE_DIR/i915" "$INITRAMFS/lib/firmware/" 2>/dev/null || true
 	find "$FIRMWARE_DIR" -name 'iwlwifi-*.ucode' -o -name 'iwlwifi-*.pnvm' | xargs -r cp -t "$INITRAMFS/lib/firmware/" 2>/dev/null || true
+	cp "$FIRMWARE_DIR/regulatory.db" "$FIRMWARE_DIR/regulatory.db.p7s" "$INITRAMFS/lib/firmware/" 2>/dev/null || \
+		cp /lib/firmware/regulatory.db /lib/firmware/regulatory.db.p7s "$INITRAMFS/lib/firmware/" 2>/dev/null || \
+		echo "Warning: regulatory.db not found, WiFi regulatory domain will be unavailable"
 fi
 
 # Pack into a compressed cpio archive
