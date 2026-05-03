@@ -104,29 +104,60 @@ def is_in_home(path):
         return False
 
 
-def create_source_tarballs(dirs):
+def is_on_lustre(path):
+    """Check if a path resides on a Lustre filesystem.
+
+    Reads /proc/mounts and finds the most specific (longest) mount point
+    that covers the given path, then checks whether its filesystem type
+    is 'lustre'.
+    """
+    try:
+        resolved = str(Path(path).resolve())
+        best_mount = ""
+        best_type = ""
+
+        with open("/proc/mounts", "r") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                mount_point = parts[1]
+                fs_type = parts[2]
+                if (resolved + "/").startswith(mount_point.rstrip("/") + "/") and len(
+                    mount_point
+                ) > len(best_mount):
+                    best_mount = mount_point
+                    best_type = fs_type
+
+        return best_type == "lustre"
+    except Exception:
+        return False
+
+
+def create_source_tarballs(dirs, include_kernel=True):
     """Create tarballs for kernel, lustre, and optionally zfs sources in /tmp/.
 
     Returns dict with paths to the created tarballs.
     """
     tarball_paths = {}
 
-    # Create kernel tarball using git archive
-    kernel_tarball = "/tmp/ktest-kernel.tar.gz"
-    print(f"Creating kernel tarball at {kernel_tarball}...")
-    subprocess.run(
-        [
-            "tar",
-            "-czf",
-            kernel_tarball,
-            "--transform",
-            "s,^./,linux/,",
-            ".",
-        ],
-        cwd=dirs["ktest_kernel_source"],
-        check=True,
-    )
-    tarball_paths["kernel"] = kernel_tarball
+    # Create kernel tarball using git archive (skipped for distro platforms)
+    if include_kernel:
+        kernel_tarball = "/tmp/ktest-kernel.tar.gz"
+        print(f"Creating kernel tarball at {kernel_tarball}...")
+        subprocess.run(
+            [
+                "tar",
+                "-czf",
+                kernel_tarball,
+                "--transform",
+                "s,^./,linux/,",
+                ".",
+            ],
+            cwd=dirs["ktest_kernel_source"],
+            check=True,
+        )
+        tarball_paths["kernel"] = kernel_tarball
 
     # Create lustre tarball using regular tar
     lustre_tarball = "/tmp/ktest-lustre.tar.gz"

@@ -59,6 +59,8 @@ class ContainerJob:
     log_path: Optional[str] = None
     get_ktest_out_archive: bool = False
     mount_ktest_out: bool = False
+    distro_platform: bool = False
+    is_vm_run: bool = False
 
     # State fields (managed internally)
     _started: bool = field(default=False, init=False)
@@ -72,17 +74,21 @@ class ContainerJob:
         Path("/tmp/ktest-packages").mkdir(exist_ok=True)
         os.chmod("/tmp/ktest-packages", 0o777)
 
-        # Only mount /var/lib/ktest as overlay_volume
-        overlay_volumes = [
-            {
-                "source": "/var/lib/ktest",
-                "destination": "/var/lib/ktest",
-            },
-        ]
+        # Build overlay volume list.
+        # /var/lib/ktest is mounted as an overlay so container writes are
+        # discarded; only VM run jobs need it.
+        # userns_mode="keep-id" maps host UID to container UID, so files
+        # appear with correct ownership without per-mount idmap options.
+        overlay_volumes = []
+        if self.is_vm_run and not self.distro_platform:
+            overlay_volumes.append(
+                {
+                    "source": "/var/lib/ktest",
+                    "destination": "/var/lib/ktest",
+                }
+            )
 
         # Add kernel and lustre as overlay volumes if not using tarballs
-        # userns_mode="keep-id" maps host UID to container UID, so files
-        # appear with correct ownership without per-mount idmap options
         if not self.use_tarball_input and self.dirs:
             if self.sync_kernel:
                 overlay_volumes.append(
@@ -159,6 +165,8 @@ class ContainerJob:
             remove=False,
             working_dir=self.working_dir,
         )
+        if overlay_volumes:
+            create_kwargs["overlay_volumes"] = overlay_volumes
         socket_url = get_podman_socket(podman_socket)
         max_retries = 3
         for attempt in range(max_retries):

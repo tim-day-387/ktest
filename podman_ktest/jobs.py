@@ -161,6 +161,19 @@ def topological_sort(jobs):
     return levels
 
 
+def any_job_needs_kernel(jobs):
+    """Return True if any job in the list requires the kernel source."""
+    for job in jobs:
+        # run_ktest never syncs kernel
+        if job.get("run", False):
+            continue
+        platform = job.get("platform", "")
+        build_config = CONFIGS.get(platform, {})
+        if not build_config.get("distro_platform", False):
+            return True
+    return False
+
+
 def get_build_config(platform):
     """Get build configuration for a platform."""
     if platform not in CONFIGS:
@@ -207,6 +220,8 @@ def run_ktest(
             use_tarball_input=use_tarball_input,
             ccache_dir=ccache_dir,
             log_path=log_path,
+            distro_platform=build_config.get("distro_platform", False),
+            is_vm_run=True,
         )
         with job:
             return_code = job.run(client, podman_socket=podman_socket)
@@ -258,13 +273,16 @@ def run_build_lustre(
         # Check if this platform needs ZFS source
         sync_zfs = build_config.get("sync_zfs", False)
 
+        # Distro platforms build against distro kernel headers, not kernel source
+        sync_kernel = not build_config.get("distro_platform", False)
+
         job = ContainerJob(
             image=build_config["image"],
             command=["bash", "-c", command],
             working_dir=build_config["working_dir"],
             ktest_out_dir=ktest_out_dir,
             tarball_paths=tarball_paths,
-            sync_kernel=True,
+            sync_kernel=sync_kernel,
             sync_lustre=True,
             sync_zfs=sync_zfs,
             sync_ktest_out=True,
@@ -275,6 +293,7 @@ def run_build_lustre(
             log_path=log_path,
             get_ktest_out_archive=should_get_archive,
             mount_ktest_out=should_mount_output,
+            distro_platform=build_config.get("distro_platform", False),
         )
         with job:
             return_code = job.run(client, podman_socket=podman_socket)
@@ -307,6 +326,7 @@ def run_package(
     command = f"export BACKING_STORAGE={backing_storage} && {command}"
 
     sync_zfs = build_config.get("sync_zfs", False)
+    sync_kernel = not build_config.get("distro_platform", False)
 
     start_time = time.time()
     with get_podman_client(podman_socket) as client:
@@ -316,7 +336,7 @@ def run_package(
             working_dir=build_config["working_dir"],
             ktest_out_dir=ktest_out_dir,
             tarball_paths=tarball_paths,
-            sync_kernel=True,
+            sync_kernel=sync_kernel,
             sync_lustre=True,
             sync_zfs=sync_zfs,
             sync_ktest_out=True,
@@ -327,6 +347,7 @@ def run_package(
             log_path=log_path,
             get_ktest_out_archive=False,
             mount_ktest_out=True,
+            distro_platform=build_config.get("distro_platform", False),
         )
         with job:
             return_code = job.run(client)
@@ -351,6 +372,8 @@ def run_tool(
     tool_name = job_config["tool"]
     command = "/home/ktest/ktest/tools/" + tool_name
 
+    sync_kernel = not build_config.get("distro_platform", False)
+
     start_time = time.time()
     with get_podman_client(podman_socket) as client:
         job = ContainerJob(
@@ -359,7 +382,7 @@ def run_tool(
             working_dir="/home/ktest/git/lustre-release/",
             ktest_out_dir=ktest_out_dir,
             tarball_paths=tarball_paths,
-            sync_kernel=True,
+            sync_kernel=sync_kernel,
             sync_lustre=True,
             sync_ktest_out=True,
             podman_socket=None,
@@ -367,6 +390,7 @@ def run_tool(
             use_tarball_input=use_tarball_input,
             ccache_dir=ccache_dir,
             log_path=log_path,
+            distro_platform=build_config.get("distro_platform", False),
         )
         with job:
             return_code = job.run(client, podman_socket=podman_socket)

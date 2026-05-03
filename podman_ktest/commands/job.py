@@ -20,7 +20,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from ..jobs import load_job_file, topological_sort, run_job_config
+from ..jobs import load_job_file, topological_sort, run_job_config, any_job_needs_kernel
 from ..utils import get_ccache_dir, create_source_tarballs, get_git_hash, get_task_name
 
 
@@ -229,11 +229,24 @@ def cmd_job(
     # Resolve ccache directory
     ccache_dir = get_ccache_dir(shared_filesystem)
 
-    # Create source tarballs only if using tarball input mode
     use_tarball_input = args.tarball_input
+
+    job_args = args.job_names
+    ktest_dir = dirs["ktest_dir"]
+
+    # Separate single-job names from multi-job file paths
+    all_jobs = []
+
+    for arg in job_args:
+        jobs = load_job_file(arg, ktest_dir)
+        all_jobs.extend(jobs)
+
+    # Create source tarballs only if using tarball input mode.
+    # Skip the kernel tarball when no job needs it (e.g. all distro platforms).
     tarball_paths = None
     if use_tarball_input:
-        tarball_paths = create_source_tarballs(dirs)
+        include_kernel = any_job_needs_kernel(all_jobs)
+        tarball_paths = create_source_tarballs(dirs, include_kernel=include_kernel)
 
     # Ensure tarballs are cleaned up when the function exits
     def cleanup_tarballs(ktest_dirs=None):
@@ -255,16 +268,6 @@ def cmd_job(
                         Path(ktest_out_tarball).unlink()
                 except Exception as e:
                     print(f"Warning: Failed to delete {ktest_out_tarball}: {e}")
-
-    job_args = args.job_names
-    ktest_dir = dirs["ktest_dir"]
-
-    # Separate single-job names from multi-job file paths
-    all_jobs = []
-
-    for arg in job_args:
-        jobs = load_job_file(arg, ktest_dir)
-        all_jobs.extend(jobs)
 
     # Check for duplicate job names
     job_names = [job["name"] for job in all_jobs]

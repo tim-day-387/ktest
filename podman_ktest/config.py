@@ -84,6 +84,7 @@ make --quiet -j$(nproc)
 make --quiet -j$(nproc) debs
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
+        "distro_platform": True,
     },
     "al2023": {
         "image": "lustre-al2023:latest",
@@ -98,6 +99,7 @@ make --quiet -j$(nproc)
 make --quiet -j$(nproc) rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
+        "distro_platform": True,
     },
     "al2": {
         "image": "lustre-al2:latest",
@@ -112,6 +114,7 @@ make --quiet -j$(nproc)
 make --quiet -j$(nproc) rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
+        "distro_platform": True,
     },
     "rocky9": {
         "image": "lustre-rocky9:latest",
@@ -128,6 +131,7 @@ O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
 make --quiet -j$(nproc) rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
+        "distro_platform": True,
     },
     "kernel_rpm": {
         "image": "ktest-runner:latest",
