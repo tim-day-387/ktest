@@ -1,0 +1,27 @@
+#!/bin/bash
+# Usage: bpftrace-kretprobe <func1> [func2 ...]
+# Attaches kretprobes to the given kernel functions and prints calls with negative return values.
+
+set -euo pipefail
+
+if [[ $# -eq 0 ]]; then
+    echo "Usage: $0 <function> [function ...]" >&2
+    exit 1
+fi
+
+funcs=()
+for func in "$@"; do
+    if ! grep -qw "$func" /proc/kallsyms; then
+        echo "Error: '$func' not found in /proc/kallsyms" >&2
+        exit 1
+    fi
+    funcs+=("$func")
+done
+
+# Build bpftrace program with one kretprobe block per function
+program=""
+for func in "${funcs[@]}"; do
+    program+="kretprobe:${func} { printf(\"${func} PID %d (%s) ret=%d\n\", pid, comm, retval); }"$'\n'
+done
+
+exec sudo bpftrace -e "$program" | grep "ret=-"

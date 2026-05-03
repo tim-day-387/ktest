@@ -1,0 +1,86 @@
+#!/bin/bash
+# Apply runtime memory tunings for the ktest development environment.
+# Safe to run repeatedly. Must be run as root.
+# Does not persist across reboots — add to your init if desired.
+
+set -euo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+    echo "error: must be run as root (try: sudo $0)" >&2
+    exit 1
+fi
+
+info()  { echo "[tune-memory] $*"; }
+warn()  { echo "[tune-memory] WARNING: $*" >&2; }
+
+apply() {
+    local desc="$1" path="$2" value="$3"
+    local current
+    current=$(cat "$path" 2>/dev/null || echo "(unreadable)")
+    if [[ "$current" == "$value" ]]; then
+        info "$desc: already $value, skipping"
+    else
+        echo "$value" > "$path"
+        info "$desc: $current -> $value"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# zswap — compress cold pages before they'd hit swap, avoids OOM under pressure
+# ---------------------------------------------------------------------------
+if [[ -d /sys/module/zswap ]]; then
+    apply "zswap enabled"          /sys/module/zswap/parameters/enabled        1
+    apply "zswap max pool %"       /sys/module/zswap/parameters/max_pool_percent 20
+else
+    warn "zswap module not present, skipping"
+fi
+
+# ---------------------------------------------------------------------------
+# ZFS ARC — cap at 512 MiB; Lustre has its own cache above ZFS so double-
+# caching is wasteful. Runtime write to zfs_arc_max takes effect immediately.
+# ---------------------------------------------------------------------------
+ARC_MAX_BYTES=536870912  # 512 MiB
+if [[ -f /sys/module/zfs/parameters/zfs_arc_max ]]; then
+    apply "ZFS ARC max (bytes)"    /sys/module/zfs/parameters/zfs_arc_max      $ARC_MAX_BYTES
+else
+    warn "ZFS not loaded, skipping ARC cap"
+fi
+
+# ---------------------------------------------------------------------------
+# Lustre — reduce per-OSC write grant and cap client page cache
+# ---------------------------------------------------------------------------
+if command -v lctl &>/dev/null; then
+    # Reduce dirty page budget per OSC (controls write grant indirectly)
+    info "Lustre OSC max_dirty_mb: setting to 256"
+    lctl set_param osc.*.max_dirty_mb=256
+
+    # Cap client page cache to 1 GiB (was 7.6 GiB default)
+    info "Lustre llite max_cached_mb: setting to 1024"
+    lctl set_param llite.*.max_cached_mb=1024
+else
+    warn "lctl not found, skipping Lustre tunings"
+fi
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+echo
+info "Done. Current state:"
+
+if [[ -f /sys/module/zswap/parameters/enabled ]]; then
+    echo "  zswap enabled:        $(cat /sys/module/zswap/parameters/enabled)"
+    echo "  zswap max_pool_%:     $(cat /sys/module/zswap/parameters/max_pool_percent)"
+fi
+
+if [[ -f /sys/module/zfs/parameters/zfs_arc_max ]]; then
+    arc_cur=$(cat /sys/module/zfs/parameters/zfs_arc_max)
+    echo "  ZFS ARC max:          $(( arc_cur / 1024 / 1024 )) MiB"
+fi
+
+if command -v lctl &>/dev/null; then
+    echo "  Lustre max_dirty_mb:  $(lctl get_param osc.*.max_dirty_mb 2>/dev/null | awk -F= '{print $2}' | paste -sd, -) MiB (per OSC)"
+    echo "  Lustre max_cached_mb: $(lctl get_param llite.*.max_cached_mb 2>/dev/null | grep max_cached_mb | awk '{print $NF}') MiB"
+fi
+
+mem_avail=$(awk '/MemAvailable/ {printf "%.1f GiB", $2/1024/1024}' /proc/meminfo)
+echo "  MemAvailable now:     $mem_avail"

@@ -1,0 +1,114 @@
+#!/bin/bash
+# Usage: bpftrace-lustre-errors
+# Attaches kretprobes to Lustre VFS operations and prints calls that fail
+# (i.e., return a negative errno).
+
+set -euo pipefail
+
+if ! grep -q " ll_file_open$" /proc/kallsyms 2>/dev/null; then
+    echo "Error: Lustre symbols not found in kallsyms" >&2
+    exit 1
+fi
+
+# VFS file operations
+FILE_OPS=(
+    ll_file_open
+    ll_file_release
+    ll_file_read_iter
+    ll_file_write_iter
+    ll_file_ioctl
+    ll_file_mmap
+    ll_file_seek
+    ll_file_flock
+    ll_fsync
+    ll_fallocate
+    ll_direct_IO
+    ll_splice_read
+)
+# ll_flush ?
+
+# VFS inode operations (files)
+INODE_OPS=(
+    ll_setattr
+    ll_getattr
+    ll_inode_permission
+    ll_listxattr
+    ll_fiemap
+    ll_get_acl
+    ll_get_inode_acl
+    ll_set_acl
+    ll_fileattr_get
+    ll_fileattr_set
+)
+
+# VFS directory operations
+DIR_OPS=(
+    ll_dir_open
+    ll_dir_release
+    ll_dir_seek
+    ll_dir_ioctl
+    ll_dir_flush
+    ll_iterate
+)
+
+# VFS name/namespace operations
+NAME_OPS=(
+    ll_atomic_open
+    ll_lookup_nd
+    ll_create_nd
+    ll_mknod
+    ll_mkdir
+    ll_rmdir
+    ll_unlink
+    ll_symlink
+    ll_link
+    ll_rename
+)
+
+# VFS symlink operations
+SYMLINK_OPS=(
+    ll_get_link
+    ll_getattr_link
+)
+
+# Page/address-space operations
+PAGE_OPS=(
+    ll_read_folio
+    ll_readpage
+    ll_writepages
+    ll_write_begin
+    ll_write_end
+)
+
+ALL_OPS=(
+    "${FILE_OPS[@]}"
+    "${INODE_OPS[@]}"
+    "${DIR_OPS[@]}"
+    "${NAME_OPS[@]}"
+    "${SYMLINK_OPS[@]}"
+    "${PAGE_OPS[@]}"
+)
+
+# Filter to only functions present in kallsyms
+available=()
+for func in "${ALL_OPS[@]}"; do
+    if grep -qw "$func" /proc/kallsyms 2>/dev/null; then
+        available+=("$func")
+    else
+        echo "Warning: '$func' not in kallsyms, skipping" >&2
+    fi
+done
+
+if [[ ${#available[@]} -eq 0 ]]; then
+    echo "Error: no Lustre functions found in kallsyms" >&2
+    exit 1
+fi
+
+echo "Tracing ${#available[@]} Lustre operations for failures... Hit Ctrl-C to stop." >&2
+
+program=""
+for func in "${available[@]}"; do
+    program+="kretprobe:${func} { printf(\"${func} PID %d (%s) ret=%d\n\", pid, comm, retval); }"$'\n'
+done
+
+exec sudo bpftrace -e "$program" | grep -E "ret=(-1|-13)$"
