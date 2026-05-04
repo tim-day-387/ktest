@@ -24,9 +24,11 @@ from .utils import put_archive, get_archive, log_container, get_podman_socket
 # when multiple keep-id containers are created concurrently
 _create_lock = threading.Lock()
 
-# Short timeout for container creation API calls, so we detect socket
-# deadlocks quickly and can retry instead of hanging forever
-_CREATE_TIMEOUT = 30
+# Timeout for container creation API calls. Needs to absorb the
+# first-create chown of the image storage layer under userns=keep-id
+# on podman versions without idmapped-mount support (<4.5), which can
+# take minutes for multi-GB images.
+_CREATE_TIMEOUT = 600
 
 
 @dataclass

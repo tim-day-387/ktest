@@ -450,7 +450,7 @@ def cmd_job(
                     return_code, job_runtime, task_name = future.result()
                     log_path = get_log_path(job_name)
                 except Exception as e:
-                    print(f"Error running job {job_name}: {e}")
+                    print(f"Error running job {job_name}: {type(e).__name__}: {e}")
                     return_code = -1
                     job_runtime = 0
                     task_name = get_job_task_name(job_map[job_name])
