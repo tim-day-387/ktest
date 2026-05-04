@@ -1,0 +1,5 @@
+{
+  "name": "rocky10",
+  "platform": "rocky10",
+  "build": "tests/fs/lustre/boot.ktest"
+}

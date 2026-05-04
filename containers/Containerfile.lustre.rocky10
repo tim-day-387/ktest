@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Author: Timothy Day <tday141@gmail.com>
+#
+
+# Distro
+FROM docker.io/rockylinux/rockylinux:10
+
+# Install ktest dependencies
+RUN dnf install -y dnf-plugins-core
+RUN dnf config-manager --enable crb
+RUN dnf install -y gcc autoconf libtool which make patch diffutils file \
+	binutils-devel python3 python3-devel elfutils-devel e2fsprogs-devel \
+	libselinux-devel libaio-devel dnf-plugins-core bc bison flex \
+	libyaml-devel libnl3-devel libmount-devel libtirpc-devel \
+	libblkid-devel openssl-devel libuuid-devel git kernel-devel \
+	keyutils-libs keyutils-libs-devel rpm-build kernel \
+	kernel-abi-stablelists kernel-rpm-macros kmod pkgconfig
+RUN dnf install -y --enablerepo=*debug* kernel-debuginfo
+
+# Install latest e2fsprogs from Lustre mirror
+RUN printf '[e2fsprogs]\nname=e2fsprogs Mirror - el10\nbaseurl=https://lustre.software/mirror/e2fsprogs/latest/el10/\nenabled=1\ngpgcheck=0\n' \
+	> /etc/yum.repos.d/e2fsprogs.repo
+RUN dnf update -y && dnf install -y e2fsprogs
+
+# Git config
+RUN git config --global safe.directory '*'
