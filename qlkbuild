@@ -238,6 +238,7 @@ function build_lustre_intree()
     cd "$ktest_lustre_build"
 
     rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
+    apply_lustre_patches
 
     # No strict errors
     if [[ "${ktest_lustre_allow_warnings}" == "1" ]]; then
@@ -316,6 +317,7 @@ function build_lustre()
     cd "$ktest_lustre_build"
 
     rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
+    apply_lustre_patches
 
     # No strict errors
     if [[ "${ktest_lustre_allow_warnings}" == "1" ]]; then
@@ -384,6 +386,27 @@ function build_lustre()
     validate_lustre_build
 
     cd "$old"
+}
+
+function apply_lustre_patches() {
+    local patches_dir="$ktest_dir/patches"
+
+    [[ -d "$patches_dir" ]] || return 0
+
+    shopt -s nullglob
+    local patches=("$patches_dir"/*.patch)
+    shopt -u nullglob
+
+    [[ ${#patches[@]} -gt 0 ]] || return 0
+
+    for patch in "${patches[@]}"; do
+	local name=$(basename "$patch")
+	if git -C "$ktest_lustre_build" apply --whitespace=nowarn "$patch"; then
+	    echo "Applied patch: $name"
+	else
+	    echo "WARNING: Failed to apply patch $name (continuing)"
+	fi
+    done
 }
 
 function safe_delete_dir() {
@@ -794,6 +817,7 @@ function build_lustre_userland_deb()
     cd "$ktest_lustre_build"
 
     rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
+    apply_lustre_patches
 
     # No strict errors
     export CFLAGS="-Wno-error=attribute-warning -Wno-error=unused-but-set-variable -Wno-error=single-bit-bitfield-constant-conversion -Wno-error=format-security -Wno-error=cast-function-type-strict -Wno-error=incompatible-function-pointer-types"
@@ -919,6 +943,7 @@ function run_copy_builtin_cached()
 
     cd "$ktest_lustre_build"
     rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
+    apply_lustre_patches
     ./copy-builtin cached "$ktest_kernel_source"
     cd "$ktest_kernel_source"
     git add *
