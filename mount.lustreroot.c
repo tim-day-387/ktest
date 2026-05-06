@@ -721,7 +721,7 @@ int main(void)
 	 */
 	snprintf(client_dev, sizeof(client_dev), "0@lo:/%s", fsname);
 	rc = snprintf(mount_data, sizeof(mount_data),
-		      "network=lo,device=%s", client_dev);
+		      "network=lo,user_xattr,device=%s", client_dev);
 	if (rc < 0 || (size_t)rc >= sizeof(mount_data)) {
 		kmsg_log(KMSG_ERR, "client mount data too long\n");
 		goto fail;
