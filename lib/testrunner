@@ -40,7 +40,6 @@ else
 fi
 
 mkdir -p /lib/modules
-ln -sf /host/$ktest_kernel_binary/lib/modules/* /lib/modules
 
 dmesg --console-on
 dmesg --console-level 8
