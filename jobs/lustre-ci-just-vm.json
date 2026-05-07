@@ -1,0 +1,67 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_mainline_native",
+      "platform": "mainline",
+      "build": "tests/fs/lustre/boot.ktest",
+      "optional": false,
+      "description": "Build Lustre (InTree)"
+    },
+    {
+      "name": "boot",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/boot.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "llmount",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/llmount.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "llog-unit",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/llog-unit.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "mgs-setup",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/mgs-setup.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "sanity-1",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/sanity/sanity-1.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "sanity-2",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/sanity/sanity-2.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "sanity-3",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/sanity/sanity-3.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    },
+    {
+      "name": "sanity-4",
+      "platform": "mainline",
+      "run": "tests/fs/lustre/sanity/sanity-4.ktest",
+      "optional": false,
+      "depends_on": ["lustre_mainline_native"]
+    }
+  ]
+}
