@@ -9,7 +9,7 @@
 #
 
 # Distro
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # Set environment variables to avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -19,10 +19,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN echo 'man-db man-db/auto-update boolean false' | debconf-set-selections && \
     echo 'INITRD=No' >> /etc/environment
 
-# Install ktest dependencies, clean up apt lists in the same layer
+# Install ktest dependencies, clean up apt lists in the same layer.
+# ovmf / qemu-efi-aarch64 are required by the UKI boot path; systemd-boot-efi
+# provides the EFI stubs (linuxx64.efi.stub / linuxaa64.efi.stub) that the
+# UKI builder objcopy's the kernel and initramfs into.
 RUN apt-get update && apt-get install -y \
     build-essential bc bison flex libelf-dev \
-    libssl-dev qemu-system-x86 qemu-utils \
+    libssl-dev qemu-system-x86 qemu-system-arm qemu-utils \
+    ovmf qemu-efi-aarch64 systemd-boot-efi systemd-ukify \
     minicom socat vde2 git ssh rsync brotli \
     lsb-release wget software-properties-common \
     gnupg clang bear pahole kmod swig quilt \
@@ -37,7 +41,7 @@ RUN apt-get update && apt-get install -y \
     rpm dh-python dkms libcurl4-openssl-dev \
     libpam0g-dev python3-all-dev python3-cffi \
     python3-setuptools python3-sphinx \
-    iptables dnsmasq-base && \
+    iptables dnsmasq-base busybox-static && \
     chmod 0644 /boot/vmlinuz* && \
     rm -rf /var/lib/apt/lists/*
 
@@ -49,8 +53,13 @@ RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)" && \
 # Setup ccache symlink for Lustre/ZFS builds
 RUN ln -s /usr/bin/ccache /usr/local/bin/clang-20
 
-# Create a user for running ktest (ktest should not run as root for VM operations)
-RUN useradd -m -s /bin/bash ktest && chmod 755 /home/ktest
+# Rename the default ubuntu user (UID 1000) to ktest so that --userns=keep-id
+# from a host UID 1000 invoker maps to ktest. Creating a fresh ktest user on
+# 24.04 would assign UID 1001 (ubuntu already owns 1000), leaving ktest unable
+# to write bind-mounted source trees owned by host UID 1000.
+RUN usermod -l ktest -d /home/ktest -m ubuntu && \
+    groupmod -n ktest ubuntu && \
+    chmod 755 /home/ktest
 
 # Pre-create bind-mount targets mode 0777 so podman with --userns=keep-id
 # can mount onto them regardless of which host uid the invoker maps to.
@@ -85,6 +94,16 @@ ENV PATH="/home/ktest/.cargo/bin:${PATH}"
 # Generate SSH key for ktest user (required for build-test-kernel ssh)
 RUN mkdir -p /home/ktest/.ssh && \
     ssh-keygen -t rsa -b 4096 -f /home/ktest/.ssh/id_rsa -N ""
+
+# Clone upstream linux-firmware so mk-initramfs picks it up via
+# FIRMWARE_DIR ($ktest_dir/../linux-firmware).  The upstream repo has the
+# flat layout mk-initramfs assumes (iwlwifi-*.ucode at the root, i915/ as a
+# subdir, regulatory.db at the root); Ubuntu's linux-firmware deb instead
+# stashes things under intel/iwlwifi/ and compresses with zstd, so the
+# existing find logic in mk-initramfs misses everything.
+RUN git clone --depth=1 \
+    https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git \
+    /home/ktest/linux-firmware
 
 # Copy the ktest repository into the container (kept late so repo changes
 # don't invalidate the layers above)

@@ -1,0 +1,120 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+#
+# mk-initramfs - Build a minimal initramfs for ktest VMs
+#
+# Compiles init.c and packages it into a zstd-compressed cpio initramfs.  The same
+# /init binary handles both standard root= boots and lustreroot= boots; the
+# decision is made at boot time from /proc/cmdline.
+#
+# Usage: mk-initramfs [--no-firmware] [--base <initramfs>] [--modules <path>]
+#                     [--utils <name>=<path>]... [output-path]
+#   --base       path to an existing initramfs to use as a base (optional)
+#   --modules    path to a modules directory (e.g. $ktest_kernel_binary/lib/modules) to include (optional)
+#   --utils      <name>=<srcpath>; bundle <srcpath>'s contents at /ktools/<name>
+#                inside the initramfs (repeatable).  init copies /ktools to a
+#                tmpfs on the new root before switch_root.
+#   output-path  path for the resulting initramfs image (default: initramfs)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(readlink -e "$0")")"
+
+FIRMWARE=true
+BASE_INITRAMFS=""
+MODULES_DIR=""
+UTILS_NAMES=()
+UTILS_PATHS=()
+while [[ $# -gt 0 ]]; do
+    case $1 in
+	--no-firmware)	FIRMWARE=false; shift ;;
+	--base)		BASE_INITRAMFS="$(readlink -f "$2")"; shift 2 ;;
+	--modules)	MODULES_DIR="$(readlink -f "$2")"; shift 2 ;;
+	--utils)
+	    spec="$2"
+	    if [[ "$spec" != *=* ]]; then
+		echo "--utils requires <name>=<path>, got: $spec" >&2
+		exit 1
+	    fi
+	    UTILS_NAMES+=("${spec%%=*}")
+	    UTILS_PATHS+=("$(readlink -f "${spec#*=}")")
+	    shift 2
+	    ;;
+	*)		break ;;
+    esac
+done
+
+OUTPUT="${1:-initramfs}"
+OUTPUT="$(readlink -f "$OUTPUT")"
+
+FIRMWARE_DIR="$SCRIPT_DIR/../linux-firmware"
+# Fall back to the distro firmware tree (e.g. the linux-firmware apt package
+# inside the ktest container) if no upstream linux-firmware git checkout is
+# present alongside ktest.
+[[ -d $FIRMWARE_DIR ]] || FIRMWARE_DIR=/lib/firmware
+
+TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR"' EXIT
+
+INITRAMFS="$TMPDIR/initramfs"
+mkdir -p "$INITRAMFS"/{dev,proc,sys,tmp,mnt,newroot}
+
+# Unpack base initramfs if provided
+if [[ -n "$BASE_INITRAMFS" ]]; then
+    echo "Unpacking base initramfs: $BASE_INITRAMFS"
+    zstd -dcf "$BASE_INITRAMFS" | (cd "$INITRAMFS" && cpio -H newc -i --quiet --make-directories)
+fi
+
+# Copy kernel modules if provided
+if [[ -n "$MODULES_DIR" ]]; then
+    echo "Copying modules from $MODULES_DIR..."
+    mkdir -p "$INITRAMFS/lib/modules"
+    cp -a "$MODULES_DIR/." "$INITRAMFS/lib/modules/"
+fi
+
+# Copy userspace utility trees into /ktools/<name>
+for i in "${!UTILS_NAMES[@]}"; do
+    name="${UTILS_NAMES[$i]}"
+    src="${UTILS_PATHS[$i]}"
+    if [[ ! -d "$src" ]]; then
+	echo "--utils $name: source not a directory: $src" >&2
+	exit 1
+    fi
+    echo "Copying utils $name from $src..."
+    mkdir -p "$INITRAMFS/ktools/$name"
+    cp -a "$src/." "$INITRAMFS/ktools/$name/"
+done
+
+# Compile init statically so it runs without shared libs
+echo "Compiling init..."
+cc -Wall -static -o "$INITRAMFS/init" "$SCRIPT_DIR/init.c"
+
+# Static busybox provides /init's rescue shell when boot setup fails.
+# busybox-static (Debian/Ubuntu) installs to /bin/busybox.
+mkdir -p "$INITRAMFS/bin"
+if [[ -x /bin/busybox ]]; then
+    cp /bin/busybox "$INITRAMFS/bin/busybox"
+elif [[ -x /usr/bin/busybox ]]; then
+    cp /usr/bin/busybox "$INITRAMFS/bin/busybox"
+else
+    echo "Warning: busybox-static not found; rescue shell will be unavailable on init failure"
+fi
+
+# Populate firmware from linux-firmware if available
+if $FIRMWARE && [ -d "$FIRMWARE_DIR" ]; then
+	echo "Copying firmware from $FIRMWARE_DIR..."
+	mkdir -p "$INITRAMFS/lib/firmware"
+	cp -a "$FIRMWARE_DIR/i915" "$INITRAMFS/lib/firmware/" 2>/dev/null || true
+	find "$FIRMWARE_DIR" -name 'iwlwifi-*.ucode' -o -name 'iwlwifi-*.pnvm' | xargs -r cp -t "$INITRAMFS/lib/firmware/" 2>/dev/null || true
+	cp "$FIRMWARE_DIR/regulatory.db" "$FIRMWARE_DIR/regulatory.db.p7s" "$INITRAMFS/lib/firmware/" 2>/dev/null || \
+		cp /lib/firmware/regulatory.db /lib/firmware/regulatory.db.p7s "$INITRAMFS/lib/firmware/" 2>/dev/null || \
+		echo "Warning: regulatory.db not found, WiFi regulatory domain will be unavailable"
+fi
+
+# Pack into a compressed cpio archive.  zstd -T0 -10 ratios near gzip -9 but
+# at an order of magnitude higher throughput; kernel decompresses with
+# CONFIG_RD_ZSTD (already on in all ktest configs).
+echo "Packing initramfs..."
+(cd "$INITRAMFS" && find . | cpio -H newc -o --quiet) | zstd -T0 -10 -q -f -o "$OUTPUT"
+
+echo "Initramfs written to: $OUTPUT"

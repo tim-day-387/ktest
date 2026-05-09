@@ -45,6 +45,7 @@ if [[ ! -v ktest_cpus ]]; then
     ktest_lustre_root=0
     ktest_networking=
     ktest_root_image=
+    ktest_uki_firmware=0
 
     BUILD_ON_HOST=""
 fi
@@ -267,6 +268,11 @@ config-no-vm()
     ktest_no_vm=true
 }
 
+config-uki-firmware()
+{
+    ktest_uki_firmware=1
+}
+
 allow_taint()
 {
     ktest_allow_taint=true
@@ -449,6 +455,7 @@ main()
 	    echo "ktest_no_vm=$ktest_no_vm"
 	    echo "ktest_lustre_allow_warnings=$ktest_lustre_allow_warnings"
 	    echo "ktest_lustre_root=$ktest_lustre_root"
+	    echo "ktest_uki_firmware=$ktest_uki_firmware"
 	    if [[ -n $ktest_networking ]]; then
 		echo "ktest_networking=$ktest_networking"
 	    fi

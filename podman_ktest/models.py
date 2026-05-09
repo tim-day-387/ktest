@@ -77,18 +77,9 @@ class ContainerJob:
         os.chmod("/tmp/ktest-packages", 0o777)
 
         # Build overlay volume list.
-        # /var/lib/ktest is mounted as an overlay so container writes are
-        # discarded; only VM run jobs need it.
         # userns_mode="keep-id" maps host UID to container UID, so files
         # appear with correct ownership without per-mount idmap options.
         overlay_volumes = []
-        if self.is_vm_run and not self.distro_platform:
-            overlay_volumes.append(
-                {
-                    "source": "/var/lib/ktest",
-                    "destination": "/var/lib/ktest",
-                }
-            )
 
         # Add kernel and lustre as overlay volumes if not using tarballs
         if not self.use_tarball_input and self.dirs:
@@ -122,6 +113,18 @@ class ContainerJob:
                 "read_only": False,
             },
         ]
+
+        # VM runs need the host root images as a backing file for qemu.
+        # Read-only is fine: qemu's snapshot=on provides per-run COW.
+        if self.is_vm_run and not self.distro_platform:
+            mounts.append(
+                {
+                    "type": "bind",
+                    "source": "/var/lib/ktest",
+                    "target": "/var/lib/ktest",
+                    "read_only": True,
+                }
+            )
 
         # Mount output directory for direct output file access (RPMs/DEBs)
         # Use /tmp/ktest-output to avoid conflicting with /tmp/ktest-out tarball extraction

@@ -29,13 +29,12 @@ make -j$(nproc)
 The configuration can be customized. However, disabling shared libraries
 and specifying the kernel path are required.
 
-Sync the Lustre modules and utils to the root image:
-```
-root_image sync
-```
+The Lustre modules and utils are bundled into the initramfs (under
+/ktools/lustre-release) by `qlkbuild run`, which re-runs mk-initramfs
+and ukify with the freshly built trees.
 
 If you require openZFS support, build it beforehand (using similar
-instructions) and sync those modules and utils to the root image.
+instructions); its tree is bundled the same way at /ktools/zfs.
 
 Now, run one of the Lustre tests:
 ```

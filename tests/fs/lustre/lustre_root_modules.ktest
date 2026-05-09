@@ -35,6 +35,8 @@ require-kernel-config PINCTRL_METEORLAKE=y
 config-mem 10G
 config-timeout 60
 
+config-uki-firmware
+
 test_llmount()
 {
     echo "Load Lustre..."

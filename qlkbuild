@@ -37,7 +37,6 @@ ktest_lustre_allow_warnings=0
 ktest_lustre_build_enable=1
 ktest_kernel_build_enable=1
 ktest_out="/tmp/ktest-out/"
-ktest_root_image="$ktest_out/root.amd64.new"
 ktest_lustre_clean_git=0
 ktest_lustre_purge=0
 ktest_njobs=$(nproc)
@@ -173,24 +172,6 @@ function validate_native_lustre_build() {
     fi
 }
 
-function sync_root_image() {
-    "$ktest_dir/root_image" sync
-}
-
-function create_root_image() {
-    local old="$PWD"
-
-    cd "$ktest_lustre_build"
-    run_quiet_with_status "UPDATE ROOT IMAGE" "DONE" sync_root_image
-    cd "$old"
-
-    if [[ "$FSTYPE" == "zfs" ]]; then
-	cd "$ktest_zfs_build"
-	run_quiet_with_status "UPDATE ROOT IMAGE" "DONE" sync_root_image
-	cd "$old"
-    fi
-}
-
 function cmd_run()
 {
     if [[ $# = 0 ]]; then
@@ -202,8 +183,6 @@ function cmd_run()
 
     ktest_testargs="$@"
     parse_test_deps "$ktest_test"
-
-    create_root_image
 
     start_vm
 }
@@ -223,8 +202,6 @@ function cmd_run_native()
     if [[ -n $COVERAGE ]]; then
 	ktest_kernel_config_require+=(GCOV_KERNEL)
     fi
-
-    # create_root_image
 
     start_vm
 }
@@ -276,9 +253,6 @@ function build_lustre_intree()
     export with_o2ib="no"
     export enable_gss="no"
     export enable_crypto="no"
-
-    # FIXME: should be specified by subtest...
-    export enable_libcfs_cdebug="no"
 
     # Always build the server
     export enable_server="yes"
@@ -347,9 +321,9 @@ function build_lustre()
 	export with_spl="$ktest_zfs_build"
 	export with_spl_obj="$ktest_zfs_build"
 	# Embed VM-accessible RPATH so mkfs.lustre finds ZFS libs at runtime.
-	# The build path (/tmp/ktest-out/zfs) differs from the VM path (/workspace/zfs),
+	# The build path (/tmp/ktest-out/zfs) differs from the VM path (/ktools/zfs),
 	# so the RPATH embedded by the linker won't work in the VM without this.
-	export LDFLAGS="-Wl,-rpath,/workspace/zfs/.libs"
+	export LDFLAGS="-Wl,-rpath,/ktools/zfs/.libs"
     else
 	export with_ldiskfs="no"
 	export with_zfs="no"
@@ -407,6 +381,24 @@ function apply_lustre_patches() {
 	    echo "WARNING: Failed to apply patch $name (continuing)"
 	fi
     done
+}
+
+function purge_build_junk() {
+    local dir="$1"
+
+    [[ -d "$dir" ]] || return 0
+
+    # Intermediate build artifacts the runtime/initramfs doesn't need.
+    # Drops object files, libtool intermediates, kbuild dep records.
+    # Keeps .ko/.so/.la/binaries/scripts.
+    find "$dir" \( \
+	-name '*.o' -o \
+	-name '*.lo' -o \
+	-name '*.cmd' -o \
+	-name '*.mod' -o \
+	-name '*.mod.c' -o \
+	-name '*.d' \
+    \) -type f -delete 2>/dev/null || true
 }
 
 function safe_delete_dir() {
@@ -636,8 +628,29 @@ function cmd_build()
     fi
     run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
 
-    # Purge junk from ktest_out to save space
-    find "$ktest_out" -name '*.o' -type f -delete
+    # Drop build intermediates from the lustre/zfs trees so the initramfs
+    # only carries the modules, libraries, and binaries the VM actually uses.
+    purge_build_junk "$ktest_lustre_build"
+    [[ "$FSTYPE" == "zfs" ]] && purge_build_junk "$ktest_zfs_build"
+
+    # Bundle the freshly-built lustre/zfs trees into the initramfs so the VM
+    # picks them up at /ktools (init copies /ktools onto a tmpfs in the new
+    # root before switching).
+    ktest_initramfs_extra_args=(--utils "lustre-release=$ktest_lustre_build")
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	ktest_initramfs_extra_args+=(--utils "zfs=$ktest_zfs_build")
+    fi
+    run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
+    run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
+
+    # The UKI now self-contains kernel + initramfs + modules + utils.  Strip
+    # ktest_out down to just that file so the build→run tarball stays small.
+    local uki_keep
+    uki_keep=$(mktemp)
+    mv "$ktest_kernel_binary/uki.efi" "$uki_keep"
+    rm -rf "${ktest_out:?}"/*
+    mkdir -p "$ktest_kernel_binary"
+    mv "$uki_keep" "$ktest_kernel_binary/uki.efi"
 }
 
 function prepare_linux_source()
@@ -732,48 +745,12 @@ function cmd_build_native()
 	#validate_native_zfs_build
     #fi
 
+    # Lustre/ZFS are in-kernel here, so the initramfs needs only modules.
+    run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
+    run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
+
     # Purge junk from ktest_out to save space
     find "$ktest_out" -name '*.o' -type f -delete
-}
-
-function cmd_build_rpm()
-{
-    if [[ $# = 0 ]]; then
-	ktest_test="$ktest_boot_test"
-    else
-	ktest_test=$(realpath "$1")
-	shift
-    fi
-
-    ktest_testargs="$@"
-    parse_test_deps "$ktest_test"
-
-    if [[ -n $COVERAGE ]]; then
-	ktest_kernel_config_require+=(GCOV_KERNEL)
-    fi
-
-    prepare_linux_source
-    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel_rpm
-}
-
-function cmd_build_deb()
-{
-    if [[ $# = 0 ]]; then
-	ktest_test="$ktest_boot_test"
-    else
-	ktest_test=$(realpath "$1")
-	shift
-    fi
-
-    ktest_testargs="$@"
-    parse_test_deps "$ktest_test"
-
-    if [[ -n $COVERAGE ]]; then
-	ktest_kernel_config_require+=(GCOV_KERNEL)
-    fi
-
-    #prepare_linux_source
-    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel_deb
 }
 
 function build_zfs_userland_deb()
@@ -913,14 +890,13 @@ function cmd_package_native()
 
     prepare_linux_source
     run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
+    run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
 
     # Copy kernel image to output directory
     local output_dir="/tmp/ktest-output"
-    cp "$ktest_kernel_binary/vmlinuz" "$output_dir/"
     cp "$ktest_kernel_binary/config" "$output_dir/"
-    if [[ -f "$ktest_kernel_binary/initramfs" ]]; then
-	cp "$ktest_kernel_binary/initramfs" "$output_dir/"
-    fi
+    cp "$ktest_kernel_binary/uki.efi" "$output_dir/"
 
     # Purge junk from ktest_out to save space
     find "$ktest_out" -name '*.o' -type f -delete

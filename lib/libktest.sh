@@ -325,7 +325,7 @@ start_vm()
     $ktest_crashdump	&& kernelargs+=(crashkernel=128M)
 
     case $ktest_arch in
-	x86|x86_64)
+	x86_64)
 	    kernelargs+=(earlycon=uart8250,io,0x3f8,115200n8)
 	    ;;
 	aarch64)
@@ -337,18 +337,11 @@ start_vm()
 
     local qemu_cmd=("$QEMU_BIN" -nodefaults -nographic)
     case $ktest_arch in
-	x86|x86_64)
+	x86_64)
 	    qemu_cmd+=(-cpu host -machine type=q35,accel=kvm,nvdimm=on)
 	    ;;
 	aarch64)
 	    qemu_cmd+=(-cpu host -machine type=virt,gic-version=max,accel=kvm)
-	    ;;
-	mips)
-	    qemu_cmd+=(-cpu 24Kf -machine malta)
-	    ktest_cpus=1
-	    ;;
-	mips64)
-	    qemu_cmd+=(-cpu MIPS64R2-generic -machine malta)
 	    ;;
     esac
 
@@ -357,8 +350,6 @@ start_vm()
     qemu_cmd+=(								\
 	-m		"$ktest_mem,slots=8,maxmem=$maxmem"		\
 	-smp		"$ktest_cpus"					\
-	-kernel		"$ktest_kernel_binary/vmlinuz"			\
-	-append		"$(join_by " " ${kernelargs[@]})"		\
 	-device		virtio-serial					\
 	-chardev	stdio,mux=on,id=console				\
 	-device		virtconsole,chardev=console			\
@@ -370,9 +361,56 @@ start_vm()
 	-virtfs		local,path=/,mount_tag=host,security_model=none,multidevs=remap	\
     )
 
-    if [[ -f $ktest_kernel_binary/initramfs ]]; then
-	qemu_cmd+=(-initrd 	"$ktest_kernel_binary/initramfs")
+    if [[ ! -f $ktest_kernel_binary/uki.efi ]]; then
+	echo "UKI not found at $ktest_kernel_binary/uki.efi (build the kernel first)"
+	exit 1
     fi
+
+    local ovmf_code ovmf_vars
+    case $ktest_arch in
+	x86_64)
+	    for c in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd /usr/share/edk2-ovmf/OVMF_CODE.fd; do
+		[[ -f $c ]] && ovmf_code=$c && break
+	    done
+	    for v in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd /usr/share/edk2-ovmf/OVMF_VARS.fd; do
+		[[ -f $v ]] && ovmf_vars=$v && break
+	    done
+	    ;;
+	aarch64)
+	    for c in /usr/share/AAVMF/AAVMF_CODE.fd /usr/share/qemu-efi-aarch64/QEMU_EFI.fd; do
+		[[ -f $c ]] && ovmf_code=$c && break
+	    done
+	    for v in /usr/share/AAVMF/AAVMF_VARS.fd; do
+		[[ -f $v ]] && ovmf_vars=$v && break
+	    done
+	    ;;
+	*)
+	    echo "Unsupported arch $ktest_arch (UKI boot requires x86_64 or aarch64)"
+	    exit 1
+	    ;;
+    esac
+
+    if [[ -z ${ovmf_code:-} || -z ${ovmf_vars:-} ]]; then
+	echo "OVMF firmware not found for $ktest_arch (install ovmf / qemu-efi-aarch64)"
+	exit 1
+    fi
+
+    # Per-VM writable copy of UEFI variables
+    local vars_copy="$ktest_out/vm/OVMF_VARS.fd"
+    install -m0644 "$ovmf_vars" "$vars_copy"
+
+    # QEMU's -smbios uses comma as the option separator; embedded
+    # commas in the cmdline (earlycon=uart8250,io,..., kgdboc=ttyS1,
+    # 115200, lustreroot=pool,device=...) must be doubled.
+    local cmdline_extra=$(join_by " " ${kernelargs[@]})
+    cmdline_extra=${cmdline_extra//,/,,}
+
+    qemu_cmd+=(								\
+	-drive	if=pflash,format=raw,readonly=on,file="$ovmf_code"	\
+	-drive	if=pflash,format=raw,file="$vars_copy"			\
+	-kernel	"$ktest_kernel_binary/uki.efi"				\
+	-smbios	"type=11,value=io.systemd.stub.kernel-cmdline-extra=$cmdline_extra" \
+    )
 
     case $ktest_networking in
 	user)
@@ -620,6 +658,17 @@ configure_kernel()
 
     MAKEARGS+=("LOCALVERSION=${KTEST_LOCALVERSION:--ktest}")
 
+    # The in-tree cmd_zstd rules invoke $(ZSTD) single-threaded; at -22 --ultra
+    # the vmlinuz compression step is serial and visible in wall time. -T0
+    # spawns one worker per core.
+    MAKEARGS+=("ZSTD=zstd -T0")
+
+    # EFI stub + initramfs support are required for the UKI boot path.
+    # RD_ZSTD: mk-initramfs packs cpio with zstd.
+    # KERNEL_ZSTD: compress vmlinuz with zstd — much faster than gzip/xz at
+    # similar ratios, dominates build wall time on lustre CI.
+    ktest_kernel_config_require+=(EFI EFI_STUB BLK_DEV_INITRD RD_ZSTD KERNEL_ZSTD)
+
     for opt in "${ktest_kernel_config_require[@]}"; do
 	[[ -n $opt ]] && kernel_opt set "$opt"
     done
@@ -642,31 +691,16 @@ build_kernel()
 
     configure_kernel
 
-    case $KERNEL_ARCH in
-	mips)
-	    do_make -k vmlinuz
-	    ;;
-	*)
-	    do_make -k
-	    ;;
-    esac
+    do_make -k
 
     local BOOT=$ktest_kernel_build/arch/$KERNEL_ARCH/boot
 
     case $ktest_arch in
-	x86*)
+	x86_64)
 	    install -m0644 "$BOOT/bzImage"	"$ktest_kernel_binary/vmlinuz"
 	    ;;
 	aarch64)
 	    install -m0644 "$BOOT/Image"	"$ktest_kernel_binary/vmlinuz"
-	    ;;
-	mips)
-	    install -m0644 "$BOOT/vmlinux.strip"	"$ktest_kernel_binary/vmlinuz"
-	    #install -m0644 "$ktest_kernel_build/vmlinux"	"$ktest_kernel_binary/vmlinuz"
-	    ;;
-	default)
-	    echo "Don't know how to install kernel"
-	    exit 1
 	    ;;
     esac
 
@@ -682,70 +716,55 @@ build_kernel()
 
     local kernel_version=$(cat "$ktest_kernel_build/include/config/kernel.release")
     $DEPMOD -b "$ktest_kernel_binary/" -v $kernel_version
+}
 
-    if [[ $ktest_lustre_root == 1 ]]; then
-	"$ktest_dir/mk-lustreroot-initramfs" --no-firmware \
-	    --modules "$ktest_kernel_binary/lib/modules" \
-	    "$ktest_kernel_binary/initramfs"
+build_initramfs()
+{
+    local initramfs_args=()
+    [[ $ktest_uki_firmware == 1 ]] || initramfs_args+=(--no-firmware)
+    initramfs_args+=(--modules "$ktest_kernel_binary/lib/modules")
+    # ${arr[@]:-} would expand an unset array to a single empty-string
+    # element and silently steal the output-path slot from mk-initramfs.
+    initramfs_args+=(${ktest_initramfs_extra_args[@]+"${ktest_initramfs_extra_args[@]}"})
+
+    "$ktest_dir/mk-initramfs" "${initramfs_args[@]}" \
+	"$ktest_kernel_binary/initramfs"
+}
+
+build_uki()
+{
+    local uki_arch
+    case $ktest_arch in
+	x86_64)  uki_arch=x64   ;;
+	aarch64) uki_arch=aa64  ;;
+	*)
+	    echo "Unsupported arch $ktest_arch (UKI requires x86_64 or aarch64)"
+	    exit 1
+	    ;;
+    esac
+
+    if ! find_command ukify; then
+	echo "ukify not found (install systemd-ukify)"
+	exit 1
     fi
-}
 
-configure_kernel_rpm()
-{
-    local kconfig="$ktest_kernel_build/.config"
+    local uki="$ktest_kernel_binary/uki.efi"
+    local osrel="$ktest_kernel_binary/uki.osrel"
+    local kernel_version=$(cat "$ktest_kernel_build/include/config/kernel.release")
 
-    cp "$ktest_dir/config/debian.config" "$kconfig"
+    cat > "$osrel" <<EOF
+ID=ktest
+NAME="ktest"
+PRETTY_NAME="ktest UKI ($uki_arch)"
+VERSION_ID=$kernel_version
+EOF
 
-    log_verbose "kernel_config_require: ${ktest_kernel_config_require[@]}  ${ktest_kernel_config_require_soft[@]}"
-
-    MAKEARGS+=("LOCALVERSION=${KTEST_LOCALVERSION:--ktest}")
-
-    for opt in "${ktest_kernel_config_require[@]}"; do
-	[[ -n $opt ]] && kernel_opt set "$opt"
-    done
-
-    for opt in "${ktest_kernel_config_require_soft[@]}"; do
-	[[ -n $opt ]] && kernel_opt set "$opt"
-    done
-
-    do_make olddefconfig
-
-    for opt in "${ktest_kernel_config_require[@]}"; do
-	[[ -n $opt ]] && kernel_opt check "$opt"
-    done
-}
-
-build_kernel_rpm()
-{
-    rm -rf "$ktest_kernel_binary"
-    mkdir -p "$ktest_kernel_binary"
-
-    configure_kernel_rpm
-
-    kernel_opt set NET_VENDOR_AMAZON
-    kernel_opt set ENA_ETHERNET
-
-    do_make binrpm-pkg
-
-    # Copy RPMs to output directory
-    rpm_output_dir="/tmp/ktest-output"
-    find ~/rpmbuild/RPMS -name '*.rpm' -exec cp {} "$rpm_output_dir/" \;
-}
-
-build_kernel_deb()
-{
-    rm -rf "$ktest_kernel_binary"
-    mkdir -p "$ktest_kernel_binary"
-
-    configure_kernel_rpm
-
-    kernel_opt set NET_VENDOR_AMAZON
-    kernel_opt set ENA_ETHERNET
-
-    do_make bindeb-pkg
-
-    # Copy DEBs to output directory (they're created in parent of kernel source)
-    deb_output_dir="/tmp/ktest-output"
-    find "$(dirname "$ktest_kernel_source")" -maxdepth 1 -name '*.deb' -exec cp {} "$deb_output_dir/" \;
-    find "$(dirname "$ktest_kernel_build")" -maxdepth 1 -name '*.deb' -exec cp {} "$deb_output_dir/" \;
+    rm -f "$uki"
+    ukify build						\
+	--linux="$ktest_kernel_binary/vmlinuz"		\
+	--initrd="$ktest_kernel_binary/initramfs"	\
+	--os-release="@$osrel"				\
+	--uname="$kernel_version"			\
+	--efi-arch="$uki_arch"				\
+	--output="$uki"
 }

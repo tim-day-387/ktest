@@ -13,7 +13,7 @@ debootstrap=$ktest_dir/debootstrap/debootstrap
 . "$ktest_dir/lib/util.sh"
 . "$ktest_dir/lib/common.sh"
 
-if [[ $(id -u) != 0 && "$1" != "sync" ]] ; then
+if [[ $(id -u) != 0 ]] ; then
     echo this script must be run as root
     exit 1
 fi
@@ -42,7 +42,6 @@ usage()
     echo "  create_lustre	Create a new image on Lustre (ZFS backend)"
     echo "  create_usb		Create a bootable USB image (EFI/GRUB)"
     echo "  update		Update an existing image"
-    echo "  sync		Copy directory to an existing image"
     echo "  mount_lustre	Mount an existing Lustre image"
     echo "  umount_lustre	Unmount a Lustre image"
     echo
@@ -371,30 +370,6 @@ cmd_update_files()
     mount_image
     update_files
     umount_image
-}
-
-cmd_sync() {
-    local dest="$(basename "$(pwd)")"
-    local source="$(pwd)/"
-    local new_img="/tmp/ktest-out/$(basename $ktest_image).new"
-
-    # Start from pristine image only if new_img doesn't exist yet.
-    # Multiple syncs (e.g. lustre-release then zfs) build on the same image.
-    if [[ ! -f "$new_img" ]]; then
-        cp "$ktest_image" "$new_img"
-    fi
-
-    # Remove only the specific destination directory, not all of /workspace/
-    guestfish -a "$new_img" -m /dev/sda:/ rm-rf "/workspace/$dest"
-    guestfish -a "$new_img" -m /dev/sda:/ mkdir-p "/workspace/$dest"
-
-    # Use tar + guestfish tar-in instead of virt-copy-in to ensure hidden
-    # directories (e.g. .libs/ containing ZFS shared libs) are included.
-    local tmp_tar
-    tmp_tar=$(mktemp /tmp/ktest-sync-XXXXXX.tar)
-    tar -C "$source" -c . -f "$tmp_tar"
-    guestfish -a "$new_img" -m /dev/sda:/ tar-in "$tmp_tar" "/workspace/$dest"
-    rm -f "$tmp_tar"
 }
 
 cmd_init()

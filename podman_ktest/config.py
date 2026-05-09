@@ -14,7 +14,7 @@ DEPLOY_NGINX_PORT = 8080
 
 IMAGES = [
     {
-        "dockerfile": "containers/Containerfile.ktest.u22",
+        "dockerfile": "containers/Containerfile.ktest.u24",
         "tag": "ktest-runner:latest",
         "name": "ktest-runner",
     },
@@ -155,26 +155,11 @@ make --quiet -j$(nproc) rpms
         "working_dir": "/home/ktest/git/lustre-release/",
         "distro_platform": True,
     },
-    "kernel_rpm": {
-        "image": "ktest-runner:latest",
-        "build_script": "./qlkbuild build_rpm",
-        "package_script": "./qlkbuild build_rpm",
-        "working_dir": "/home/ktest/ktest/",
-        "output_files": ["*.rpm"],
-    },
-    "kernel_deb": {
-        "image": "ktest-runner:latest",
-        "build_script": "./qlkbuild build_deb",
-        "package_script": "./qlkbuild build_deb",
-        "working_dir": "/home/ktest/ktest/",
-        "output_files": ["*.deb"],
-    },
     "userland_deb": {
         "image": "ktest-runner:latest",
         "build_script": "./qlkbuild build_userland_deb",
         "package_script": "./qlkbuild build_userland_deb",
         "working_dir": "/home/ktest/ktest/",
-        "output_files": ["*.deb"],
         "sync_zfs": True,
     },
 }

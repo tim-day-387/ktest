@@ -5,21 +5,6 @@ have_virtio=0
 have_suspend=0
 
 case $ktest_arch in
-    x86)
-	require-kernel-config SMP
-	require-kernel-config IO_DELAY_0XED
-	require-kernel-config 64BIT=n
-	require-kernel-config ACPI	# way slower without it, do not know why
-	require-kernel-config UNWINDER_ORC
-	require-kernel-config HARDLOCKUP_DETECTOR
-	require-kernel-config RTC_DRV_CMOS
-
-	have_kvmguest=1
-	have_virtio=1
-	have_suspend=1
-
-	require-kernel-append console=hvc0
-	;;
     x86_64)
 	require-kernel-config SMP
 	require-kernel-config IO_DELAY_0XED
@@ -42,27 +27,6 @@ case $ktest_arch in
 	require-kernel-config RTC_DRV_PL031
 
 	have_virtio=1
-
-	require-kernel-append console=hvc0
-	;;
-    powerpc)
-	require-kernel-config ADVANCED_OPTIONS
-
-	have_kvmguest=1
-	have_virtio=1
-	have_suspend=1
-
-	require-kernel-append console=hvc0
-	;;
-    mips)
-	require-kernel-config MIPS_MALTA
-	require-kernel-config CPU_MIPS${BITS}_R2
-	require-kernel-config CPU_BIG_ENDIAN=y
-	require-kernel-config CPU_LITTLE_ENDIAN=n
-	require-kernel-config 32BIT
-
-	have_virtio=1
-	ktest_storage_bus=piix4-ide
 
 	require-kernel-append console=hvc0
 	;;

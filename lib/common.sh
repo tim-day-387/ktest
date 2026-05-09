@@ -80,11 +80,16 @@ function run_quiet_with_status()
     shift
     shift
 
+    local start=$SECONDS
+
     if $ktest_verbose; then
 	if [[ -n $msg ]]; then
 	    echo "$msg:"
 	fi
 	"$@"
+	if [[ -n $msg ]]; then
+	    echo "$msg done in $((SECONDS - start))s"
+	fi
     else
 	if [[ -n $msg ]]; then
 	    echo -n "$msg ... "
@@ -108,7 +113,7 @@ function run_quiet_with_status()
 	fi
 
 	if [[ -n $status ]]; then
-	    echo done
+	    echo "$((SECONDS - start))s"
 	fi
     fi
 }
@@ -129,24 +134,12 @@ CROSS_COMPILE=""
 parse_arch()
 {
     case $1 in
-	x86|i386)
-	    ktest_arch=x86
-	    DEBIAN_ARCH=i386
-	    ARCH_TRIPLE=${ARCH_TRIPLE_X86}
-
-	    KERNEL_ARCH=x86
-	    BITS=32
-
-	    QEMU_PACKAGE=qemu-system-x86
-	    QEMU_BIN=qemu-system-x86_64
-	    ;;
 	x86_64|amd64)
 	    ktest_arch=x86_64
 	    DEBIAN_ARCH=amd64
 	    ARCH_TRIPLE=${ARCH_TRIPLE_X86_64}
 
 	    KERNEL_ARCH=x86
-	    BITS=64
 
 	    QEMU_PACKAGE=qemu-system-x86
 	    QEMU_BIN=qemu-system-x86_64
@@ -157,74 +150,9 @@ parse_arch()
 	    ARCH_TRIPLE=${ARCH_TRIPLE_ARM64}
 
 	    KERNEL_ARCH=arm64
-	    BITS=64
 
 	    QEMU_PACKAGE=qemu-system-arm
 	    QEMU_BIN=qemu-system-aarch64
-	    ;;
-	mips)
-	    DEBIAN_ARCH=mips
-	    ARCH_TRIPLE=mips-linux-gnu
-
-	    KERNEL_ARCH=mips
-	    BITS=32
-
-	    QEMU_PACKAGE=qemu-system-mips
-	    QEMU_BIN=qemu-system-mips
-	    ;;
-	mips64)
-	    DEBIAN_ARCH=mips
-	    ARCH_TRIPLE=mips-linux-gnu
-
-	    KERNEL_ARCH=mips
-	    BITS=64
-
-	    QEMU_PACKAGE=qemu-system-mips
-	    QEMU_BIN=qemu-system-mips64
-	    ;;
-	sparc)
-	    DEBIAN_ARCH=sparc
-	    ARCH_TRIPLE=sparc64-linux-gnu
-
-	    KERNEL_ARCH=sparc
-	    BITS=32
-
-	    QEMU_PACKAGE=qemu-system-sparc
-	    QEMU_BIN=qemu-system-sparc
-	    ;;
-	sparc64)
-	    DEBIAN_ARCH=sparc
-	    ARCH_TRIPLE=sparc64-linux-gnu
-
-	    KERNEL_ARCH=sparc
-	    BITS=64
-
-	    QEMU_PACKAGE=qemu-system-sparc
-	    QEMU_BIN=qemu-system-sparc64
-	    ;;
-	ppc|powerpc)
-	    DEBIAN_ARCH=powerpc
-	    MIRROR=http://deb.debian.org/debian-ports
-
-	    ARCH_TRIPLE=powerpc-linux-gnu
-
-	    KERNEL_ARCH=powerpc
-	    BITS=32
-
-	    QEMU_PACKAGE=qemu-system-ppc
-	    QEMU_BIN=qemu-system-ppc
-	    ;;
-	ppc64)
-	    DEBIAN_ARCH=ppc64
-	    MIRROR=http://deb.debian.org/debian-ports
-
-	    ARCH_TRIPLE=powerpc-linux-gnu
-
-	    KERNEL_ARCH=powerpc
-	    BITS=64
-
-	    QEMU_PACKAGE=qemu-system-ppc
-	    QEMU_BIN=qemu-system-ppc64
 	    ;;
 	*)
 	    echo "Unsupported architecture $1"

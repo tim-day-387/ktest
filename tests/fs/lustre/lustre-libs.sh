@@ -14,9 +14,9 @@
 
 . "$(dirname "$(dirname "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")")")/test-libs.sh"
 
-# Currently, other packages must be in the same directory
-# as the kernel source and ktest
-export workspace_path="/workspace"
+# Userspace utilities are exposed at /ktools by the initramfs (see
+# mk-initramfs --utils and init.c copy_ktools_to_newroot).
+export workspace_path="/ktools"
 export lustre_pkg_path="$workspace_path/lustre-release"
 export zfs_pkg_path="$workspace_path/zfs"
 

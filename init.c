@@ -4,22 +4,17 @@
 /*
  * Copyright (c) 2024, OpenSFS.
  *
- * mount.lustreroot - Mount Lustre root filesystem from kernel command line
+ * init - ktest initramfs /init, runs in two modes selected by /proc/cmdline:
  *
- * Reads the lustreroot= parameter from /proc/cmdline, starts local ZFS-backed
- * Lustre servers (MGS/MDT + OSTs) via normal mount calls, then mounts the
- * Lustre client on /newroot and pivots into it.
+ *   Standard root: parse root= (and optional rootfstype=), mount that block
+ *   device on /newroot, switch_root into it.
  *
- * Intended to run as /init in an initramfs when the kernel command line
- * contains:
- *   lustreroot=<pool>,device=<path>[,fsname=<name>]
- *
- * The initramfs issues individual mount -t lustre_tgt calls for each server
- * target, then mount -t lustre for the client. No custom kernel mount code
- * is required.
+ *   Lustre root: when lustreroot=<pool>,device=<path>[,fsname=<name>] is
+ *   present, load ZFS+Lustre modules, start local ZFS-backed servers
+ *   (MGS/MDT + OSTs), mount the Lustre client on /newroot, and switch_root.
  *
  * Build (standalone, outside kernel tree):
- *   cc -Wall -static -o mount.lustreroot mount.lustreroot.c
+ *   cc -Wall -static -o init init.c
  */
 
 #include <dirent.h>
@@ -30,13 +25,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
-#define PROG		"mount.lustreroot"
+#define PROG		"init"
 #define MOUNTPOINT	"/newroot"
 #define CMDLINE_PATH	"/proc/cmdline"
 #define KMSG_PATH	"/dev/kmsg"
@@ -295,14 +291,34 @@ static int find_module_file_walk(const char *modname, const char *release,
 	g_walk_found = 0;
 	nftw(searchdir, walk_cb, 16, FTW_PHYS);
 
-	if (!g_walk_found) {
-		kmsg_log(KMSG_ERR, "module %s not found under %s\n",
-			 modname, searchdir);
+	if (!g_walk_found)
 		return -1;
-	}
 
 	snprintf(pathbuf, pathbuf_size, "%s", g_walk_result);
 	return 0;
+}
+
+/*
+ * load_one_module - resolve a module by name and load it (+ deps)
+ *
+ * Tries modules.dep first (correct dependency order), falls back to a
+ * filesystem walk for modules absent from modules.dep.  Returns -1 if the
+ * module can't be found at all (e.g., it's built-in or simply not bundled).
+ */
+static int load_one_module(const char *modname, const char *release)
+{
+	char relpath[RELPATH_MAX];
+	char abspath[512];
+
+	if (find_relpath_for_modname(modname, release,
+				     relpath, sizeof(relpath)) == 0)
+		return load_relpath_recursive(relpath, release);
+
+	if (find_module_file_walk(modname, release,
+				  abspath, sizeof(abspath)) == 0)
+		return load_module_file(abspath);
+
+	return -1;
 }
 
 /*
@@ -333,7 +349,7 @@ static int load_modules(void)
 		NULL,
 	};
 	struct utsname uts;
-	char relpath[RELPATH_MAX];
+	int ret = 0;
 	int i;
 
 	if (uname(&uts) < 0) {
@@ -341,31 +357,47 @@ static int load_modules(void)
 		return -1;
 	}
 
-	int ret = 0;
-
 	for (i = 0; modules[i]; i++) {
 		kmsg_log(KMSG_INFO, "loading module %s\n", modules[i]);
-		if (find_relpath_for_modname(modules[i], uts.release,
-					     relpath, sizeof(relpath)) == 0) {
-			if (load_relpath_recursive(relpath, uts.release) < 0)
-				ret = -1;
-		} else {
-			/* Not in modules.dep — search filesystem and load directly */
-			char abspath[512];
-
-			kmsg_log(KMSG_INFO,
-				 "module %s not in modules.dep, searching filesystem\n",
-				 modules[i]);
-			if (find_module_file_walk(modules[i], uts.release,
-						  abspath, sizeof(abspath)) < 0) {
-				ret = -1;
-				continue;
-			}
-			if (load_module_file(abspath) < 0)
-				ret = -1;
+		if (load_one_module(modules[i], uts.release) < 0) {
+			kmsg_log(KMSG_ERR, "failed to load %s\n", modules[i]);
+			ret = -1;
 		}
 	}
 	return ret;
+}
+
+/*
+ * load_input_modules - load HID/keyboard modules needed by the rescue shell
+ *
+ * In configs where USB/HID/keyboard drivers are built as modules (e.g.,
+ * debian-modules.config) the kernel cannot receive keystrokes until they're
+ * loaded — without this, the rescue shell shows a prompt but stdin is dead.
+ * Missing modules are silently ignored (built-in is fine, not-bundled is fine).
+ */
+static void load_input_modules(void)
+{
+	static const char * const modules[] = {
+		/* PS/2 keyboard (built-in laptop keyboards) */
+		"i8042",
+		"atkbd",
+		/* USB host controllers — usbhid pulls usbcore via modules.dep */
+		"xhci-pci",
+		"ehci-pci",
+		"ohci-pci",
+		/* HID layer */
+		"hid-generic",
+		"usbhid",
+		NULL,
+	};
+	struct utsname uts;
+	int i;
+
+	if (uname(&uts) < 0)
+		return;
+
+	for (i = 0; modules[i]; i++)
+		load_one_module(modules[i], uts.release);
 }
 
 static void kmsg_open(void)
@@ -603,22 +635,202 @@ static int copy_tree(const char *src, const char *dst)
 	return 0;
 }
 
-int main(void)
+/*
+ * copy_ktools_to_newroot - expose initramfs /ktools on the new root
+ *
+ * The mk-initramfs --utils flag bundles userspace utility trees under
+ * /ktools/<name> in the initramfs.  After switch_root, the initramfs is gone,
+ * so we mount a tmpfs at /newroot/ktools and copy the trees into it.  A
+ * no-op if no /ktools tree was bundled.
+ */
+static void copy_ktools_to_newroot(void)
 {
-	char cmdline[CMDLINE_MAX];
+	struct stat st;
+
+	if (lstat("/ktools", &st) < 0 || !S_ISDIR(st.st_mode))
+		return;
+
+	mkdir(MOUNTPOINT "/ktools", 0755);
+
+	if (mount("tmpfs", MOUNTPOINT "/ktools", "tmpfs", 0, "mode=0755") < 0) {
+		kmsg_log(KMSG_ERR, "mount tmpfs on /ktools: %s\n",
+			 strerror(errno));
+		return;
+	}
+
+	kmsg_log(KMSG_INFO, "copying /ktools to new root\n");
+	if (copy_tree("/ktools", MOUNTPOINT "/ktools") < 0)
+		kmsg_log(KMSG_ERR, "copy /ktools failed\n");
+	else
+		kmsg_log(KMSG_INFO, "copied /ktools successfully\n");
+}
+
+/*
+ * rescue_shell - exec busybox sh as PID 1 instead of letting init exit
+ *
+ * When init exits the kernel panics ("attempted to kill init"), so on any
+ * unrecoverable boot failure we exec a static busybox shell on /dev/console
+ * to give a chance to inspect state.  Returns only if exec fails, in which
+ * case the caller falls through to sleep+exit and the kernel panics as before.
+ */
+static void rescue_shell(const char *reason)
+{
+	int fd;
+
+	kmsg_log(KMSG_ERR, "dropping to rescue shell: %s\n", reason);
+
+	/*
+	 * In configs with HID/keyboard as modules, stdin is dead until these
+	 * are loaded.  Brief sleep lets USB enumerate before exec'ing the shell.
+	 */
+	load_input_modules();
+	usleep(500000);
+
+	setsid();
+	fd = open("/dev/console", O_RDWR);
+	if (fd >= 0) {
+		/* Force-steal: /dev/console may still be CT of the prior session */
+		ioctl(fd, TIOCSCTTY, 1);
+		dup2(fd, 0);
+		dup2(fd, 1);
+		dup2(fd, 2);
+		if (fd > 2)
+			close(fd);
+	}
+
+	execl("/bin/busybox", "busybox", "sh", NULL);
+	kmsg_log(KMSG_ERR, "exec /bin/busybox: %s\n", strerror(errno));
+}
+
+/*
+ * switch_root_and_exec - move /newroot on top of /, chroot in, exec init
+ *
+ * Returns only on failure (caller is expected to sleep and exit).
+ */
+static void switch_root_and_exec(void)
+{
+	if (chdir(MOUNTPOINT) < 0) {
+		kmsg_log(KMSG_ERR, "chdir %s: %s\n", MOUNTPOINT, strerror(errno));
+		return;
+	}
+
+	if (mount(".", "/", NULL, MS_MOVE, NULL) < 0) {
+		kmsg_log(KMSG_ERR, "mount --move: %s\n", strerror(errno));
+		return;
+	}
+
+	if (chroot(".") < 0) {
+		kmsg_log(KMSG_ERR, "chroot: %s\n", strerror(errno));
+		return;
+	}
+
+	if (chdir("/") < 0) {
+		kmsg_log(KMSG_ERR, "chdir /: %s\n", strerror(errno));
+		return;
+	}
+
+	kmsg_log(KMSG_INFO, "switch_root done\n");
+
+	if (mount("tmpfs", "/run", "tmpfs",
+		  MS_NODEV | MS_NOSUID | MS_STRICTATIME,
+		  "mode=0755") < 0) {
+		kmsg_log(KMSG_ERR, "mount /run: %s\n", strerror(errno));
+		return;
+	}
+
+	execl("/sbin/init", "init", NULL);
+	execl("/init", "init", NULL);
+	kmsg_log(KMSG_ERR, "exec init: %s\n", strerror(errno));
+}
+
+/*
+ * standard_main - mount the block device named by root= and switch into it.
+ *
+ * Filesystem type comes from rootfstype= when present, otherwise a small
+ * list of common types is tried in order.
+ */
+static int standard_main(char *cmdline)
+{
+	static const char * const fstypes[] = {
+		"ext4", "xfs", "btrfs", "ext3", "ext2", NULL,
+	};
+	char rootspec[256] = "";
+	char rootfstype[64] = "";
+	char *val;
+	size_t n;
+	int i;
+
+	kmsg_log(KMSG_INFO, "starting standard root setup\n");
+
+	val = find_cmdline_arg(cmdline, "root");
+	if (!val) {
+		kmsg_log(KMSG_ERR, "root= not found on cmdline\n");
+		return 1;
+	}
+	n = strcspn(val, " \t\n");
+	if (n == 0 || n >= sizeof(rootspec)) {
+		kmsg_log(KMSG_ERR, "invalid root= value\n");
+		return 1;
+	}
+	memcpy(rootspec, val, n);
+	rootspec[n] = '\0';
+
+	val = find_cmdline_arg(cmdline, "rootfstype");
+	if (val) {
+		n = strcspn(val, " \t\n");
+		if (n > 0 && n < sizeof(rootfstype)) {
+			memcpy(rootfstype, val, n);
+			rootfstype[n] = '\0';
+		}
+	}
+
+	/* devtmpfs may take a moment to populate the root device node */
+	for (i = 0; i < 50; i++) {
+		if (access(rootspec, F_OK) == 0)
+			break;
+		usleep(100000);
+	}
+
+	if (rootfstype[0]) {
+		if (mount(rootspec, MOUNTPOINT, rootfstype, 0, NULL) < 0) {
+			kmsg_log(KMSG_ERR, "mount %s as %s: %s\n",
+				 rootspec, rootfstype, strerror(errno));
+			return 1;
+		}
+	} else {
+		int mounted = 0;
+
+		for (i = 0; fstypes[i]; i++) {
+			if (mount(rootspec, MOUNTPOINT, fstypes[i], 0, NULL) == 0) {
+				kmsg_log(KMSG_INFO, "mounted %s as %s\n",
+					 rootspec, fstypes[i]);
+				mounted = 1;
+				break;
+			}
+		}
+		if (!mounted) {
+			kmsg_log(KMSG_ERR, "no fstype matched %s\n", rootspec);
+			return 1;
+		}
+	}
+
+	copy_ktools_to_newroot();
+
+	switch_root_and_exec();
+	return 1;
+}
+
+/*
+ * lustre_main - bring up local ZFS-backed Lustre and switch into the client.
+ */
+static int lustre_main(char *cmdline)
+{
 	char pool[256], device[256], fsname[64];
 	char dataset[320], svname[64], client_dev[320];
 	char mount_data[512];
 	char *lustreroot_val;
-	FILE *f;
 	int rc;
 
-	/* Mount essential pseudo-filesystems */
-	mount("proc",     "/proc", "proc",     0, NULL);
-	mount("sysfs",    "/sys",  "sysfs",    0, NULL);
-	mount("devtmpfs", "/dev",  "devtmpfs", 0, NULL);
-
-	kmsg_open();
 	kmsg_log(KMSG_INFO, "starting lustre root filesystem setup\n");
 
 	/* Load ZFS and Lustre kernel modules before anything else */
@@ -643,27 +855,8 @@ int main(void)
 		}
 	}
 
-	/* Read kernel command line */
-	f = fopen(CMDLINE_PATH, "r");
-	if (!f) {
-		kmsg_log(KMSG_ERR, "cannot open %s: %s\n",
-			 CMDLINE_PATH, strerror(errno));
-		goto fail;
-	}
-	if (!fgets(cmdline, sizeof(cmdline), f)) {
-		kmsg_log(KMSG_ERR, "cannot read %s: %s\n",
-			 CMDLINE_PATH, strerror(errno));
-		fclose(f);
-		goto fail;
-	}
-	fclose(f);
-
-	/* Find lustreroot= argument */
+	/* lustreroot= is guaranteed present here — the dispatcher checked. */
 	lustreroot_val = find_cmdline_arg(cmdline, "lustreroot");
-	if (!lustreroot_val) {
-		kmsg_log(KMSG_ERR, "lustreroot= not found in %s\n", CMDLINE_PATH);
-		goto fail;
-	}
 
 	/* Parse pool, device, and fsname out of the boot parameter value */
 	if (parse_lustreroot(lustreroot_val, pool, sizeof(pool),
@@ -757,43 +950,48 @@ int main(void)
 			kmsg_log(KMSG_INFO, "copied /lib/modules successfully\n");
 	}
 
+	copy_ktools_to_newroot();
+
 	/*
-	 * The initial ramfs cannot be pivot_root()'d.  Instead, move the new
-	 * root on top of "/" and chroot into it (switch_root(8) semantics).
+	 * The initial ramfs cannot be pivot_root()'d.  switch_root_and_exec()
+	 * implements switch_root(8) semantics and execs /sbin/init.
 	 */
-	if (chdir(MOUNTPOINT) < 0) {
-		kmsg_log(KMSG_ERR, "chdir %s: %s\n", MOUNTPOINT, strerror(errno));
-		goto fail;
-	}
-
-	if (mount(".", "/", NULL, MS_MOVE, NULL) < 0) {
-		kmsg_log(KMSG_ERR, "mount --move: %s\n", strerror(errno));
-		goto fail;
-	}
-
-	if (chroot(".") < 0) {
-		kmsg_log(KMSG_ERR, "chroot: %s\n", strerror(errno));
-		goto fail;
-	}
-
-	if (chdir("/") < 0) {
-		kmsg_log(KMSG_ERR, "chdir /: %s\n", strerror(errno));
-		goto fail;
-	}
-
-	kmsg_log(KMSG_INFO, "switch_root done\n");
-
-	if (mount("tmpfs", "/run", "tmpfs",
-		  MS_NODEV | MS_NOSUID | MS_STRICTATIME,
-		  "mode=0755") < 0) {
-		kmsg_log(KMSG_ERR, "mount /run: %s\n", strerror(errno));
-		goto fail;
-	}
-
-	execl("/sbin/init", "init", NULL);
-	execl("/init", "init", NULL);
-	kmsg_log(KMSG_ERR, "exec init: %s\n", strerror(errno));
+	switch_root_and_exec();
 fail:
+	return 1;
+}
+
+int main(void)
+{
+	char cmdline[CMDLINE_MAX];
+	FILE *f;
+
+	mount("proc",     "/proc", "proc",     0, NULL);
+	mount("sysfs",    "/sys",  "sysfs",    0, NULL);
+	mount("devtmpfs", "/dev",  "devtmpfs", 0, NULL);
+
+	kmsg_open();
+
+	f = fopen(CMDLINE_PATH, "r");
+	if (!f || !fgets(cmdline, sizeof(cmdline), f)) {
+		kmsg_log(KMSG_ERR, "cannot read %s\n", CMDLINE_PATH);
+		if (f)
+			fclose(f);
+		rescue_shell("cannot read /proc/cmdline");
+		sleep(30);
+		return 1;
+	}
+	fclose(f);
+
+	kmsg_log(KMSG_INFO, "cmdline: %s", cmdline);
+
+	if (find_cmdline_arg(cmdline, "lustreroot"))
+		lustre_main(cmdline);
+	else
+		standard_main(cmdline);
+
+	/* Boot path failed (success paths exec into the new root) */
+	rescue_shell("boot failed");
 	sleep(30);
 	return 1;
 }
