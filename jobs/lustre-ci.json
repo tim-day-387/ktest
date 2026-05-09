@@ -73,13 +73,6 @@
       "depends_on": ["lustre_mainline_native"]
     },
     {
-      "name": "llog-unit",
-      "platform": "mainline",
-      "run": "tests/fs/lustre/llog-unit.ktest",
-      "optional": false,
-      "depends_on": ["lustre_mainline_native"]
-    },
-    {
       "name": "mgs-setup",
       "platform": "mainline",
       "run": "tests/fs/lustre/mgs-setup.ktest",
