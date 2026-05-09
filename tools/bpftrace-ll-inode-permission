@@ -1,0 +1,18 @@
+#!/bin/bash
+# Trace ll_inode_permission calls that return errors, printing inode uid/gid and mask.
+
+set -euo pipefail
+
+exec sudo bpftrace -e '
+kprobe:acl_permission_check {
+    @uid[tid] = ((struct inode *)arg1)->i_uid.val;
+    @gid[tid] = ((struct inode *)arg1)->i_gid.val;
+    @mask[tid] = arg2;
+}
+kretprobe:acl_permission_check {
+    printf("acl_permission_check PID %d (%s) uid=%d gid=%d mask=%d ret=%d\n", pid, comm, @uid[tid], @gid[tid], @mask[tid], retval);
+    delete(@uid[tid]);
+    delete(@gid[tid]);
+    delete(@mask[tid]);
+}
+' | grep "ret=-"

@@ -1,0 +1,18 @@
+#!/bin/bash
+# Trace xattr_permission calls that return errors, printing the xattr name.
+
+set -euo pipefail
+
+exec sudo bpftrace -e '
+kprobe:xattr_permission {
+    @name[tid] = str(arg2);
+    @uid[tid] = ((struct inode *)arg1)->i_uid.val;
+    @gid[tid] = ((struct inode *)arg1)->i_gid.val;
+}
+kretprobe:xattr_permission {
+    printf("xattr_permission PID %d (%s) name=%s uid=%d gid=%d ret=%d\n", pid, comm, @name[tid], @uid[tid], @gid[tid], retval);
+    delete(@name[tid]);
+    delete(@uid[tid]);
+    delete(@gid[tid]);
+}
+' | grep "ret=-"
