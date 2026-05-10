@@ -18,7 +18,7 @@ from typing import Optional, Dict, List, Any
 
 import podman
 
-from .utils import put_archive, get_archive, log_container, get_podman_socket, get_idmappings
+from .utils import put_archive, get_archive, log_container, get_podman_socket
 
 # Serialize container creation to avoid podman user namespace race condition
 # when multiple keep-id containers are created concurrently
@@ -75,9 +75,6 @@ class ContainerJob:
 
         Path("/tmp/ktest-packages").mkdir(exist_ok=True)
         os.chmod("/tmp/ktest-packages", 0o777)
-
-        Path(ccache_dir).mkdir(parents=True, exist_ok=True)
-        os.chmod(ccache_dir, 0o777)
 
         # Build overlay volume list.
         # /var/lib/ktest is mounted as an overlay so container writes are
@@ -163,7 +160,7 @@ class ContainerJob:
             devices=["/dev/kvm", "/dev/net/tun"],
             cap_add=["NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"],
             sysctls={"net.ipv4.ip_forward": "1"},
-            idmappings=get_idmappings(),
+            userns_mode="keep-id",
             pids_limit=100000,
             overlay_volumes=overlay_volumes,
             mounts=mounts,

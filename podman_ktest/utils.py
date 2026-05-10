@@ -10,7 +10,6 @@
 #
 
 import os
-import pwd
 import subprocess
 import threading
 import time
@@ -74,43 +73,6 @@ def log_container(log_path, container):
     else:
         for line in container.logs(stream=True, stdout=True, stderr=True):
             print(line.decode("utf-8"), end="")
-
-
-def _read_subid(path, username):
-    """Read the first subordinate ID range for a user."""
-    try:
-        with open(path) as f:
-            for line in f:
-                parts = line.strip().split(":")
-                if len(parts) == 3 and parts[0] == username:
-                    return int(parts[1]), int(parts[2])
-    except Exception:
-        pass
-    return 100000, 65536
-
-
-def get_idmappings():
-    """Return idmappings for rootless container creation.
-
-    Maps container UID/GID 0 to the current host user so the overlay storage
-    remains accessible to the host process, and maps container UIDs 1+ to the
-    subordinate ID range.
-    """
-    uid = os.getuid()
-    gid = os.getgid()
-    username = pwd.getpwuid(uid).pw_name
-    subuid_start, subuid_count = _read_subid("/etc/subuid", username)
-    subgid_start, subgid_count = _read_subid("/etc/subgid", username)
-    return {
-        "uidmap": [
-            {"container_id": 0, "host_id": uid, "size": 1},
-            {"container_id": 1, "host_id": subuid_start, "size": subuid_count},
-        ],
-        "gidmap": [
-            {"container_id": 0, "host_id": gid, "size": 1},
-            {"container_id": 1, "host_id": subgid_start, "size": subgid_count},
-        ],
-    }
 
 
 def get_ccache_dir(shared_filesystem_path=None):
