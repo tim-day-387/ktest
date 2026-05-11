@@ -417,7 +417,7 @@ cmd_create()
     MNT=$(mktemp --tmpdir -d $(basename "$0")-XXXXXXXXXX)
     trap '_umount_image; rm -f "$ktest_image".new' EXIT
 
-    fallocate -l "$IMAGE_SIZE" "$ktest_image".new
+    truncate -s "$IMAGE_SIZE" "$ktest_image".new
     chmod 644 "$ktest_image".new
     mkfs.ext4 -F "$ktest_image".new
     mount "$ktest_image".new "$MNT"
