@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 build = "src/build.rs"
 
+[features]
+default = ["git2"]
+
 [dependencies]
 cgi = "0.6"
-git2 = "0.16"
+git2 = { version = "0.16", optional = true }
 querystring = "1.1.0"
 multimap = "0.8.3"
 die = "0.2.0"

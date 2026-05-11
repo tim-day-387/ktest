@@ -16,6 +16,7 @@ pub mod worker_capnp;
 pub use users::RcTestGroup;
 pub use users::Userrc;
 
+#[cfg(feature = "git2")]
 pub fn git_get_commit(
     repo: &git2::Repository,
     reference: String,

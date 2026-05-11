@@ -50,7 +50,7 @@ RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)" && \
 RUN ln -s /usr/bin/ccache /usr/local/bin/clang-20
 
 # Create a user for running ktest (ktest should not run as root for VM operations)
-RUN useradd -m -s /bin/bash ktest
+RUN useradd -m -s /bin/bash ktest && chmod 755 /home/ktest
 
 # Switch to ktest user
 USER ktest
@@ -82,7 +82,7 @@ COPY --chown=ktest:ktest . /home/ktest/ktest
 
 # Build ktest with cargo
 WORKDIR /home/ktest/ktest
-RUN cargo build --release
+RUN cargo build --release --bin lustre-ktest --no-default-features
 
 # Default command
 CMD ["/bin/bash"]
