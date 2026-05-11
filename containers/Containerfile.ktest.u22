@@ -52,6 +52,16 @@ RUN ln -s /usr/bin/ccache /usr/local/bin/clang-20
 # Create a user for running ktest (ktest should not run as root for VM operations)
 RUN useradd -m -s /bin/bash ktest && chmod 755 /home/ktest
 
+# Pre-create bind-mount targets mode 0777 so podman with --userns=keep-id
+# can mount onto them regardless of which host uid the invoker maps to.
+# Without this, crun's mkdir fails when the keep-id'd uid isn't ktest (1000)
+# because /home/ktest is 0755 owned by 1000.
+RUN install -d -m 0777 \
+    /home/ktest/git \
+    /home/ktest/git/linux \
+    /home/ktest/git/lustre-release \
+    /home/ktest/git/zfs
+
 # Switch to ktest user
 USER ktest
 WORKDIR /home/ktest
