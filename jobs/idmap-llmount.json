@@ -1,0 +1,18 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_mainline",
+      "platform": "mainline",
+      "build": "tests/fs/lustre/idmapped-llmount.ktest",
+      "backing_storage": "zfs"
+    },
+    {
+      "name": "boot",
+      "platform": "mainline",
+      "build": "tests/fs/lustre/idmapped-llmount.ktest",
+      "run": "tests/fs/lustre/idmapped-llmount.ktest",
+      "backing_storage": "zfs",
+      "depends_on": ["lustre_mainline"]
+    }
+  ]
+}
