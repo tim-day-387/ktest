@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y \
     minicom socat vde2 git ssh rsync brotli \
     lsb-release wget software-properties-common \
     gnupg clang bear pahole kmod swig quilt \
-    libtool pkg-config libpython3-dev libmount-dev \
+    cmake libtool pkg-config libpython3-dev libmount-dev \
     libaio-dev libssl-dev libnl-genl-3-dev \
     libkeyutils-dev libyaml-dev libreadline-dev \
     module-assistant debhelper libsnmp-dev quota \
@@ -45,9 +45,10 @@ RUN apt-get update && apt-get install -y \
     chmod 0644 /boot/vmlinuz* && \
     rm -rf /var/lib/apt/lists/*
 
-# Get LLVM and clean up in the same layer
+# Get LLVM and clean up in the same layer.  llvm-20-dev / libclang-20-dev
+# provide the headers and libs the cplugin (xunused) links against.
 RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)" && \
-    apt-get install -y clang-tidy-20 && \
+    apt-get install -y clang-tidy-20 llvm-20-dev libclang-20-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup ccache symlink for Lustre/ZFS builds
@@ -112,6 +113,12 @@ COPY --chown=ktest:ktest . /home/ktest/ktest
 # Build ktest with cargo
 WORKDIR /home/ktest/ktest
 RUN cargo build --release --bin lustre-ktest --no-default-features
+
+# Build the xunused cc-plugin against the apt.llvm.org-installed LLVM 20.
+# Output lands at cplugin/build/xunused, where the cc-plugin / qlkbuild
+# scripts look for it.
+RUN cmake -S cplugin -B cplugin/build && \
+    cmake --build cplugin/build -j"$(nproc)"
 
 # Default command
 CMD ["/bin/bash"]

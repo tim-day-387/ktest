@@ -30,7 +30,7 @@ ktest_kernel_source="$(realpath -e ~/git/linux/ 2>/dev/null || true)"
 ktest_lustre_source="$ktest_kernel_source/../lustre-release/"
 ktest_zfs_source="$ktest_kernel_source/../zfs/"
 ktest_boot_test="$ktest_dir/tests/fs/lustre/boot.ktest"
-ktest_ccplugin="$ktest_dir/../xunused/build/xunused"
+ktest_ccplugin="$ktest_dir/cplugin/build/xunused"
 ktest_compiler="${CC:-clang-20}"
 ktest_skip_kernel_config=false
 ktest_lustre_allow_warnings=0
@@ -603,6 +603,35 @@ function cmd_generate_zfs_patch()
     run_quiet_with_status "ZFS BUILD [$(basename "$ktest_test")]" "DONE" build_zfs
 
     run_zfs_copy_builtin
+}
+
+function cmd_ccplugin()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
+
+    if [[ ! -f "$ktest_lustre_build/compile_commands.json" ]]; then
+	echo "compile_commands.json not found at $ktest_lustre_build/compile_commands.json"
+	exit 1
+    fi
+
+    if [[ ! -x "$ktest_ccplugin" ]]; then
+	echo "cc-plugin binary not found at $ktest_ccplugin"
+	exit 1
+    fi
+
+    echo "PLUGIN"
+    "$ktest_ccplugin" "$ktest_lustre_build/compile_commands.json"
 }
 
 function cmd_build()

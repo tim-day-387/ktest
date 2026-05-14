@@ -76,6 +76,12 @@ CONFIGS = {
         "run_script": "./qlkbuild run",
         "sync_zfs": True,
     },
+    "mainline_ccplugin": {
+        "image": "ktest-runner:latest",
+        "build_script": "./qlkbuild ccplugin",
+        "working_dir": "/home/ktest/ktest/",
+        "sync_zfs": True,
+    },
     "u24": {
         "image": "lustre-u24:latest",
         "build_script": """
