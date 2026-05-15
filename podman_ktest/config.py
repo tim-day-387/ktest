@@ -155,11 +155,4 @@ make --quiet -j$(nproc) rpms
         "working_dir": "/home/ktest/git/lustre-release/",
         "distro_platform": True,
     },
-    "userland_deb": {
-        "image": "ktest-runner:latest",
-        "build_script": "./qlkbuild build_userland_deb",
-        "package_script": "./qlkbuild build_userland_deb",
-        "working_dir": "/home/ktest/ktest/",
-        "sync_zfs": True,
-    },
 }
