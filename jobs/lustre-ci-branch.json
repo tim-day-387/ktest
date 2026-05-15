@@ -64,20 +64,11 @@
       "description": "Build Lustre (InTree)"
     },
     {
-      "name": "clang-tidy",
-      "platform": "mainline",
-      "tool": "clang-tidy",
-      "optional": true,
-      "description": "Run Clang Tidy",
-      "depends_on": ["lustre_mainline_native"]
-    },
-    {
       "name": "cc-plugin",
-      "platform": "mainline",
-      "tool": "cc-plugin",
+      "platform": "mainline_ccplugin",
+      "build": "tests/fs/lustre/boot.ktest",
       "optional": true,
-      "description": "Run Lustre LLVM Compiler Plugin",
-      "depends_on": ["lustre_mainline_native"]
+      "description": "Run Lustre LLVM Compiler Plugin"
     },
     {
       "name": "boot",
