@@ -118,6 +118,11 @@ def main():
         default=None,
         help="Commit subject for metadata_store.json",
     )
+    job_parser.add_argument(
+        "--no-cleanup",
+        action="store_true",
+        help="Do not remove containers after jobs complete (useful for debugging)",
+    )
 
     # Deploy command - deploy the CI container
     deploy_parser = subparsers.add_parser(

@@ -195,6 +195,7 @@ def run_ktest(
     podman_socket=None,
     use_tarball_input=False,
     ccache_dir=None,
+    no_cleanup=False,
 ):
     """Run a ktest job."""
     task_name = get_task_name(job_config, "run")
@@ -222,6 +223,7 @@ def run_ktest(
             log_path=log_path,
             distro_platform=build_config.get("distro_platform", False),
             is_vm_run=True,
+            no_cleanup=no_cleanup,
         )
         with job:
             return_code = job.run(client, podman_socket=podman_socket)
@@ -240,6 +242,7 @@ def run_build_lustre(
     podman_socket=None,
     use_tarball_input=False,
     ccache_dir=None,
+    no_cleanup=False,
 ):
     """Run a Lustre build job."""
     task_name = get_task_name(job_config, "build")
@@ -294,6 +297,7 @@ def run_build_lustre(
             get_ktest_out_archive=should_get_archive,
             mount_ktest_out=should_mount_output,
             distro_platform=build_config.get("distro_platform", False),
+            no_cleanup=no_cleanup,
         )
         with job:
             return_code = job.run(client, podman_socket=podman_socket)
@@ -312,6 +316,7 @@ def run_package(
     podman_socket=None,
     use_tarball_input=False,
     ccache_dir=None,
+    no_cleanup=False,
 ):
     """Run a package build job."""
     task_name = get_task_name(job_config, "package")
@@ -348,6 +353,7 @@ def run_package(
             get_ktest_out_archive=False,
             mount_ktest_out=True,
             distro_platform=build_config.get("distro_platform", False),
+            no_cleanup=no_cleanup,
         )
         with job:
             return_code = job.run(client)
@@ -366,6 +372,7 @@ def run_tool(
     podman_socket=None,
     use_tarball_input=False,
     ccache_dir=None,
+    no_cleanup=False,
 ):
     """Run a tool job."""
     task_name = get_task_name(job_config, "tool")
@@ -391,6 +398,7 @@ def run_tool(
             ccache_dir=ccache_dir,
             log_path=log_path,
             distro_platform=build_config.get("distro_platform", False),
+            no_cleanup=no_cleanup,
         )
         with job:
             return_code = job.run(client, podman_socket=podman_socket)
@@ -408,6 +416,7 @@ def run_job_config(
     podman_socket=None,
     use_tarball_input=False,
     ccache_dir=None,
+    no_cleanup=False,
 ):
     """Run a job from a job configuration object."""
     platform = job_config["platform"]
@@ -428,6 +437,7 @@ def run_job_config(
             podman_socket,
             use_tarball_input,
             ccache_dir,
+            no_cleanup,
         )
     elif job_config.get("build", False):
         return_code, runtime, task_name = run_build_lustre(
@@ -440,6 +450,7 @@ def run_job_config(
             podman_socket,
             use_tarball_input,
             ccache_dir,
+            no_cleanup,
         )
     elif job_config.get("package", False):
         return_code, runtime, task_name = run_package(
@@ -452,6 +463,7 @@ def run_job_config(
             podman_socket,
             use_tarball_input,
             ccache_dir,
+            no_cleanup,
         )
     elif job_config.get("tool", False):
         return_code, runtime, task_name = run_tool(
@@ -464,6 +476,7 @@ def run_job_config(
             podman_socket,
             use_tarball_input,
             ccache_dir,
+            no_cleanup,
         )
 
     return return_code, runtime, task_name

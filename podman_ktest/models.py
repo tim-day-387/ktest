@@ -63,6 +63,7 @@ class ContainerJob:
     mount_ktest_out: bool = False
     distro_platform: bool = False
     is_vm_run: bool = False
+    no_cleanup: bool = False
 
     # State fields (managed internally)
     _started: bool = field(default=False, init=False)
@@ -156,9 +157,13 @@ class ContainerJob:
         # and retry on transient socket errors (e.g. timeout under load).
         # Uses a short-timeout client so we detect deadlocks quickly
         # instead of hanging forever.
+        command = self.command
+        if self.no_cleanup and len(command) == 3 and command[0] == "bash" and command[1] == "-c":
+            command = ["bash", "-c", command[2] + "; sleep infinity"]
+
         create_kwargs = dict(
             image=self.image,
-            command=self.command,
+            command=command,
             stdin_open=False,
             devices=["/dev/kvm", "/dev/net/tun"],
             cap_add=["NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"],
@@ -224,15 +229,17 @@ class ContainerJob:
             return return_code
 
         finally:
-            # Clean up container
-            try:
-                container.stop(timeout=5)
-            except:
-                pass
-            try:
-                container.remove()
-            except:
-                pass
+            if self.no_cleanup:
+                print(f"Skipping container cleanup (--no-cleanup): {container.id}")
+            else:
+                try:
+                    container.stop(timeout=5)
+                except:
+                    pass
+                try:
+                    container.remove()
+                except:
+                    pass
 
             self._container = None
 
@@ -252,6 +259,9 @@ class ContainerJob:
         """Stop and remove container if still running."""
         container = self._container
         if container is not None:
+            if self.no_cleanup:
+                print(f"Skipping container cleanup (--no-cleanup): {container.id}")
+                return
             try:
                 container.stop(timeout=5)
             except:

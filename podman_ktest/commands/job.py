@@ -399,6 +399,8 @@ def cmd_job(
         log_path = get_log_path(job_name)
         task_name = get_job_task_name(job)
         print(f"START {task_name}")
+        # Only sleep/skip cleanup on the last container (jobs with no dependents)
+        job_no_cleanup = no_cleanup and not dependents.get(job_name)
         future = executor.submit(
             run_job_config,
             job,
@@ -409,6 +411,7 @@ def cmd_job(
             podman_socket,
             use_tarball_input,
             ccache_dir,
+            job_no_cleanup,
         )
         return future
 
@@ -419,6 +422,8 @@ def cmd_job(
         if return_code != 0:
             end_msg += f" (exit code: {return_code})"
         print(end_msg)
+
+    no_cleanup = getattr(args, "no_cleanup", False)
 
     # Multi-job execution with dynamic scheduling
     max_workers = min(len(all_jobs), 10)  # Reasonable limit on parallelism
