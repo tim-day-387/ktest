@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Minimal reproducer for overlayfs-over-Lustre silent read truncation bug.
+#
+# When a file exists in the overlayfs lower layer (size A), and a larger file
+# (size B > A) is written via the overlayfs upper Lustre layer, subsequent
+# reads with a buffer larger than the Lustre KMS trigger a glimpse that may
+# return a stale OST size, truncating the read to the old size.
+#
+# See: vvp_prep_size() in lustre/llite/vvp_io.c
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
+
+require-lustre-kernel-config
+require-lustre-debug-kernel-config
+
+require-kernel-config LNET=y
+require-kernel-config LUSTRE=y
+require-kernel-config ZFS=y
+require-kernel-config MODULES=y
+require-kernel-config MODULE_UNLOAD
+
+require-kernel-config USER_NS
+require-kernel-config OVERLAY_FS
+
+# ZFS OSD backs its targets with zpools on ramdisks (/dev/ram*)
+require-kernel-config BLK_DEV_RAM=y
+require-kernel-config BLK_DEV_RAM_SIZE=524288
+
+config-mem 10G
+config-timeout 120
+
+LOWER_DIR=/tmp/ovl-lower
+OVL_DIR=/tmp/ovl-merge
+LUSTRE_UPPER=/mnt/lustre/ovl-upper
+LUSTRE_WORK=/mnt/lustre/ovl-work
+
+LOWER_FILE=testfile
+SMALL_SIZE=821
+LARGE_SIZE=1182
+
+setup_overlayfs()
+{
+    mkdir -p "$LOWER_DIR" "$OVL_DIR" "$LUSTRE_UPPER" "$LUSTRE_WORK"
+
+    # Create lower-layer file with SMALL_SIZE bytes of known content
+    dd if=/dev/urandom bs=1 count="$SMALL_SIZE" of="$LOWER_DIR/$LOWER_FILE" 2>/dev/null
+    echo "lower file size: $(wc -c < "$LOWER_DIR/$LOWER_FILE")"
+
+    mount -t overlay overlay \
+        -o lowerdir="$LOWER_DIR",upperdir="$LUSTRE_UPPER",workdir="$LUSTRE_WORK" \
+        "$OVL_DIR"
+}
+
+cleanup_overlayfs()
+{
+    umount "$OVL_DIR" 2>/dev/null || true
+    rm -rf "$LUSTRE_UPPER" "$LUSTRE_WORK"
+}
+
+run_reproducer()
+{
+    local src="$OVL_DIR/$LOWER_FILE"
+
+    # Generate a LARGE_SIZE source in memory (not on overlayfs)
+    local tmpfile=$(mktemp)
+    dd if=/dev/urandom bs=1 count="$LARGE_SIZE" of="$tmpfile" 2>/dev/null
+    local expected_hash
+    expected_hash=$(sha256sum "$tmpfile" | awk '{print $1}')
+
+    echo "Writing $LARGE_SIZE bytes to overlayfs file (triggers copy-up + write)..."
+    # Use O_TRUNC write like cat > does — this is the failing path
+    cat "$tmpfile" > "$src"
+    sync
+
+    local written
+    written=$(wc -c < "$src")
+    echo "Written size (stat): $written bytes"
+
+    echo "Reading back via cat (large buffer read)..."
+    local readback=$(mktemp)
+    cat "$src" > "$readback"
+
+    local read_size
+    read_size=$(wc -c < "$readback")
+    local read_hash
+    read_hash=$(sha256sum "$readback" | awk '{print $1}')
+
+    echo "Expected: $LARGE_SIZE bytes, hash=$expected_hash"
+    echo "Got:      $read_size bytes, hash=$read_hash"
+
+    rm -f "$tmpfile" "$readback"
+
+    if [[ "$read_size" -ne "$LARGE_SIZE" ]]; then
+        echo "FAIL: read returned $read_size bytes, expected $LARGE_SIZE"
+        return 1
+    fi
+
+    if [[ "$read_hash" != "$expected_hash" ]]; then
+        echo "FAIL: hash mismatch"
+        return 1
+    fi
+
+    echo "PASS"
+}
+
+test_overlayfs_read()
+{
+    setup_lustrefs
+
+    setup_overlayfs
+
+    run_reproducer
+    local rc=$?
+
+    cleanup_overlayfs
+
+    cleanup_lustrefs
+
+    return $rc
+}
+
+main "$@"

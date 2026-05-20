@@ -1,0 +1,25 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_patch",
+      "platform": "native_1",
+      "build": "tests/fs/lustre/overlayfs-read.ktest",
+      "backing_storage": "zfs"
+    },
+    {
+      "name": "kernel_build",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/overlayfs-read.ktest",
+      "backing_storage": "zfs",
+      "depends_on": ["lustre_patch"]
+    },
+    {
+      "name": "boot",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/overlayfs-read.ktest",
+      "run": "tests/fs/lustre/overlayfs-read.ktest",
+      "backing_storage": "zfs",
+      "depends_on": ["kernel_build"]
+    }
+  ]
+}
