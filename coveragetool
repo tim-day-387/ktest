@@ -28,8 +28,6 @@ shift $(( OPTIND - 1 ))
 
 if [ "$#" -ne 0 ]; then
     ktest_out=$1
-else
-    ktest_out=./ktest-out
 fi
 
 ktest_out=$(readlink -f "$ktest_out")
@@ -38,6 +36,20 @@ if ! which lcov > /dev/null; then
     echo "lcov not installed"
     exit 0
 fi
+
+# When the kernel is compiled with clang, use llvm-cov gcov to avoid
+# gcov format version mismatches between clang output and the system gcov.
+gcov_tool_opt=()
+for v in "" -20 -19 -18 -17; do
+    if command -v "llvm-cov$v" > /dev/null 2>&1; then
+        wrapper=$(mktemp /tmp/gcov-wrapper.XXXXXX)
+        printf '#!/bin/sh\nexec llvm-cov%s gcov "$@"\n' "$v" > "$wrapper"
+        chmod +x "$wrapper"
+        trap "rm -f $wrapper" EXIT
+        gcov_tool_opt=(--gcov-tool "$wrapper")
+        break
+    fi
+done
 
 lcov_out="$ktest_out/lcov"
 
@@ -54,7 +66,8 @@ for dir in $ktest_out/gcov.*; do
     out=$lcov_out/lcov.${n}.info
     tracefiles+=" --add-tracefile $out"
 
-    lcov --capture --quiet --directory "$dir" --output-file "$out"
+    lcov --capture --quiet "${gcov_tool_opt[@]}" \
+        --directory "$dir" --output-file "$out"
 
     n=$((n+1))
 done

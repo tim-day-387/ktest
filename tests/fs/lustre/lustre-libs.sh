@@ -20,19 +20,16 @@ export workspace_path="/ktools"
 export lustre_pkg_path="$workspace_path/lustre-release"
 export zfs_pkg_path="$workspace_path/zfs"
 
-# Set Lustre test-framework.sh environment
-if [[ -f "$zfs_pkg_path/zfs" ]]; then
-    export ZFS="$zfs_pkg_path/zfs"
-    export ZPOOL="$zfs_pkg_path/zpool"
-else
-    export ZFS="$zfs_pkg_path/cmd/zfs/zfs"
-    export ZPOOL="$zfs_pkg_path/cmd/zpool/zpool"
-fi
+# Set Lustre test-framework.sh environment. Prefer the normally-installed
+# zfs/zpool (resolved from PATH before the build-tree dirs are prepended
+# below); fall back to the in-tree build layout only if not installed.
+export ZFS="$(command -v zfs 2>/dev/null || echo "$zfs_pkg_path/cmd/zfs/zfs")"
+export ZPOOL="$(command -v zpool 2>/dev/null || echo "$zfs_pkg_path/cmd/zpool/zpool")"
 
 export LUSTRE="$lustre_pkg_path/lustre"
-export LCTL="$LUSTRE/utils/lctl"
-export LNETCTL="$LUSTRE/../lnet/utils/lnetctl"
-export LNETDUMP="/host/home/timothy/Programming/lustre-release/utils/lnetdump/lnetdump"
+export LCTL="$(command -v lctl 2>/dev/null || echo "$LUSTRE/utils/lctl")"
+export LNETCTL="$(command -v lnetctl 2>/dev/null || echo "$LUSTRE/../lnet/utils/lnetctl")"
+export LNETDUMP="$(command -v lnetdump 2>/dev/null || echo "$LUSTRE/utils/lnetdump/lnetdump")"
 export RUNAS_ID="1000"
 
 # Update paths

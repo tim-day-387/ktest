@@ -164,7 +164,7 @@ def topological_sort(jobs):
 def any_job_needs_kernel(jobs):
     """Return True if any job in the list requires the kernel source."""
     for job in jobs:
-        # run_ktest never syncs kernel
+        # run_ktest syncs kernel via overlay mount, not tarball
         if job.get("run", False):
             continue
         platform = job.get("platform", "")
@@ -212,11 +212,12 @@ def run_ktest(
             working_dir=build_config["working_dir"],
             ktest_out_dir=ktest_out_dir,
             tarball_paths=tarball_paths,
-            sync_kernel=False,
-            sync_lustre=False,
+            sync_kernel=True,
+            sync_lustre=True,
             sync_zfs=False,
             sync_ktest_out=True,
             podman_socket=None,
+            mount_ktest_out=True,
             dirs=dirs,
             use_tarball_input=use_tarball_input,
             ccache_dir=ccache_dir,

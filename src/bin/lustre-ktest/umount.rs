@@ -1,4 +1,5 @@
 use crate::macros::TestCall;
+use crate::zfs::zpool_destroy_lustre_pools;
 use colored::Colorize;
 use regex::Regex;
 use std::ffi::CString;
@@ -247,4 +248,6 @@ pub fn umount_all() {
             println!("Removed directory: {}", mount.path);
         }
     }
+
+    zpool_destroy_lustre_pools();
 }

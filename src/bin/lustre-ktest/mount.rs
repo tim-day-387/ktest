@@ -1,4 +1,5 @@
 use crate::macros::{TestCall, FSNAME, LNET_INTF};
+use crate::zfs::{zfs_dataset_create, zpool_create};
 use colored::Colorize;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
@@ -367,6 +368,185 @@ pub fn mount_oss(end: u32) {
         let mount_point = generate_random_mount_point("OST", &format!("{:04X}", index));
 
         mount_lustre_ost("lustre-wbcfs", &mount_point, LNET_INTF, &sv_name)
+            .test_call()
+            .ok();
+    }
+}
+
+// ZFS pool/dataset naming convention: pool "lustre-mdt0" contains dataset "mdt0",
+// giving the full device path "lustre-mdt0/mdt0". The caller is responsible for
+// creating the zpools (e.g. via `zpool create lustre-mdt0 /dev/ram0`) before
+// invoking these functions. Lustre formats each dataset on first mount (virgin).
+
+fn zfs_mdt_device(index: u32) -> String {
+    format!("lustre-mdt{}/mdt{}", index, index)
+}
+
+fn zfs_ost_device(index: u32) -> String {
+    format!("lustre-ost{}/ost{}", index, index)
+}
+
+fn zfs_mgs_device() -> String {
+    "lustre-mgs/mgs".to_string()
+}
+
+fn mount_lustre_mdt_with_mgs_zfs(
+    mount_point: &str,
+    mgs_node: &str,
+    sv_name: &str,
+) -> Result<(), String> {
+    let device = zfs_mdt_device(0);
+    let mut mop = MountOpts::default();
+    mop.device = device.clone();
+    mop.mount_point = mount_point.to_string();
+    mop.fstype = "lustre_tgt".to_string();
+
+    append_option(&mut mop.options, "osd", Some("osd-zfs"));
+    append_option(&mut mop.options, "mgs", None);
+    append_option(&mut mop.options, "virgin", None);
+    append_option(&mut mop.options, "update", None);
+    append_option(
+        &mut mop.options,
+        "param",
+        Some(&format!("mgsnode={}", mgs_node)),
+    );
+    append_option(&mut mop.options, "svname", Some(sv_name));
+    append_option(&mut mop.options, "device", Some(&device));
+
+    mount_lustre_internal(&mop)
+}
+
+fn mount_lustre_mdt_zfs(
+    index: u32,
+    mount_point: &str,
+    mgs_node: &str,
+    sv_name: &str,
+) -> Result<(), String> {
+    let device = zfs_mdt_device(index);
+    let mut mop = MountOpts::default();
+    mop.device = device.clone();
+    mop.mount_point = mount_point.to_string();
+    mop.fstype = "lustre_tgt".to_string();
+
+    append_option(&mut mop.options, "osd", Some("osd-zfs"));
+    append_option(&mut mop.options, "virgin", None);
+    append_option(&mut mop.options, "update", None);
+    append_option(&mut mop.options, "mgsnode", Some(mgs_node));
+    append_option(&mut mop.options, "svname", Some(sv_name));
+    append_option(&mut mop.options, "device", Some(&device));
+
+    mount_lustre_internal(&mop)
+}
+
+fn mount_lustre_mgs_zfs(mount_point: &str, sv_name: &str) -> Result<(), String> {
+    let device = zfs_mgs_device();
+    let mut mop = MountOpts::default();
+    mop.device = device.clone();
+    mop.mount_point = mount_point.to_string();
+    mop.fstype = "lustre_tgt".to_string();
+
+    append_option(&mut mop.options, "osd", Some("osd-zfs"));
+    append_option(&mut mop.options, "virgin", None);
+    append_option(&mut mop.options, "update", None);
+    append_option(&mut mop.options, "mgs", None);
+    append_option(&mut mop.options, "svname", Some(sv_name));
+    append_option(&mut mop.options, "device", Some(&device));
+
+    mount_lustre_internal(&mop)
+}
+
+fn mount_lustre_ost_zfs(
+    index: u32,
+    mount_point: &str,
+    mgs_node: &str,
+    sv_name: &str,
+) -> Result<(), String> {
+    let device = zfs_ost_device(index);
+    let mut mop = MountOpts::default();
+    mop.device = device.clone();
+    mop.mount_point = mount_point.to_string();
+    mop.fstype = "lustre_tgt".to_string();
+
+    append_option(&mut mop.options, "osd", Some("osd-zfs"));
+    append_option(&mut mop.options, "mgsnode", Some(mgs_node));
+    append_option(&mut mop.options, "virgin", None);
+    append_option(&mut mop.options, "update", None);
+    append_option(&mut mop.options, "svname", Some(sv_name));
+    append_option(&mut mop.options, "device", Some(&device));
+
+    mount_lustre_internal(&mop)
+}
+
+fn mount_mds_zfs(start: u32, end: u32, ram_offset: u32) {
+    for index in start..end {
+        let sv_name = get_service_name(FSNAME, "MDT", index);
+        let ram_dev = format!("/dev/ram{}", ram_offset + index);
+        let pool = format!("lustre-mdt{}", index);
+        let dataset = format!("{}/mdt{}", pool, index);
+
+        boldln!("Mounting ZFS MDT {}...", sv_name);
+
+        zpool_create(&pool, &ram_dev).test_call().ok();
+        zfs_dataset_create(&dataset, false).test_call().ok();
+
+        let mount_point = generate_random_mount_point("MDT", &format!("{:04X}", index));
+        mount_lustre_mdt_zfs(index, &mount_point, LNET_INTF, &sv_name)
+            .test_call()
+            .ok();
+    }
+}
+
+/// Mount combined MGS+MDT targets using ZFS datasets on ramdisks.
+/// MDT{i} uses /dev/ram{i}. Returns the next available RAM device index.
+pub fn mount_mds_combined_zfs(mds_count: u32) -> u32 {
+    boldln!("Mounting ZFS combined MGS/MDT...");
+
+    // MDT0 is also the MGS; uses /dev/ram0
+    zpool_create("lustre-mdt0", "/dev/ram0").test_call().ok();
+    zfs_dataset_create("lustre-mdt0/mdt0", false).test_call().ok();
+
+    let mdt0_mount = generate_random_mount_point("MDT", "0000");
+    mount_lustre_mdt_with_mgs_zfs(&mdt0_mount, LNET_INTF, "lustre-MDT0000")
+        .test_call()
+        .ok();
+
+    mount_mds_zfs(1, mds_count, 0);
+    mds_count
+}
+
+/// Mount standalone MGS + MDT targets using ZFS datasets on ramdisks.
+/// MGS uses /dev/ram0; MDT{i} uses /dev/ram{i+1}. Returns next RAM device index.
+pub fn mount_mds_split_zfs(mds_count: u32) -> u32 {
+    boldln!("Mounting ZFS standalone MGS...");
+
+    zpool_create("lustre-mgs", "/dev/ram0").test_call().ok();
+    zfs_dataset_create("lustre-mgs/mgs", false).test_call().ok();
+
+    let mgs_mount = generate_random_mount_point("MGS", "0000");
+    mount_lustre_mgs_zfs(&mgs_mount, "MGS0000")
+        .test_call()
+        .ok();
+
+    mount_mds_zfs(0, mds_count, 1);
+    mds_count + 1
+}
+
+/// Mount OST targets using ZFS datasets on ramdisks.
+/// OST{i} uses /dev/ram{ost_ram_offset + i}.
+pub fn mount_oss_zfs(end: u32, ost_ram_offset: u32) {
+    for index in 0..end {
+        let sv_name = get_service_name(FSNAME, "OST", index);
+        let ram_dev = format!("/dev/ram{}", ost_ram_offset + index);
+        let pool = format!("lustre-ost{}", index);
+        let dataset = format!("{}/ost{}", pool, index);
+
+        boldln!("Mounting ZFS OST {}...", sv_name);
+
+        zpool_create(&pool, &ram_dev).test_call().ok();
+        zfs_dataset_create(&dataset, true).test_call().ok();
+
+        let mount_point = generate_random_mount_point("OST", &format!("{:04X}", index));
+        mount_lustre_ost_zfs(index, &mount_point, LNET_INTF, &sv_name)
             .test_call()
             .ok();
     }

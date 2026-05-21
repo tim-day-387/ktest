@@ -201,7 +201,7 @@ class ContainerJob:
         try:
             # Only sync tarballs if using tarball input mode
             if self.use_tarball_input:
-                if self.sync_kernel and self.tarball_paths:
+                if self.sync_kernel and self.tarball_paths and "kernel" in self.tarball_paths:
                     put_archive(
                         container, self.tarball_paths["kernel"], "/home/ktest/git"
                     )

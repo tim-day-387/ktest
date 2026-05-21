@@ -41,14 +41,14 @@ RUN apt-get update && apt-get install -y \
     rpm dh-python dkms libcurl4-openssl-dev \
     libpam0g-dev python3-all-dev python3-cffi \
     python3-setuptools python3-sphinx \
-    iptables dnsmasq-base busybox-static zstd linux-firmware && \
+    iptables dnsmasq-base busybox-static zstd linux-firmware lcov && \
     chmod 0644 /boot/vmlinuz* && \
     rm -rf /var/lib/apt/lists/*
 
 # Get LLVM and clean up in the same layer.  llvm-20-dev / libclang-20-dev
 # provide the headers and libs the cplugin (xunused) links against.
 RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)" && \
-    apt-get install -y clang-tidy-20 llvm-20-dev libclang-20-dev && \
+    apt-get install -y clang-tidy-20 llvm-20-dev libclang-20-dev llvm-20 && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup ccache symlink for Lustre/ZFS builds

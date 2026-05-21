@@ -21,6 +21,10 @@ require-kernel-config LNET=m
 require-kernel-config LUSTRE=m
 require-kernel-config ZFS=m
 
+require-kernel-config GCOV_KERNEL
+require-kernel-config GCOV_PROFILE_LNET
+require-kernel-config GCOV_PROFILE_LUSTRE
+
 config-mem 10G
 config-timeout 60
 

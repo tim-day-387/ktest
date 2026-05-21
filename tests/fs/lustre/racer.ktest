@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Run the Lustre racer test suite.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
+
+require-lustre-kernel-config
+require-lustre-debug-kernel-config
+require-kernel-config LNET=y
+require-kernel-config LUSTRE=y
+require-kernel-config ZFS=y
+require-kernel-config MODULES=y
+require-kernel-config MODULE_UNLOAD
+
+require-kernel-config BLK_DEV_RAM=y
+require-kernel-config BLK_DEV_RAM_SIZE=524288
+
+require-kernel-config GCOV_KERNEL
+require-kernel-config GCOV_PROFILE_LNET
+require-kernel-config GCOV_PROFILE_LUSTRE
+
+config-mem 8G
+config-timeout 60
+
+test_racer()
+{
+    export lustre_pkg_path="/host/home/ktest/git/lustre-release"
+    export LUSTRE="$lustre_pkg_path/lustre"
+
+    local mds_count=2
+    local ost_count=2
+
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	"$ktest_dir/target/release/lustre-ktest" mount --osd zfs
+    else
+	"$ktest_dir/target/release/lustre-ktest" mount
+    fi
+
+    # Disable identity upcall (required for OSD wbcfs; harmless for ZFS)
+    "$LCTL" set_param mdt.*.identity_upcall=NONE
+
+    # -N skips setup_if_needed / cleanup_if_needed in auster.
+    # MGSNID=0@lo overrides h2nettype(hostname) which would give a tcp NID.
+    # cfg/local.sh supplies defaults for mds_HOST, ost_HOST, MOUNT2, etc.
+    FSTYPE="$FSTYPE" \
+    MOUNT=/mnt/lustre \
+    MGSNID="0@lo" \
+    MDSCOUNT=$mds_count \
+    OSTCOUNT=$ost_count \
+    FSNAME=lustre \
+    "$lustre_pkg_path/lustre/tests/auster" -v -N racer
+
+    "$ktest_dir/target/release/lustre-ktest" umount
+}
+
+main "$@"
