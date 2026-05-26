@@ -346,6 +346,7 @@ static int load_modules(void)
 		"iwlwifi",
 		"iwlmvm",
 		"i915",
+		"nouveau",
 		NULL,
 	};
 	struct utsname uts;

@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y \
     rpm dh-python dkms libcurl4-openssl-dev \
     libpam0g-dev python3-all-dev python3-cffi \
     python3-setuptools python3-sphinx \
-    iptables dnsmasq-base busybox-static && \
+    iptables dnsmasq-base busybox-static zstd linux-firmware && \
     chmod 0644 /boot/vmlinuz* && \
     rm -rf /var/lib/apt/lists/*
 
@@ -105,6 +105,21 @@ RUN mkdir -p /home/ktest/.ssh && \
 RUN git clone --depth=1 \
     https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git \
     /home/ktest/linux-firmware
+
+# Supplement the upstream git clone with AD-series nvidia chips (ad103/104/106/107)
+# that are absent from the upstream git but present in Ubuntu's linux-firmware deb
+# (sourced from NVIDIA's proprietary driver package) as .zst files. Decompress
+# them so the firmware loader in the test VM can find them without zstd support.
+RUN for chip in ad103 ad104 ad106 ad107; do \
+        src="/lib/firmware/nvidia/$chip"; \
+        dst="/home/ktest/linux-firmware/nvidia/$chip"; \
+        [ -d "$src" ] || continue; \
+        for f in "$src"/gsp/*.bin.zst; do \
+            [ -f "$f" ] || continue; \
+            mkdir -p "$dst/gsp"; \
+            zstd -d "$f" -o "$dst/gsp/$(basename "${f%.zst}")"; \
+        done; \
+    done
 
 # Copy the ktest repository into the container (kept late so repo changes
 # don't invalidate the layers above)
