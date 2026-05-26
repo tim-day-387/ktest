@@ -7,7 +7,7 @@
 
 . "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
 
-config-kernel-base "$ktest_dir/config/debian.config"
+config-kernel-base "$ktest_dir/config/debian-modules.config"
 config-lustre-root
 
 require-lustre-base-kernel-config

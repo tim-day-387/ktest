@@ -829,7 +829,7 @@ function cmd_build_native()
 function cmd_package_native()
 {
     if [[ $# = 0 ]]; then
-	ktest_test="$ktest_dir/tests/fs/lustre/lustre_root.ktest"
+	ktest_test="$ktest_dir/tests/fs/lustre/lustre_root_modules.ktest"
     else
 	ktest_test=$(realpath "$1")
 	shift
