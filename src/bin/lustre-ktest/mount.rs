@@ -348,14 +348,18 @@ pub fn mount_mds_combined(mds_count: u32) {
     mount_mds(1, mds_count);
 }
 
-pub fn mount_mds_split(mds_count: u32) {
+/// Mount a standalone wbcfs MGS.
+pub fn mount_mgs() {
     boldln!("Mounting separate MGS...");
 
     let mgs_mount = generate_random_mount_point("MGS", "0000");
     mount_lustre_mgs("lustre-wbcfs", &mgs_mount, "MGS0000")
         .test_call()
         .ok();
+}
 
+pub fn mount_mds_split(mds_count: u32) {
+    mount_mgs();
     mount_mds(0, mds_count);
 }
 
@@ -518,7 +522,8 @@ pub fn mount_mds_combined_zfs(mds_count: u32) -> u32 {
 
 /// Mount standalone MGS + MDT targets using ZFS datasets on ramdisks.
 /// MGS uses /dev/ram0; MDT{i} uses /dev/ram{i+1}. Returns next RAM device index.
-pub fn mount_mds_split_zfs(mds_count: u32) -> u32 {
+/// Mount a standalone MGS using a ZFS dataset on /dev/ram0.
+pub fn mount_mgs_zfs() {
     boldln!("Mounting ZFS standalone MGS...");
 
     zpool_create("lustre-mgs", "/dev/ram0").test_call().ok();
@@ -526,7 +531,10 @@ pub fn mount_mds_split_zfs(mds_count: u32) -> u32 {
 
     let mgs_mount = generate_random_mount_point("MGS", "0000");
     mount_lustre_mgs_zfs(&mgs_mount, "MGS0000").test_call().ok();
+}
 
+pub fn mount_mds_split_zfs(mds_count: u32) -> u32 {
+    mount_mgs_zfs();
     mount_mds_zfs(0, mds_count, 1);
     mds_count + 1
 }

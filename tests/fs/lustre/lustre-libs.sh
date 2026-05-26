@@ -226,32 +226,16 @@ function load_lustre_modules()
 
 function setup_lustre_mgs()
 {
-    mkdir -p /mnt/lustre-mgs
-
-    # TODO: This logic probably belongs in llmount.sh or test-framework.sh?
-    case "$FSTYPE" in
-	zfs)
-	    zpool create lustre-mgs "${ktest_scratch_dev[0]}"
-	    "$lustre_pkg_path/lustre/utils/mkfs.lustre" --mgs --fsname=lustre lustre-mgs/mgs
-	    mount -t lustre lustre-mgs/mgs /mnt/lustre-mgs
-	    ;;
-	wbcfs)
-	    export OSD_WBC_TGT_TYPE="MGT"
-	    export OSD_WBC_INDEX="0"
-	    export OSD_WBC_MGS_NID="$(hostname -i)@tcp"
-	    export OSD_WBC_FSNAME="lustre"
-	    run_tf "$lustre_pkg_path/lustre/utils/mount.lustre" -v lustre-wbcfs /mnt/lustre-mgs
-	    ;;
-	*)
-	    echo "Unsupported OSD!"
-	    exit 1
-	    ;;
-    esac
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	"$ktest_dir/target/release/lustre-ktest" mgs --osd zfs
+    else
+	"$ktest_dir/target/release/lustre-ktest" mgs
+    fi
 }
 
 function cleanup_lustre_mgs()
 {
-    umount -t lustre /mnt/lustre-mgs
+    "$ktest_dir/target/release/lustre-ktest" umount
 }
 
 function configure_lnet()

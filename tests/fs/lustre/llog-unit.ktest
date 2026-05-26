@@ -20,8 +20,6 @@ require-lustre-debug-kernel-config
 config-mem 10G
 config-timeout 60
 
-config-scratch-devs 512M
-
 test_llog-unit()
 {
     load_lustre_modules

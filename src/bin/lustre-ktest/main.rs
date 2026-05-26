@@ -7,7 +7,7 @@ mod zfs;
 use clap::{Parser, Subcommand, ValueEnum};
 use mount::{
     mount_client, mount_mds_combined, mount_mds_combined_zfs, mount_mds_split, mount_mds_split_zfs,
-    mount_oss, mount_oss_zfs,
+    mount_mgs, mount_mgs_zfs, mount_oss, mount_oss_zfs,
 };
 use umount::umount_all;
 
@@ -47,6 +47,12 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = OsdType::Wbcfs)]
         osd: OsdType,
     },
+    /// Mount a standalone MGS only
+    Mgs {
+        /// OSD backend to use for the MGS target
+        #[arg(long, value_enum, default_value_t = OsdType::Wbcfs)]
+        osd: OsdType,
+    },
     /// Unmount all Lustre filesystem components
     Umount,
 }
@@ -79,6 +85,10 @@ fn main() {
                 mount_oss_zfs(ost_count, ost_ram_offset);
                 mount_client();
             }
+        },
+        Commands::Mgs { osd } => match osd {
+            OsdType::Wbcfs => mount_mgs(),
+            OsdType::Zfs => mount_mgs_zfs(),
         },
         Commands::Umount => {
             umount_all();
