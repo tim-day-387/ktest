@@ -127,13 +127,7 @@ COPY --chown=ktest:ktest . /home/ktest/ktest
 
 # Build ktest with cargo
 WORKDIR /home/ktest/ktest
-RUN cargo build --release
-
-# Build the xunused cc-plugin against the apt.llvm.org-installed LLVM 20.
-# Output lands at cplugin/build/xunused, where the cc-plugin / qlkbuild
-# scripts look for it.
-RUN cmake -S cplugin -B cplugin/build && \
-    cmake --build cplugin/build -j"$(nproc)"
+RUN make
 
 # Default command
 CMD ["/bin/bash"]

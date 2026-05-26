@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0
+
+"""Format `cargo --message-format=json` output in the style of the Linux build.
+
+Reads cargo's JSON message stream on stdin and prints one line per crate that
+is actually (re)compiled:
+
+  [CARGO]   lustre-ktest
+
+Crates that cargo reports as "fresh" (already up to date) are skipped, so an
+incremental build only shows what was rebuilt. Compiler diagnostics are passed
+through to stderr unchanged.
+"""
+
+import json
+import sys
+
+TAG = "CARGO"
+
+
+def main():
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            # Not a JSON line (e.g. a stray cargo notice); echo it through.
+            print(line, file=sys.stderr)
+            continue
+
+        reason = msg.get("reason")
+        if reason == "compiler-artifact" and not msg.get("fresh", False):
+            target = msg.get("target", {})
+            # Skip build scripts (custom-build): they all share the target
+            # name "build-script-build" and are build plumbing, not output.
+            if "custom-build" in target.get("kind", []):
+                continue
+            print("  %-8s %s" % ("[%s]" % TAG, target.get("name", "?")))
+            sys.stdout.flush()
+        elif reason == "compiler-message":
+            rendered = msg.get("message", {}).get("rendered")
+            if rendered:
+                sys.stderr.write(rendered)
+                sys.stderr.flush()
+
+
+if __name__ == "__main__":
+    main()
