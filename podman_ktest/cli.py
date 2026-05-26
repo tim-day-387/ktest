@@ -208,7 +208,9 @@ def main():
         # Auto-enable tarball input when source directories are on Lustre,
         # since Lustre does not support the overlay filesystem used for mounts.
         if not args.tarball_input:
-            check_path = dirs.get("ktest_lustre_source") or dirs.get("ktest_kernel_source")
+            check_path = dirs.get("ktest_lustre_source") or dirs.get(
+                "ktest_kernel_source"
+            )
             if check_path and is_on_lustre(check_path):
                 print("Lustre filesystem detected: defaulting to tarball input mode")
                 args.tarball_input = True

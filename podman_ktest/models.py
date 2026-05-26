@@ -158,7 +158,12 @@ class ContainerJob:
         # Uses a short-timeout client so we detect deadlocks quickly
         # instead of hanging forever.
         command = self.command
-        if self.no_cleanup and len(command) == 3 and command[0] == "bash" and command[1] == "-c":
+        if (
+            self.no_cleanup
+            and len(command) == 3
+            and command[0] == "bash"
+            and command[1] == "-c"
+        ):
             command = ["bash", "-c", command[2] + "; sleep infinity"]
 
         create_kwargs = dict(
@@ -190,7 +195,7 @@ class ContainerJob:
                 break
             except Exception as e:
                 if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)
+                    time.sleep(2**attempt)
                 else:
                     raise
         # Look up the container via the caller's client (which has no timeout)
@@ -201,7 +206,11 @@ class ContainerJob:
         try:
             # Only sync tarballs if using tarball input mode
             if self.use_tarball_input:
-                if self.sync_kernel and self.tarball_paths and "kernel" in self.tarball_paths:
+                if (
+                    self.sync_kernel
+                    and self.tarball_paths
+                    and "kernel" in self.tarball_paths
+                ):
                     put_archive(
                         container, self.tarball_paths["kernel"], "/home/ktest/git"
                     )
