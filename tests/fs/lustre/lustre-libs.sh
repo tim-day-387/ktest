@@ -130,11 +130,6 @@ function set_hostname_interface()
     echo "$local_ip" "$host_name" >> /etc/hosts
 }
 
-function load_zfs_modules()
-{
-    modprobe zfs
-}
-
 function require-lustre-base-kernel-config()
 {
     # Minimal config required for Lustre to build
@@ -220,35 +215,10 @@ function require-lustre-efa-kernel-config()
     require-kernel-config AMAZON_EFA_INFINIBAND
 }
 
-function setup_zfs_shared_libs()
-{
-    local canonical_path="/usr/lib"
-    local lib_dirs=(
-	"$zfs_pkg_path/.libs"
-	"$zfs_pkg_path/lib/libzfs/.libs"
-	"$zfs_pkg_path/lib/libzfs_core/.libs"
-	"$zfs_pkg_path/lib/libnvpair/.libs"
-	"$zfs_pkg_path/lib/libzpool/.libs"
-    )
-
-    local found=0
-    for dir in "${lib_dirs[@]}"; do
-	[[ -d "$dir" ]] || continue
-	for lib in "$dir"/*.so*; do
-	    [[ -e "$lib" ]] || continue
-	    ln -sf "$(realpath "$lib")" "$canonical_path/$(basename "$lib")"
-	    found=1
-	done
-    done
-
-    [[ $found -eq 1 ]] && ldconfig
-}
-
 function load_lustre_modules()
 {
     if [[ "$FSTYPE" =~ "zfs" ]]; then
-	setup_zfs_shared_libs
-	load_zfs_modules
+	modprobe zfs
     fi
 
     FSTYPE="$FSTYPE" "$lustre_pkg_path/lustre/tests/llmount.sh" --load-modules
@@ -333,13 +303,17 @@ function __setup_lustrefs()
     print_lustre_env
     load_lustre_modules
 
-    FSTYPE="$FSTYPE" "$lustre_pkg_path/lustre/tests/llmount.sh"
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	"$ktest_dir/target/release/lustre-ktest" mount --osd zfs
+    else
+	"$ktest_dir/target/release/lustre-ktest" mount
+    fi
 
     # TODO: Make this tunable...
     # valgrind --leak-check=full "$LNETDUMP" &
     # "$LNETDUMP" &
 
-    # Disable identity upcall (for OSD wbcfs)
+    # Disable identity upcall (required for OSD wbcfs; harmless for ZFS)
     "$LCTL" set_param mdt.*.identity_upcall=NONE
 
     mount -t lustre
@@ -353,7 +327,7 @@ function setup_lustrefs()
 function __cleanup_lustrefs()
 {
     if [[ "$ktest_interactive" != "true" ]]; then
-	FSTYPE="$FSTYPE" "$lustre_pkg_path/lustre/tests/llmountcleanup.sh"
+	"$ktest_dir/target/release/lustre-ktest" umount
     fi
 }
 
@@ -362,7 +336,7 @@ function cleanup_lustrefs()
     run_quiet_with_status "CLEANUP LUSTRE" "DONE" __cleanup_lustrefs
 }
 
-split_array() {
+function split_array() {
     local input="$1"
     local input_array=($input)
     local chunk_size=$2
@@ -382,7 +356,7 @@ split_array() {
     echo "${result[@]}"
 }
 
-join () {
+function join () {
     local IFS="$1"
     shift
     echo "$*"
