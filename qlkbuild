@@ -341,10 +341,6 @@ function build_lustre()
 	export with_zfs_obj="$ktest_zfs_build"
 	export with_spl="$ktest_zfs_build"
 	export with_spl_obj="$ktest_zfs_build"
-	# Embed VM-accessible RPATH so mkfs.lustre finds ZFS libs at runtime.
-	# The build path (/tmp/ktest-out/zfs) differs from the VM path (/ktools/zfs),
-	# so the RPATH embedded by the linker won't work in the VM without this.
-	export LDFLAGS="-Wl,-rpath,/ktools/zfs/.libs"
     else
 	export with_ldiskfs="no"
 	export with_zfs="no"
@@ -655,6 +651,30 @@ function cmd_ccplugin()
     "$ktest_ccplugin" "$ktest_lustre_build/compile_commands.json"
 }
 
+# Install the freshly-built lustre/zfs kernel modules into the kernel's
+# /lib/modules/<release> tree so they get bundled into the initramfs (via
+# mk-initramfs --modules) and resolve under modprobe(8) in the VM.  Runs after
+# the kernel's own modules_install, so depmod here regenerates modules.dep with
+# the kernel + lustre + zfs modules together.
+function install_fs_modules()
+{
+    local kernel_version moddir
+    kernel_version=$(cat "$ktest_kernel_build/include/config/kernel.release")
+    moddir="$ktest_kernel_binary/lib/modules/$kernel_version/updates"
+    mkdir -p "$moddir"
+
+    # Skip kconftest.results/: autoconf's kernel feature probes leave many
+    # identically-named conftest.ko there, which would collide in $moddir.
+    find "$ktest_lustre_build" -name kconftest.results -prune -o \
+	\( -name '*.ko' ! -name 'conftest.ko' \) -exec cp -t "$moddir" {} +
+    if [[ "$FSTYPE" == "zfs" && -d "$ktest_zfs_build" ]]; then
+	find "$ktest_zfs_build" -name kconftest.results -prune -o \
+	    \( -name '*.ko' ! -name 'conftest.ko' \) -exec cp -t "$moddir" {} +
+    fi
+
+    "$DEPMOD" -b "$ktest_kernel_binary" "$kernel_version"
+}
+
 function cmd_build()
 {
     if [[ $# = 0 ]]; then
@@ -683,17 +703,11 @@ function cmd_build()
     purge_build_junk "$ktest_lustre_build"
     [[ "$FSTYPE" == "zfs" ]] && purge_build_junk "$ktest_zfs_build"
 
-    # Bundle the freshly-built lustre/zfs trees into the initramfs so the VM
-    # picks them up at /ktools (init copies /ktools onto a tmpfs in the new
-    # root before switching).
-    ktest_initramfs_extra_args=(--utils "lustre-release=$ktest_lustre_build")
-    if [[ "$FSTYPE" == "zfs" ]]; then
-	ktest_initramfs_extra_args+=(--utils "zfs=$ktest_zfs_build")
-    fi
+    run_quiet_with_status "INSTALL FS MODULES [$(basename "$ktest_test")]" "DONE" install_fs_modules
     run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
     run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
 
-    # The UKI now self-contains kernel + initramfs + modules + utils.  Strip
+    # The UKI now self-contains kernel + initramfs + modules.  Strip
     # ktest_out down to just that file so the build→run tarball stays small.
     local uki_keep
     uki_keep=$(mktemp)

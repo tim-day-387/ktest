@@ -14,9 +14,12 @@
 
 . "$(dirname "$(dirname "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")")")/test-libs.sh"
 
-# Userspace utilities are exposed at /ktools by the initramfs (see
-# mk-initramfs --utils and init.c copy_ktools_to_newroot).
-export workspace_path="/ktools"
+# The lustre-release and zfs trees are built in place on the host and reached
+# in the VM over the /host 9p mount (the build runs in these checkouts, so the
+# compiled modules/binaries live there).  The Lustre test framework (llmount.sh,
+# auster, etc.) runs straight out of them.  racer.ktest overrides these for its
+# own layout.
+export workspace_path="/host/home/ktest/git"
 export lustre_pkg_path="$workspace_path/lustre-release"
 export zfs_pkg_path="$workspace_path/zfs"
 
@@ -128,20 +131,7 @@ function set_hostname_interface()
 
 function load_zfs_modules()
 {
-    # ZFS pre-2.3.0
-    insmod "$zfs_pkg_path/module/spl/spl.ko" || true
-    insmod "$zfs_pkg_path/module/zstd/zzstd.ko" || true
-    insmod "$zfs_pkg_path/module/unicode/zunicode.ko" || true
-    insmod "$zfs_pkg_path/module/avl/zavl.ko" || true
-    insmod "$zfs_pkg_path/module/lua/zlua.ko" || true
-    insmod "$zfs_pkg_path/module/nvpair/znvpair.ko" || true
-    insmod "$zfs_pkg_path/module/zcommon/zcommon.ko" || true
-    insmod "$zfs_pkg_path/module/icp/icp.ko" || true
-    insmod "$zfs_pkg_path/module/zfs/zfs.ko" || true
-
-    # ZFS post-2.3.0
-    insmod "$zfs_pkg_path/module/spl.ko" || true
-    insmod "$zfs_pkg_path/module/zfs.ko" || true
+    modprobe zfs
 }
 
 function require-lustre-base-kernel-config()

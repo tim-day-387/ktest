@@ -69,8 +69,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Lustre client userspace utils (lctl, lfs, lnetctl, mount.lustre) from the
 # Lustre Ubuntu 24.04 feature-release mirror. Kernel modules are built from
-# source separately (see qlkbuild) and exposed at /ktools; this only provides
-# the userspace tools in the image itself.
+# source separately (see qlkbuild); this only provides the userspace tools in
+# the image itself.
 #
 # We download the .deb directly rather than adding an apt source: the mirror
 # serves no InRelease/Release.gpg (and returns its HTML landing page with a 200

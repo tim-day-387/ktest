@@ -29,12 +29,14 @@ make -j$(nproc)
 The configuration can be customized. However, disabling shared libraries
 and specifying the kernel path are required.
 
-The Lustre modules and utils are bundled into the initramfs (under
-/ktools/lustre-release) by `qlkbuild run`, which re-runs mk-initramfs
-and ukify with the freshly built trees.
+The freshly built Lustre kernel modules are bundled into the initramfs by
+`qlkbuild run`, which re-runs mk-initramfs and ukify against the build. The
+lustre-release and zfs checkouts are built in place on the host and read in the
+VM over the /host 9p mount, so the test framework (llmount.sh, auster, etc.)
+runs straight out of them.
 
 If you require openZFS support, build it beforehand (using similar
-instructions); its tree is bundled the same way at /ktools/zfs.
+instructions); its tree is reached the same way.
 
 Now, run one of the Lustre tests:
 ```

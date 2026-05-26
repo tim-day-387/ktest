@@ -637,33 +637,36 @@ static int copy_tree(const char *src, const char *dst)
 }
 
 /*
- * copy_ktools_to_newroot - expose initramfs /ktools on the new root
+ * copy_modules_to_newroot - keep initramfs /lib/modules after switch_root
  *
- * The mk-initramfs --utils flag bundles userspace utility trees under
- * /ktools/<name> in the initramfs.  After switch_root, the initramfs is gone,
- * so we mount a tmpfs at /newroot/ktools and copy the trees into it.  A
- * no-op if no /ktools tree was bundled.
+ * The freshly built kernel modules (including lustre/zfs) live in the
+ * initramfs at /lib/modules/<release>, but switch_root discards the initramfs
+ * and the root image carries no matching modules.  Mount a tmpfs at
+ * /newroot/lib/modules and copy the tree in so modprobe(8) finds them after
+ * the switch.  A no-op if the initramfs bundled no modules.
  */
-static void copy_ktools_to_newroot(void)
+static void copy_modules_to_newroot(void)
 {
 	struct stat st;
 
-	if (lstat("/ktools", &st) < 0 || !S_ISDIR(st.st_mode))
+	if (lstat("/lib/modules", &st) < 0 || !S_ISDIR(st.st_mode))
 		return;
 
-	mkdir(MOUNTPOINT "/ktools", 0755);
+	mkdir(MOUNTPOINT "/lib", 0755);
+	mkdir(MOUNTPOINT "/lib/modules", 0755);
 
-	if (mount("tmpfs", MOUNTPOINT "/ktools", "tmpfs", 0, "mode=0755") < 0) {
-		kmsg_log(KMSG_ERR, "mount tmpfs on /ktools: %s\n",
+	if (mount("tmpfs", MOUNTPOINT "/lib/modules", "tmpfs", 0,
+		  "mode=0755") < 0) {
+		kmsg_log(KMSG_ERR, "mount tmpfs on /lib/modules: %s\n",
 			 strerror(errno));
 		return;
 	}
 
-	kmsg_log(KMSG_INFO, "copying /ktools to new root\n");
-	if (copy_tree("/ktools", MOUNTPOINT "/ktools") < 0)
-		kmsg_log(KMSG_ERR, "copy /ktools failed\n");
+	kmsg_log(KMSG_INFO, "copying /lib/modules to new root\n");
+	if (copy_tree("/lib/modules", MOUNTPOINT "/lib/modules") < 0)
+		kmsg_log(KMSG_ERR, "copy /lib/modules failed\n");
 	else
-		kmsg_log(KMSG_INFO, "copied /ktools successfully\n");
+		kmsg_log(KMSG_INFO, "copied /lib/modules successfully\n");
 }
 
 /*
@@ -815,7 +818,7 @@ static int standard_main(char *cmdline)
 		}
 	}
 
-	copy_ktools_to_newroot();
+	copy_modules_to_newroot();
 
 	switch_root_and_exec();
 	return 1;
@@ -931,27 +934,7 @@ static int lustre_main(char *cmdline)
 
 	kmsg_log(KMSG_INFO, "mounted successfully, switching root\n");
 
-	/*
-	 * Copy /lib/modules from the initramfs into a tmpfs mounted at
-	 * /newroot/lib/modules so kernel modules remain accessible after
-	 * switch_root.  The MS_MOVE below carries the tmpfs into the new root.
-	 */
-	mkdir(MOUNTPOINT "/lib", 0755);
-	mkdir(MOUNTPOINT "/lib/modules", 0755);
-
-	if (mount("tmpfs", MOUNTPOINT "/lib/modules", "tmpfs", 0,
-		  "mode=0755") < 0) {
-		kmsg_log(KMSG_ERR, "mount tmpfs on /lib/modules: %s\n",
-			 strerror(errno));
-	} else {
-		kmsg_log(KMSG_INFO, "copying /lib/modules to new root\n");
-		if (copy_tree("/lib/modules", MOUNTPOINT "/lib/modules") < 0)
-			kmsg_log(KMSG_ERR, "copy /lib/modules failed\n");
-		else
-			kmsg_log(KMSG_INFO, "copied /lib/modules successfully\n");
-	}
-
-	copy_ktools_to_newroot();
+	copy_modules_to_newroot();
 
 	/*
 	 * The initial ramfs cannot be pivot_root()'d.  switch_root_and_exec()

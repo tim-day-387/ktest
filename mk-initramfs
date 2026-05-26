@@ -8,12 +8,9 @@
 # decision is made at boot time from /proc/cmdline.
 #
 # Usage: mk-initramfs [--no-firmware] [--base <initramfs>] [--modules <path>]
-#                     [--utils <name>=<path>]... [output-path]
+#                     [output-path]
 #   --base       path to an existing initramfs to use as a base (optional)
 #   --modules    path to a modules directory (e.g. $ktest_kernel_binary/lib/modules) to include (optional)
-#   --utils      <name>=<srcpath>; bundle <srcpath>'s contents at /ktools/<name>
-#                inside the initramfs (repeatable).  init copies /ktools to a
-#                tmpfs on the new root before switch_root.
 #   output-path  path for the resulting initramfs image (default: initramfs)
 
 set -euo pipefail
@@ -23,23 +20,11 @@ SCRIPT_DIR="$(dirname "$(readlink -e "$0")")"
 FIRMWARE=true
 BASE_INITRAMFS=""
 MODULES_DIR=""
-UTILS_NAMES=()
-UTILS_PATHS=()
 while [[ $# -gt 0 ]]; do
     case $1 in
 	--no-firmware)	FIRMWARE=false; shift ;;
 	--base)		BASE_INITRAMFS="$(readlink -f "$2")"; shift 2 ;;
 	--modules)	MODULES_DIR="$(readlink -f "$2")"; shift 2 ;;
-	--utils)
-	    spec="$2"
-	    if [[ "$spec" != *=* ]]; then
-		echo "--utils requires <name>=<path>, got: $spec" >&2
-		exit 1
-	    fi
-	    UTILS_NAMES+=("${spec%%=*}")
-	    UTILS_PATHS+=("$(readlink -f "${spec#*=}")")
-	    shift 2
-	    ;;
 	*)		break ;;
     esac
 done
@@ -71,19 +56,6 @@ if [[ -n "$MODULES_DIR" ]]; then
     mkdir -p "$INITRAMFS/lib/modules"
     cp -a "$MODULES_DIR/." "$INITRAMFS/lib/modules/"
 fi
-
-# Copy userspace utility trees into /ktools/<name>
-for i in "${!UTILS_NAMES[@]}"; do
-    name="${UTILS_NAMES[$i]}"
-    src="${UTILS_PATHS[$i]}"
-    if [[ ! -d "$src" ]]; then
-	echo "--utils $name: source not a directory: $src" >&2
-	exit 1
-    fi
-    echo "Copying utils $name from $src..."
-    mkdir -p "$INITRAMFS/ktools/$name"
-    cp -a "$src/." "$INITRAMFS/ktools/$name/"
-done
 
 # Compile init statically so it runs without shared libs
 echo "Compiling init..."
