@@ -219,9 +219,19 @@ class ContainerJob:
 
             container.start()
 
-            log_container(self.log_path, container)
+            # Stream logs in a background thread so container.wait() always
+            # unblocks when the container exits, even if podman's log stream
+            # fails to send EOF (a known podman bug on some versions).
+            log_thread = threading.Thread(
+                target=log_container, args=(self.log_path, container), daemon=True
+            )
+            log_thread.start()
 
             return_code = container.wait()
+
+            # Drain any remaining log output (30s is generous; stream should
+            # already be at EOF since the container just exited).
+            log_thread.join(timeout=30)
 
             if self.get_ktest_out_archive:
                 get_archive(container, tarball_path, "/tmp/ktest-out")
