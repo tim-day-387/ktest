@@ -115,24 +115,27 @@ cmd_create()
 
     build_root_image
 
-    local mnt
-    mnt=$(mktemp --tmpdir -d root_image-mnt-XXXXXXXXXX)
-    trap 'umount "$mnt" 2>/dev/null; rmdir "$mnt" 2>/dev/null; rm -f "$ktest_image".new' EXIT
+    # Extract the image into a directory, then build the ext4 filesystem
+    # straight from that tree with mke2fs -d. This needs no loop mount, so it
+    # works unprivileged and inside a rootless container, where setting up a
+    # loop device is not permitted. Both the extraction and mke2fs run in the
+    # same user namespace, so ownership is recorded with the right uids.
+    # rootfs is deliberately not 'local' so the EXIT trap can see it.
+    rootfs=$(mktemp --tmpdir -d root_image-rootfs-XXXXXXXXXX)
+    trap 'rm -rf "$rootfs"; rm -f "$ktest_image".new' EXIT
 
-    # Sparse file: mkfs writes only metadata, extraction only used blocks,
-    # the rest stay holes - so the image stays compact despite IMAGE_SIZE.
+    echo "Extracting root image..."
+    extract_image_to "$ROOT_IMAGE_TAG" "$rootfs"
+
+    # Sparse file: mke2fs writes only metadata and used blocks, the rest stay
+    # holes - so the image stays compact despite IMAGE_SIZE.
     truncate -s "$IMAGE_SIZE" "$ktest_image".new
     chmod 644 "$ktest_image".new
-    mkfs.ext4 -q -F "$ktest_image".new
-
-    mount -o loop "$ktest_image".new "$mnt"
-    echo "Extracting root image..."
-    extract_image_to "$ROOT_IMAGE_TAG" "$mnt"
-    umount "$mnt"
-    rmdir "$mnt"
+    mkfs.ext4 -q -F -d "$rootfs" "$ktest_image".new
 
     e2fsck -fy "$ktest_image".new >/dev/null || true
 
+    rm -rf "$rootfs"
     trap '' EXIT
     mv "$ktest_image".new "$ktest_image"
     echo "Created $ktest_image"

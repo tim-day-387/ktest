@@ -70,7 +70,8 @@ RUN install -d -m 0777 \
     /home/ktest/git \
     /home/ktest/git/linux \
     /home/ktest/git/lustre-release \
-    /home/ktest/git/zfs
+    /home/ktest/git/zfs \
+    /var/lib/ktest
 
 # Switch to ktest user
 USER ktest

@@ -43,6 +43,14 @@ git clone git://git.whamcloud.com/fs/lustre-release.git /home/ktest/git/lustre-r
 
 echo "Repository fetch complete"
 
+# Build a fresh VM root image (must run as root). root_image shells out to the
+# podman CLI; point it at the host daemon's socket so podman build/create/export
+# run against the host rather than a (nonexistent) in-container daemon.
+echo "Building root image with root_image create..."
+export CONTAINER_HOST="unix://${PODMAN_SOCKET:-/run/podman/podman.sock}"
+/home/ktest/ktest/root_image create
+echo "Root image build complete"
+
 # Clone GitHub Pages repository if in github-pages mode
 if [ "$HOSTING_MODE" = "github-pages" ]; then
     echo "Cloning GitHub Pages repository..."

@@ -12,7 +12,9 @@ FROM ktest-runner:latest
 # Switch back to root to install additional packages
 USER root
 
-# Install nginx and Python packages for CI
+# Install nginx and Python packages for CI. podman is the remote client used
+# by root_image to drive the host podman daemon over the mounted socket (see
+# CONTAINER_HOST in entrypoint.sh) - the container has no local podman daemon.
 RUN apt-get update && apt-get install -y \
     nginx \
     python3-requests \
@@ -20,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     attr \
     git \
     jq \
+    podman \
     && rm -rf /var/lib/apt/lists/*
 
 # Install podman Python bindings

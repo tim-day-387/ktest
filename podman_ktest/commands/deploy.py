@@ -133,12 +133,20 @@ def cmd_deploy(args, podman_socket=None):
         if args.github_token:
             env["GITHUB_TOKEN"] = args.github_token
 
-        # Prepare mounts - only mount podman socket
+        # Prepare mounts: the podman socket, plus /var/lib/ktest so the root
+        # image built by root_image lands on the host and is visible to the
+        # job containers (which bind-mount the same path).
         mounts = [
             {
                 "type": "bind",
                 "source": host_socket_to_mount,
                 "target": "/run/podman/podman.sock",
+                "read_only": False,
+            },
+            {
+                "type": "bind",
+                "source": "/var/lib/ktest",
+                "target": "/var/lib/ktest",
                 "read_only": False,
             },
         ]
