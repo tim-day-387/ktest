@@ -503,7 +503,9 @@ pub fn mount_mds_combined_zfs(mds_count: u32) -> u32 {
 
     // MDT0 is also the MGS; uses /dev/ram0
     zpool_create("lustre-mdt0", "/dev/ram0").test_call().ok();
-    zfs_dataset_create("lustre-mdt0/mdt0", false).test_call().ok();
+    zfs_dataset_create("lustre-mdt0/mdt0", false)
+        .test_call()
+        .ok();
 
     let mdt0_mount = generate_random_mount_point("MDT", "0000");
     mount_lustre_mdt_with_mgs_zfs(&mdt0_mount, LNET_INTF, "lustre-MDT0000")
@@ -523,9 +525,7 @@ pub fn mount_mds_split_zfs(mds_count: u32) -> u32 {
     zfs_dataset_create("lustre-mgs/mgs", false).test_call().ok();
 
     let mgs_mount = generate_random_mount_point("MGS", "0000");
-    mount_lustre_mgs_zfs(&mgs_mount, "MGS0000")
-        .test_call()
-        .ok();
+    mount_lustre_mgs_zfs(&mgs_mount, "MGS0000").test_call().ok();
 
     mount_mds_zfs(0, mds_count, 1);
     mds_count + 1

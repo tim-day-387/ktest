@@ -6,8 +6,8 @@ mod zfs;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mount::{
-    mount_client, mount_mds_combined, mount_mds_combined_zfs, mount_mds_split,
-    mount_mds_split_zfs, mount_oss, mount_oss_zfs,
+    mount_client, mount_mds_combined, mount_mds_combined_zfs, mount_mds_split, mount_mds_split_zfs,
+    mount_oss, mount_oss_zfs,
 };
 use umount::umount_all;
 

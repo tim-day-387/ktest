@@ -22,8 +22,8 @@ const ZFS_CMD_SIZE: usize = 13744;
 const ZC_NAME_OFF: usize = 0; // char zc_name[4096]
 const ZC_NVLIST_SRC_OFF: usize = 4096; // uint64_t zc_nvlist_src
 const ZC_NVLIST_SRC_SIZE_OFF: usize = 4104; // uint64_t zc_nvlist_src_size
-// Skip zc_nvlist_dst(8), zc_nvlist_dst_size(8), zc_nvlist_dst_filled(4), zc_pad2(4),
-//      zc_history(8), zc_value[8192], zc_string[256], zc_guid(8)
+                                            // Skip zc_nvlist_dst(8), zc_nvlist_dst_size(8), zc_nvlist_dst_filled(4), zc_pad2(4),
+                                            //      zc_history(8), zc_value[8192], zc_string[256], zc_guid(8)
 const ZC_NVLIST_CONF_OFF: usize = 12600; // uint64_t zc_nvlist_conf
 const ZC_NVLIST_CONF_SIZE_OFF: usize = 12608; // uint64_t zc_nvlist_conf_size
 
@@ -269,9 +269,9 @@ pub fn zpool_create(pool: &str, device: &str) -> Result<(), String> {
 /// Calls ZFS_IOC_CREATE with {type:2, props:{...}} in zc_nvlist_src.
 pub fn zfs_dataset_create(dataset: &str, is_ost: bool) -> Result<(), String> {
     let mut props = NvList::new();
-    props.add_uint64("canmount", 0);    // ZFS_CANMOUNT_OFF
-    props.add_uint64("xattr", 2);       // ZFS_XATTR_SA
-    props.add_uint64("dnodesize", 1);   // ZFS_DNSIZE_AUTO
+    props.add_uint64("canmount", 0); // ZFS_CANMOUNT_OFF
+    props.add_uint64("xattr", 2); // ZFS_XATTR_SA
+    props.add_uint64("dnodesize", 1); // ZFS_DNSIZE_AUTO
     props.add_uint64("compression", 2); // ZIO_COMPRESS_OFF
     if is_ost {
         props.add_uint64("recordsize", 1048576); // 1 MiB
