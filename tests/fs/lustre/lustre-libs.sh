@@ -37,7 +37,8 @@ export RUNAS_ID="1000"
 
 # Update paths
 set +u
-export PATH="$zfs_pkg_path:$zfs_pkg_path/cmd/zpool:$zfs_pkg_path/cmd/zfs:$PATH"
+export lustre_tests_bin="/usr/lib/lustre/tests"
+export PATH="$zfs_pkg_path:$zfs_pkg_path/cmd/zpool:$zfs_pkg_path/cmd/zfs:$PATH:$lustre_tests_bin"
 export LD_LIBRARY_PATH="$zfs_pkg_path/lib/libzfs/.libs:$zfs_pkg_path/lib/libzfs_core/.libs:$LD_LIBRARY_PATH"
 export LD_LIBRARY_PATH="$zfs_pkg_path/lib/libuutil/.libs:$zfs_pkg_path/lib/libnvpair/.libs:$LD_LIBRARY_PATH"
 export LD_LIBRARY_PATH="$zfs_pkg_path/lib/libzpool/.libs:$LD_LIBRARY_PATH"

@@ -67,26 +67,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         podman fuse-overlayfs bpftrace \
  && rm -rf /var/lib/apt/lists/*
 
-# Lustre client userspace utils (lctl, lfs, lnetctl, mount.lustre) from the
-# Lustre Ubuntu 24.04 feature-release mirror. Kernel modules are built from
-# source separately (see qlkbuild); this only provides the userspace tools in
-# the image itself.
-#
-# We download the .deb directly rather than adding an apt source: the mirror
-# serves no InRelease/Release.gpg (and returns its HTML landing page with a 200
-# for them), so apt's metadata verification fails even with [trusted=yes]. The
-# filename is read from the repo's Packages index so it tracks the current
-# feature release instead of pinning a version. apt-get install resolves the
-# deps (all stock Ubuntu libs); --no-install-recommends keeps the DKMS modules
-# package out.
+# Lustre util and test debs
 ARG LUSTRE_MIRROR=https://lustre.software/mirror/latest-feature-release/latest-feature-release/ubuntu2404/client
-RUN deb=$(curl -fsSL "$LUSTRE_MIRROR/Packages" \
-            | awk '/^Filename: .*lustre-client-utils/ {print $2; exit}') \
- && [ -n "$deb" ] || { echo "lustre-client-utils not found in mirror Packages"; exit 1; } \
- && curl -fsSL -o /tmp/lustre-client-utils.deb "$LUSTRE_MIRROR/$deb" \
+RUN for pkg in lustre-client-utils lustre-dev lustre-iokit lustre-tests; do \
+        deb=$(curl -fsSL "$LUSTRE_MIRROR/Packages" \
+                | awk -v p="$pkg" '$1 == "Filename:" && index($2, p) {print $2; exit}'); \
+        [ -n "$deb" ] || { echo "$pkg not found in mirror Packages"; exit 1; }; \
+        curl -fsSL -o "/tmp/$pkg.deb" "$LUSTRE_MIRROR/$deb" || exit 1; \
+    done \
  && apt-get update \
- && apt-get install -y --no-install-recommends /tmp/lustre-client-utils.deb \
- && rm -f /tmp/lustre-client-utils.deb \
+ && apt-get install -y --no-install-recommends \
+        /tmp/lustre-client-utils.deb /tmp/lustre-dev.deb \
+        /tmp/lustre-iokit.deb /tmp/lustre-tests.deb \
+ && rm -f /tmp/lustre-client-utils.deb /tmp/lustre-dev.deb \
+        /tmp/lustre-iokit.deb /tmp/lustre-tests.deb \
  && rm -rf /var/lib/apt/lists/*
 
 # Static system config baked into the image.
