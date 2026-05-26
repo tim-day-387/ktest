@@ -1,6 +1,6 @@
 use colored::Colorize;
 
-pub const LNET_INTF: &str = "10.0.2.15@tcp";
+pub const LNET_INTF: &str = "0@lo";
 pub const FSNAME: &str = "lustre";
 
 pub trait TestCall<T, E> {
