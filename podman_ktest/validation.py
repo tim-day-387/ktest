@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional, List
 
 from .models import ValidationError
-from .utils import get_podman_client, get_ccache_dir, is_in_home
+from .utils import get_podman_client, get_ccache_dir, get_package_dir, is_in_home
 
 
 def _run_validation_container(client, command, devices=None, mounts=None):
@@ -61,25 +61,38 @@ def _validate_kvm_permissions(client) -> Optional[ValidationError]:
     return None
 
 
-def _validate_ccache_directory(client, ccache_dir) -> Optional[ValidationError]:
-    """Create and validate the ccache directory."""
-    ccache_path = Path(ccache_dir)
-    parent_dir = str(ccache_path.parent.parent)
+def _validate_host_directory(
+    client, dir_path, check_name, label, mount_source=None
+) -> Optional[ValidationError]:
+    """Create and validate a directory on the host.
 
-    # Create ccache directory locally if in home directory
-    if is_in_home(ccache_dir):
+    The directory is used as a bind-mount source for job containers, which
+    podman resolves on the host. When podman-ktest runs inside the ci-lustre
+    container, a local mkdir would land in the container's private filesystem,
+    not the host -- so for non-home paths we create the directory via a
+    container that bind-mounts an existing host ancestor (mount_source) and
+    runs mkdir -p underneath it.
+
+    mount_source defaults to the grandparent (the layout for <root>/ktest/<x>);
+    callers whose path sits directly under the shared root pass it explicitly.
+    """
+    path = Path(dir_path)
+    parent_dir = mount_source if mount_source else str(path.parent.parent)
+
+    # Create directory locally if in home directory (host runs only)
+    if is_in_home(dir_path):
         try:
-            ccache_path.mkdir(parents=True, exist_ok=True)
-            os.chmod(ccache_path, 0o777)
-            os.chmod(ccache_path.parent, 0o777)
-        except Exception as e:
+            path.mkdir(parents=True, exist_ok=True)
+            os.chmod(path, 0o777)
+            os.chmod(path.parent, 0o777)
+        except Exception:
             return ValidationError(
-                check_name="ccache_directory",
-                message=f"Failed to create ccache directory: {ccache_dir}",
+                check_name=check_name,
+                message=f"Failed to create {label} directory: {dir_path}",
                 remediation=f"Ensure the parent directory exists and is writable: {parent_dir}",
             )
     else:
-        command = f"mkdir -p {ccache_dir} && chmod 777 {ccache_dir} && echo 'ok'"
+        command = f"mkdir -p {dir_path} && chmod 777 {dir_path} && echo 'ok'"
         mounts = [
             {
                 "type": "bind",
@@ -93,12 +106,32 @@ def _validate_ccache_directory(client, ccache_dir) -> Optional[ValidationError]:
 
         if not success or "ok" not in output:
             return ValidationError(
-                check_name="ccache_directory",
-                message=f"Failed to create ccache directory: {ccache_dir}",
+                check_name=check_name,
+                message=f"Failed to create {label} directory: {dir_path}",
                 remediation=f"Ensure the parent directory exists and is writable: {parent_dir}",
             )
 
     return None
+
+
+def _validate_ccache_directory(client, ccache_dir) -> Optional[ValidationError]:
+    """Create and validate the ccache directory."""
+    return _validate_host_directory(client, ccache_dir, "ccache_directory", "ccache")
+
+
+def _validate_package_directory(
+    client, package_dir, shared_filesystem=None
+) -> Optional[ValidationError]:
+    """Create and validate the package output directory.
+
+    The default (/tmp/ktest-packages) sits directly under /tmp, and the shared
+    variant under the shared-filesystem root, so bind-mount that root rather
+    than the path's grandparent (which would be / for the default).
+    """
+    mount_source = shared_filesystem if shared_filesystem else "/tmp"
+    return _validate_host_directory(
+        client, package_dir, "package_directory", "package output", mount_source
+    )
 
 
 def _validate_ccache_writable(client, ccache_dir) -> Optional[ValidationError]:
@@ -134,6 +167,7 @@ def valid_env(podman_socket=None, shared_filesystem=None):
     Returns True if environment is valid, False otherwise.
     """
     ccache_dir = get_ccache_dir(shared_filesystem)
+    package_dir = get_package_dir(shared_filesystem)
     errors: List[ValidationError] = []
 
     try:
@@ -154,6 +188,20 @@ def valid_env(podman_socket=None, shared_filesystem=None):
                     lambda: _validate_ccache_writable(client, ccache_dir),
                 ),
             ]
+
+            # The package output dir is only created up-front for a shared
+            # filesystem, where podman-ktest runs inside the ci-lustre container
+            # and the bind-mount source must be created on the host. A plain
+            # host run creates it lazily at job time instead.
+            if shared_filesystem:
+                validations.append(
+                    (
+                        "Creating package output directory",
+                        lambda: _validate_package_directory(
+                            client, package_dir, shared_filesystem
+                        ),
+                    )
+                )
 
             for description, validate_func in validations:
                 print(f"  {description}...", end=" ", flush=True)

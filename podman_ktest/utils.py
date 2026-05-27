@@ -94,6 +94,31 @@ def get_ccache_dir(shared_filesystem_path=None):
     return str(ccache_dir.resolve())
 
 
+def get_package_dir(shared_filesystem_path=None):
+    """Resolve the package output directory (built RPMs/DEBs) based on shared
+    filesystem argument.
+
+    Mirrors get_ccache_dir. This path is used as a bind-mount source for job
+    containers, which podman resolves on the host. When podman-ktest runs inside
+    the ci-lustre container, a directory created in the container's private /tmp
+    would not exist on the host, so the path must live under the shared
+    filesystem and be created on the host (see _validate_package_directory).
+
+    Args:
+        shared_filesystem_path: Optional path from --shared-filesystem argument
+
+    Returns:
+        Path to the package output directory on the host
+    """
+    if shared_filesystem_path is None:
+        # Default: /tmp/ktest-packages (a host run, where this path is the
+        # conventional drop location for built RPMs/DEBs)
+        return "/tmp/ktest-packages"
+
+    # User provided a path - append /ktest/packages to it
+    return str((Path(shared_filesystem_path) / "ktest" / "packages").resolve())
+
+
 def is_in_home(path):
     """Check if a path is within the home directory."""
     home = Path.home().resolve()

@@ -196,6 +196,7 @@ def run_ktest(
     use_tarball_input=False,
     ccache_dir=None,
     no_cleanup=False,
+    package_dir=None,
 ):
     """Run a ktest job."""
     task_name = get_task_name(job_config, "run")
@@ -218,6 +219,7 @@ def run_ktest(
             sync_ktest_out=True,
             podman_socket=None,
             mount_ktest_out=True,
+            package_dir=package_dir,
             dirs=dirs,
             use_tarball_input=use_tarball_input,
             ccache_dir=ccache_dir,
@@ -244,6 +246,7 @@ def run_build_lustre(
     use_tarball_input=False,
     ccache_dir=None,
     no_cleanup=False,
+    package_dir=None,
 ):
     """Run a Lustre build job."""
     task_name = get_task_name(job_config, "build")
@@ -297,6 +300,7 @@ def run_build_lustre(
             log_path=log_path,
             get_ktest_out_archive=should_get_archive,
             mount_ktest_out=should_mount_output,
+            package_dir=package_dir,
             distro_platform=build_config.get("distro_platform", False),
             no_cleanup=no_cleanup,
         )
@@ -318,6 +322,7 @@ def run_package(
     use_tarball_input=False,
     ccache_dir=None,
     no_cleanup=False,
+    package_dir=None,
 ):
     """Run a package build job."""
     task_name = get_task_name(job_config, "package")
@@ -353,6 +358,7 @@ def run_package(
             log_path=log_path,
             get_ktest_out_archive=False,
             mount_ktest_out=True,
+            package_dir=package_dir,
             distro_platform=build_config.get("distro_platform", False),
             no_cleanup=no_cleanup,
         )
@@ -374,6 +380,7 @@ def run_tool(
     use_tarball_input=False,
     ccache_dir=None,
     no_cleanup=False,
+    package_dir=None,
 ):
     """Run a tool job."""
     task_name = get_task_name(job_config, "tool")
@@ -418,6 +425,7 @@ def run_job_config(
     use_tarball_input=False,
     ccache_dir=None,
     no_cleanup=False,
+    package_dir=None,
 ):
     """Run a job from a job configuration object."""
     platform = job_config["platform"]
@@ -439,6 +447,7 @@ def run_job_config(
             use_tarball_input,
             ccache_dir,
             no_cleanup,
+            package_dir,
         )
     elif job_config.get("build", False):
         return_code, runtime, task_name = run_build_lustre(
@@ -452,6 +461,7 @@ def run_job_config(
             use_tarball_input,
             ccache_dir,
             no_cleanup,
+            package_dir,
         )
     elif job_config.get("package", False):
         return_code, runtime, task_name = run_package(
@@ -465,6 +475,7 @@ def run_job_config(
             use_tarball_input,
             ccache_dir,
             no_cleanup,
+            package_dir,
         )
     elif job_config.get("tool", False):
         return_code, runtime, task_name = run_tool(
@@ -478,6 +489,7 @@ def run_job_config(
             use_tarball_input,
             ccache_dir,
             no_cleanup,
+            package_dir,
         )
 
     return return_code, runtime, task_name

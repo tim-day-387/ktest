@@ -9,7 +9,6 @@
 # Author: Timothy Day <timday@amazon.com>
 #
 
-import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -61,6 +60,7 @@ class ContainerJob:
     log_path: Optional[str] = None
     get_ktest_out_archive: bool = False
     mount_ktest_out: bool = False
+    package_dir: Optional[str] = None
     distro_platform: bool = False
     is_vm_run: bool = False
     no_cleanup: bool = False
@@ -73,9 +73,19 @@ class ContainerJob:
         """Internal execution logic - runs container and manages lifecycle."""
         ktest_out_host = self.ktest_out_dir if self.ktest_out_dir else "/tmp/ktest-out"
         ccache_dir = self.ccache_dir if self.ccache_dir else "/tmp/ccache"
-
-        Path("/tmp/ktest-packages").mkdir(exist_ok=True)
-        os.chmod("/tmp/ktest-packages", 0o777)
+        # Bind-mount source for built packages, resolved on the host by podman.
+        # On a plain host run, create it here (best effort). Under a shared
+        # filesystem podman-ktest runs inside the ci-lustre container, where this
+        # mkdir would only touch the container's private /tmp -- the real host
+        # dir is created during validation -- so failures are ignored.
+        package_dir = self.package_dir if self.package_dir else "/tmp/ktest-packages"
+        if self.mount_ktest_out:
+            try:
+                pkg_path = Path(package_dir)
+                pkg_path.mkdir(parents=True, exist_ok=True)
+                pkg_path.chmod(0o777)
+            except OSError:
+                pass
 
         # Build overlay volume list.
         # userns_mode="keep-id" maps host UID to container UID, so files
@@ -133,7 +143,7 @@ class ContainerJob:
             mounts.append(
                 {
                     "type": "bind",
-                    "source": "/tmp/ktest-packages",
+                    "source": package_dir,
                     "target": "/tmp/ktest-output",
                     "read_only": False,
                 }

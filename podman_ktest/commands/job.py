@@ -21,7 +21,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from ..jobs import load_job_file, topological_sort, run_job_config, any_job_needs_kernel
-from ..utils import get_ccache_dir, create_source_tarballs, get_git_hash, get_task_name
+from ..utils import (
+    get_ccache_dir,
+    get_package_dir,
+    create_source_tarballs,
+    get_git_hash,
+    get_task_name,
+)
 
 
 class MetadataStore:
@@ -226,8 +232,9 @@ def cmd_job(
     metadata_store_path = results_dir / "metadata_store.json"
     metadata_store = MetadataStore(str(metadata_store_path))
 
-    # Resolve ccache directory
+    # Resolve ccache and package output directories
     ccache_dir = get_ccache_dir(shared_filesystem)
+    package_dir = get_package_dir(shared_filesystem)
 
     use_tarball_input = args.tarball_input
 
@@ -412,6 +419,7 @@ def cmd_job(
             use_tarball_input,
             ccache_dir,
             job_no_cleanup,
+            package_dir,
         )
         return future
 
