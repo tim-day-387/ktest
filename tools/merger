@@ -1,0 +1,361 @@
+#!/usr/bin/env python3
+
+import json
+import re
+import subprocess
+import sys
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+#
+# gerrit-predict-conflicts.py
+#
+# Predict conflicts between a local patch and open Gerrit changes
+# WITHOUT touching the worktree/index.
+#
+
+args = sys.argv[1:]
+
+READY_ONLY = False
+
+if "--ready-only" in args:
+    READY_ONLY = True
+    args.remove("--ready-only")
+
+if len(args) != 3:
+    print(
+        "usage: script [--ready-only] "
+        "<gerrit-url> <target-branch> <local-commit>"
+    )
+    sys.exit(1)
+
+GERRIT = args[0].rstrip("/")
+TARGET = args[1]
+LOCAL = args[2]
+
+
+def git(*args, check=True):
+    p = subprocess.run(
+        ["git", *args],
+        text=True,
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    if check and p.returncode != 0:
+        raise RuntimeError(p.stderr.strip())
+
+    return p
+
+
+#
+# Files touched locally
+#
+local_files = set(
+    git(
+        "diff",
+        "--name-only",
+        f"{TARGET}...{LOCAL}",
+    ).stdout.splitlines()
+)
+
+print("Local patch files:")
+for f in sorted(local_files):
+    print(" ", f)
+
+print()
+
+#
+# Query Gerrit
+#
+query = (
+    "status:open "
+    f"branch:{TARGET.split('/')[-1]}"
+)
+
+
+def query_page(start):
+    params = urlencode([
+        ("q", query),
+        ("o", "CURRENT_REVISION"),
+        ("o", "CURRENT_FILES"),
+        ("o", "DETAILED_LABELS"),
+        ("o", "DETAILED_ACCOUNTS"),
+        ("S", start),
+    ])
+
+    url = f"{GERRIT}/changes/?{params}"
+
+    raw = urlopen(Request(url)).read().decode()
+
+    if raw.startswith(")]}'"):
+        raw = raw.split("\n", 1)[1]
+
+    return json.loads(raw)
+
+
+def conflict_lines(out):
+    """
+    Parse legacy `git merge-tree` output and return, per conflicting file,
+    the lines from the local side (".our") that sit inside a conflict, each
+    paired with its line number in the local file.
+
+    Every file that has at least one conflict region gets an entry, even if
+    the local side of that conflict is empty (i.e. the change only added or
+    removed lines there) -- in that case the list is empty.
+
+    merge-tree emits a diff from "our"/LOCAL to the merged result, so the
+    conflicting local lines carry a ' ' (context) prefix and live between
+    the "<<<<<<< .our" and "=======" markers.
+    """
+    files = {}          # path -> list of (lineno, text)
+    cur = None          # current file path
+    our_line = 0        # current line number on the our/LOCAL side
+    in_local = False
+
+    for line in out.splitlines():
+        parts = line.split()
+
+        #
+        # File section header, e.g. "  our    100644 <sha> path". The
+        # stage word varies (base/our/their/added/removed/result) but
+        # always sits at a 2-space indent followed by an octal mode; all
+        # such lines in one section name the same path, so any works.
+        #
+        if (line[:2] == "  " and len(parts) >= 4
+                and re.fullmatch(r"[0-7]{6}", parts[1])):
+            cur = " ".join(parts[3:])
+            in_local = False
+            continue
+
+        #
+        # Hunk header resets the our-side line counter. Match strictly:
+        # binary diffs can produce lines that merely start with "@@".
+        #
+        hunk = re.match(r"^@@ -(\d+)", line)
+
+        if hunk:
+            our_line = int(hunk.group(1))
+            in_local = False
+            continue
+
+        if not line:
+            continue
+
+        prefix, content = line[0], line[1:]
+
+        if content.startswith("<<<<<<<"):
+            in_local = True
+            if cur is not None:
+                files.setdefault(cur, [])
+            continue
+
+        if content.startswith("======="):
+            in_local = False
+            continue
+
+        if content.startswith(">>>>>>>"):
+            continue
+
+        #
+        # ' ' and '-' lines exist on the our/LOCAL side; '+' lines are
+        # introduced by the merge (their side / markers) and don't.
+        #
+        if prefix in (" ", "-"):
+            if in_local and cur is not None:
+                files.setdefault(cur, []).append((our_line, content))
+            our_line += 1
+
+    return files
+
+
+def is_bot(voter):
+    return "SERVICE_USER" in voter.get("tags", [])
+
+
+def review_status(ch):
+    """
+    Landing readiness: +1 Verified from both bots (jenkins, Maloo),
+    Code-Review approval from two humans, and no negative vote anywhere.
+
+    Returns (ready, summary): the boolean readiness and a human-readable
+    one-line summary.
+    """
+    labels = ch.get("labels", {})
+
+    bots_passed = set()
+    humans = set()
+    blocked = False
+
+    for name, label in labels.items():
+        for v in label.get("all", []):
+            value = v.get("value", 0) or 0
+
+            if value < 0:
+                blocked = True
+
+            if value < 1:
+                continue
+
+            if name == "Verified" and is_bot(v):
+                bots_passed.add(v.get("username", v.get("name")))
+            elif name == "Code-Review" and not is_bot(v):
+                humans.add(v.get("username", v.get("name")))
+
+    bots_ok = {"jenkins", "maloo"} <= bots_passed
+    ready = bots_ok and len(humans) >= 2 and not blocked
+
+    summary = (
+        f"bots {len(bots_passed & {'jenkins', 'maloo'})}/2, "
+        f"humans {len(humans)}/2"
+    )
+
+    if blocked:
+        summary += ", has -1"
+
+    summary += " -> READY" if ready else " -> not ready"
+
+    return ready, summary
+
+
+#
+# Gerrit caps results per response and sets _more_changes on
+# the last entry of a page, so page through with the S offset.
+#
+MAX_PAGES = 2
+
+changes = []
+start = 0
+
+for _ in range(MAX_PAGES):
+    page = query_page(start)
+
+    if not page:
+        break
+
+    changes.extend(page)
+
+    if not page[-1].get("_more_changes"):
+        break
+
+    start += len(page)
+
+predicted = []
+
+for ch in changes:
+    rev = ch["current_revision"]
+    revinfo = ch["revisions"][rev]
+
+    remote_files = set(revinfo["files"].keys())
+
+    overlap = sorted(local_files & remote_files)
+
+    if not overlap:
+        continue
+
+    fetch = revinfo["fetch"]["anonymous http"]
+
+    #
+    # Fetch patchset object
+    #
+    git(
+        "fetch",
+        fetch["url"],
+        fetch["ref"],
+    )
+
+    remote_commit = "FETCH_HEAD"
+
+    #
+    # Compute merge-base
+    #
+    base = git(
+        "merge-base",
+        LOCAL,
+        remote_commit,
+    ).stdout.strip()
+
+    #
+    # Pure in-memory merge prediction
+    #
+    mt = git(
+        "merge-tree",
+        base,
+        LOCAL,
+        remote_commit,
+        check=False,
+    )
+
+    out = mt.stdout
+
+    #
+    # Conflict detection
+    #
+    has_conflict = (
+        "<<<<<<<" in out
+        or mt.returncode != 0
+    )
+
+    if has_conflict:
+        predicted.append({
+            "change": ch,
+            "overlap": overlap,
+            "lines": conflict_lines(out),
+        })
+
+#
+# Results
+#
+print("Potential conflicts:")
+print()
+
+if not predicted:
+    print("None")
+    sys.exit(0)
+
+shown = 0
+
+for item in predicted:
+    ch = item["change"]
+
+    ready, summary = review_status(ch)
+
+    if READY_ONLY and not ready:
+        continue
+
+    shown += 1
+
+    print(
+        f"{ch['_number']}: {ch['subject']}"
+    )
+    print(f"   reviews: {summary}")
+
+    lines = item["lines"]
+
+    #
+    # Report every file that actually conflicts in the 3-way merge -- this
+    # is a superset of the Gerrit file overlap, since the merge-base can be
+    # far behind. Fall back to the file overlap for non-text conflicts
+    # (binary, rename, mode) where merge-tree emits no "<<<<<<<" markers.
+    #
+    conflicted = sorted(lines) if lines else item["overlap"]
+
+    for f in conflicted:
+        print(f"   {f}")
+
+        #
+        # Lines from the local patch that land inside a conflict.
+        #
+        rows = lines.get(f, [])
+
+        if rows:
+            for lineno, text in rows:
+                print(f"      {lineno}: {text}")
+        else:
+            print("      (no local lines; change conflicts on the other side)")
+
+    print()
+
+if not shown:
+    print("None")
