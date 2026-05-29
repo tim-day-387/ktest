@@ -12,6 +12,7 @@ require-lustre-debug-kernel-config
 require-kernel-config LNET=y
 require-kernel-config LUSTRE=y
 require-kernel-config ZFS=y
+require-kernel-config ZFS_DEBUG=y
 require-kernel-config MODULES=y
 require-kernel-config MODULE_UNLOAD
 
