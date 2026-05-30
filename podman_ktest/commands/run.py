@@ -34,7 +34,6 @@ def cmd_run(
             tarball_paths=tarball_paths,
             sync_kernel=False,
             sync_lustre=False,
-            sync_ktest_out=False,
             dirs=dirs,
             use_tarball_input=tarball_input,
             ccache_dir=ccache_dir,

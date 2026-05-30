@@ -52,8 +52,6 @@ class ContainerJob:
     sync_kernel: bool = False
     sync_lustre: bool = False
     sync_zfs: bool = False
-    sync_ktest_out: bool = False
-    podman_socket: Optional[str] = None
     dirs: Optional[Dict[str, str]] = None
     use_tarball_input: bool = False
     ccache_dir: Optional[str] = None
@@ -61,7 +59,6 @@ class ContainerJob:
     get_ktest_out_archive: bool = False
     mount_ktest_out: bool = False
     package_dir: Optional[str] = None
-    distro_platform: bool = False
     is_vm_run: bool = False
     no_cleanup: bool = False
 
@@ -127,7 +124,7 @@ class ContainerJob:
 
         # VM runs need the host root images as a backing file for qemu.
         # Read-only is fine: qemu's snapshot=on provides per-run COW.
-        if self.is_vm_run and not self.distro_platform:
+        if self.is_vm_run:
             mounts.append(
                 {
                     "type": "bind",
@@ -145,18 +142,6 @@ class ContainerJob:
                     "type": "bind",
                     "source": package_dir,
                     "target": "/tmp/ktest-output",
-                    "read_only": False,
-                }
-            )
-
-        # Mount podman socket if provided (for CI container to spawn job containers)
-        if self.podman_socket:
-            socket_path = self.podman_socket.replace("unix://", "")
-            mounts.append(
-                {
-                    "type": "bind",
-                    "source": socket_path,
-                    "target": socket_path,
                     "read_only": False,
                 }
             )
@@ -190,8 +175,6 @@ class ContainerJob:
             remove=False,
             working_dir=self.working_dir,
         )
-        if overlay_volumes:
-            create_kwargs["overlay_volumes"] = overlay_volumes
         socket_url = get_podman_socket(podman_socket)
         max_retries = 3
         for attempt in range(max_retries):
@@ -233,7 +216,7 @@ class ContainerJob:
 
             tarball_path = f"{ktest_out_host}.tar"
 
-            if Path(tarball_path).exists() and self.sync_ktest_out:
+            if Path(tarball_path).exists():
                 put_archive(container, tarball_path, "/tmp")
 
             container.start()

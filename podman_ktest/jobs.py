@@ -216,15 +216,12 @@ def run_ktest(
             sync_kernel=True,
             sync_lustre=True,
             sync_zfs=False,
-            sync_ktest_out=True,
-            podman_socket=None,
             mount_ktest_out=True,
             package_dir=package_dir,
             dirs=dirs,
             use_tarball_input=use_tarball_input,
             ccache_dir=ccache_dir,
             log_path=log_path,
-            distro_platform=build_config.get("distro_platform", False),
             is_vm_run=True,
             no_cleanup=no_cleanup,
         )
@@ -292,8 +289,6 @@ def run_build_lustre(
             sync_kernel=sync_kernel,
             sync_lustre=True,
             sync_zfs=sync_zfs,
-            sync_ktest_out=True,
-            podman_socket=None,
             dirs=dirs,
             use_tarball_input=use_tarball_input,
             ccache_dir=ccache_dir,
@@ -301,7 +296,6 @@ def run_build_lustre(
             get_ktest_out_archive=should_get_archive,
             mount_ktest_out=should_mount_output,
             package_dir=package_dir,
-            distro_platform=build_config.get("distro_platform", False),
             no_cleanup=no_cleanup,
         )
         with job:
@@ -350,8 +344,6 @@ def run_package(
             sync_kernel=sync_kernel,
             sync_lustre=True,
             sync_zfs=sync_zfs,
-            sync_ktest_out=True,
-            podman_socket=None,
             dirs=dirs,
             use_tarball_input=use_tarball_input,
             ccache_dir=ccache_dir,
@@ -359,7 +351,6 @@ def run_package(
             get_ktest_out_archive=False,
             mount_ktest_out=True,
             package_dir=package_dir,
-            distro_platform=build_config.get("distro_platform", False),
             no_cleanup=no_cleanup,
         )
         with job:
@@ -399,13 +390,10 @@ def run_tool(
             tarball_paths=tarball_paths,
             sync_kernel=sync_kernel,
             sync_lustre=True,
-            sync_ktest_out=True,
-            podman_socket=None,
             dirs=dirs,
             use_tarball_input=use_tarball_input,
             ccache_dir=ccache_dir,
             log_path=log_path,
-            distro_platform=build_config.get("distro_platform", False),
             no_cleanup=no_cleanup,
         )
         with job:
