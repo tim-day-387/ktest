@@ -3,21 +3,21 @@
     {
       "name": "lustre_patch",
       "platform": "native_1",
-      "build": "tests/fs/lustre/inkernel.ktest",
+      "build": "tests/fs/lustre/racer.ktest",
       "backing_storage": "zfs"
     },
     {
       "name": "lustre_native",
       "platform": "native_2",
-      "build": "tests/fs/lustre/inkernel.ktest",
+      "build": "tests/fs/lustre/racer.ktest",
       "backing_storage": "zfs",
       "depends_on": ["lustre_patch"]
     },
     {
       "name": "lustre_native_boot",
       "platform": "native_2",
-      "build": "tests/fs/lustre/inkernel.ktest",
-      "run": "tests/fs/lustre/inkernel.ktest",
+      "build": "tests/fs/lustre/racer.ktest",
+      "run": "tests/fs/lustre/racer.ktest",
       "backing_storage": "zfs",
       "depends_on": ["lustre_native"]
     }
