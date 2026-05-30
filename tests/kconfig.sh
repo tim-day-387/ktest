@@ -55,6 +55,9 @@ require-kernel-config BINFMT_SCRIPT
 
 require-kernel-config COMPACTION	# virtfs doesn't do well without it
 
+require-kernel-config CONFIG_CRYPTO_LZ4
+require-kernel-config CONFIG_CRYPTO_LZ4HC
+
 require-kernel-config PROC_KCORE	# XXX Needed?
 
 require-kernel-config TTY

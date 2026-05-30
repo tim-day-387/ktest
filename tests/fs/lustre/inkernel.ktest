@@ -17,20 +17,52 @@
 
 require-lustre-kernel-config
 require-lustre-debug-kernel-config
+require-kernel-config LIBCFS=m
 require-kernel-config LNET=m
 require-kernel-config LUSTRE=m
 require-kernel-config ZFS=m
 
-require-kernel-config GCOV_KERNEL
-require-kernel-config GCOV_PROFILE_LNET
-require-kernel-config GCOV_PROFILE_LUSTRE
+require-kernel-config BLK_DEV_RAM=y
+require-kernel-config BLK_DEV_RAM_SIZE=524288
 
 config-mem 10G
-config-timeout 60
+config-timeout 120
 
 test_llmount()
 {
     modprobe lustre
+    modprobe zfs
+    modprobe osd-zfs
+
+    setup_lustrefs
+
+    sleep 10
+
+    cd /mnt/lustre
+    fio --name=bulk_write_test \
+	--size=10M \
+	--bs=1M \
+	--rw=write \
+	--iodepth=32 \
+	--numjobs=$(nproc) \
+	--direct=1 \
+	--time_based \
+	--runtime=30 \
+	--group_reporting
+    cd -
+
+    # Dump memory allocation profiling (CONFIG_MEM_ALLOC_PROFILING),
+    # sorted by bytes allocated, to attribute memory use to callsites.
+    echo "=== MEM_ALLOC_PROFILING (/proc/allocinfo) ==="
+    # head closing the pipe early sends SIGPIPE to sort (exit 141); tolerate it
+    # so pipefail/set -e don't fail the test.
+    sort -grk1 /proc/allocinfo | head -50 || true
+
+    cleanup_lustrefs
+
+    "$LUSTRE_RMMOD" zfs
+    "$LUSTRE_RMMOD"
+    lsmod
 }
 
 main "$@"

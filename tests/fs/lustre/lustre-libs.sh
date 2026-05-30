@@ -33,6 +33,7 @@ export LUSTRE="$lustre_pkg_path/lustre"
 export LCTL="$(command -v lctl 2>/dev/null || echo "$LUSTRE/utils/lctl")"
 export LNETCTL="$(command -v lnetctl 2>/dev/null || echo "$LUSTRE/../lnet/utils/lnetctl")"
 export LNETDUMP="$(command -v lnetdump 2>/dev/null || echo "$LUSTRE/utils/lnetdump/lnetdump")"
+export LUSTRE_RMMOD="$(command -v lustre_rmmod 2>/dev/null || echo "$LUSTRE/scripts/lustre_rmmod")"
 export RUNAS_ID="1000"
 
 # Update paths
@@ -149,10 +150,20 @@ function require-lustre-base-kernel-config()
     require-kernel-config DEBUG_INFO_BTF
     # require-kernel-config DEBUG_INFO_BTF_MODULES
     require-kernel-config BPF_JIT
+    require-kernel-config FUNCTION_GRAPH_RETVAL
+
+    # Expose kernel config via /proc/config.gz
+    require-kernel-config IKCONFIG
+    require-kernel-config IKCONFIG_PROC
+
+    # Enable zswap by default
+    require-kernel-config ZSWAP
+    require-kernel-config ZSWAP_DEFAULT_ON
 
     # Profiling
     # TODO: Fix me!
-    # require-kernel-config CONFIG_MEM_ALLOC_PROFILING
+    require-kernel-config MEM_ALLOC_PROFILING
+    require-kernel-config ERRNO_UNWIND
 }
 
 function require-lustre-modules-kernel-config()
