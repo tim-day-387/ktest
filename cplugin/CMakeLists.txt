@@ -67,6 +67,10 @@ else (XUNUSED_LINK_CLANG_DYLIB)
     if (LLVM_VERSION_MAJOR GREATER_EQUAL 15)
         list(APPEND XUNUSED_CLANG_LIBS "clangSupport")
     endif (LLVM_VERSION_MAJOR GREATER_EQUAL 15)
+    # clang 22 split the option tables out of clangDriver into clangOptions.
+    if (LLVM_VERSION_MAJOR GREATER_EQUAL 22)
+        list(APPEND XUNUSED_CLANG_LIBS "clangOptions")
+    endif (LLVM_VERSION_MAJOR GREATER_EQUAL 22)
 endif (XUNUSED_LINK_CLANG_DYLIB)
 
 if (XUNUSED_LINK_LLVM_DYLIB)

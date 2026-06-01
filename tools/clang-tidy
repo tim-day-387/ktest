@@ -20,4 +20,4 @@ ktest_lustre_build="$ktest_out/lustre-release"
 
 echo "CLANG-TIDY"
 cd "$ktest_lustre_build"
-run-clang-tidy-20 -checks='-*,linuxkernel-must-check-errs,misc-static-assert'
+run-clang-tidy-22 -checks='-*,linuxkernel-must-check-errs,misc-static-assert'

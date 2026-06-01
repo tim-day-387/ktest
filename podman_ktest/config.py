@@ -14,7 +14,7 @@ DEPLOY_NGINX_PORT = 8080
 
 IMAGES = [
     {
-        "dockerfile": "containers/Containerfile.ktest.u24",
+        "dockerfile": "containers/Containerfile.ktest.u26",
         "tag": "ktest-runner:latest",
         "name": "ktest-runner",
     },

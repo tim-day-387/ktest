@@ -9,7 +9,7 @@
 #
 
 # Distro
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 # Set environment variables to avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y \
     minicom socat vde2 git ssh rsync brotli \
     lsb-release wget software-properties-common \
     gnupg clang bear pahole kmod swig quilt \
+    libstdc++-16-dev \
     cmake libtool pkg-config libpython3-dev libmount-dev \
     libaio-dev libssl-dev libnl-genl-3-dev \
     libkeyutils-dev libyaml-dev libreadline-dev \
@@ -45,18 +46,20 @@ RUN apt-get update && apt-get install -y \
     chmod 0644 /boot/vmlinuz* && \
     rm -rf /var/lib/apt/lists/*
 
-# Get LLVM and clean up in the same layer.  llvm-20-dev / libclang-20-dev
-# provide the headers and libs the cplugin (xunused) links against.
+# Get LLVM and clean up in the same layer.  llvm-22-dev / libclang-22-dev
+# provide the headers and libs the cplugin (xunused) links against.  llvm.sh
+# installs the latest stable LLVM (22), which is what cplugin's CMake
+# find_package picks up, so the matching -dev packages must be version 22.
 RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)" && \
-    apt-get install -y clang-tidy-20 llvm-20-dev libclang-20-dev llvm-20 && \
+    apt-get install -y clang-tidy-22 llvm-22-dev libclang-22-dev llvm-22 && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup ccache symlink for Lustre/ZFS builds
-RUN ln -s /usr/bin/ccache /usr/local/bin/clang-20
+RUN ln -s /usr/bin/ccache /usr/local/bin/clang-22
 
 # Rename the default ubuntu user (UID 1000) to ktest so that --userns=keep-id
 # from a host UID 1000 invoker maps to ktest. Creating a fresh ktest user on
-# 24.04 would assign UID 1001 (ubuntu already owns 1000), leaving ktest unable
+# 26.04 would assign UID 1001 (ubuntu already owns 1000), leaving ktest unable
 # to write bind-mounted source trees owned by host UID 1000.
 RUN usermod -l ktest -d /home/ktest -m ubuntu && \
     groupmod -n ktest ubuntu && \
