@@ -15,8 +15,18 @@
 export CHECKPATCH=${CHECKPATCH:-"/home/ktest/git/linux/scripts/checkpatch.pl"}
 export NPROC=${NPROC:-$(nproc)}
 
+# Only check kernel code in the Lustre source tree.
+LUSTRE_ROOT=${LUSTRE_ROOT:-"$HOME/Programming/lustre-release"}
+
+# Default to the kernel module trees; userspace-only subdirs are
+# pruned below.
 DIRS="$*"
-[ -z "$DIRS" ] && DIRS="ls -d */"
+[ -z "$DIRS" ] && DIRS="lnet lustre"
+
+# Userspace-only directories to skip (not kernel code).
+EXCLUDE="lnet/utils lustre/utils lustre/tests lustre/scripts lustre/conf lustre/kernel_patches"
+
+cd "$LUSTRE_ROOT" || { echo "error: cannot cd to $LUSTRE_ROOT" >&2; exit 1; }
 
 # Create temporary directory for results
 TMPDIR=$(mktemp -d)
@@ -42,12 +52,19 @@ export -f process_file
 export CHECKPATCH
 export TMPDIR
 
-# Build list of all files
+# Build the find prune expression for userspace-only directories.
+PRUNE=()
+for E in $EXCLUDE; do
+	PRUNE+=(-path "$E" -o)
+done
+
+# Build list of all files, skipping userspace-only directories.
 for D in $DIRS; do
 	[ ! -d "$D" ] && continue
-	find "$D" -name "*.[ch]"
-done | if command -v parallel >/dev/null 2>&1; then
-	# Use GNU parallel if available
+	find "$D" -type d \( "${PRUNE[@]}" -false \) -prune \
+		-o -type f -name "*.[ch]" -print
+done | if parallel --version 2>/dev/null | grep -q "GNU parallel"; then
+	# Use GNU parallel if available (moreutils 'parallel' is incompatible)
 	parallel -j"$NPROC" process_file
 else
 	# Fall back to xargs
@@ -96,3 +113,26 @@ sort -t'|' -k1 -rn "$RESULTS_FILE" | while IFS='|' read -r PER_KLOC DIR_PATH TOT
 		echo
 	fi
 done
+
+# Aggregate summaries: all-of-LNet, all-of-Lustre, and grand total.
+awk -F'|' '
+function kloc(c, t) { return (t > 0) ? sprintf("%.2f", (c / t) * 1000) : "0.00" }
+function show(name, c, t) {
+	printf "%-16s %-10s %-11s %-15s\n", \
+	       name ":", "loc=" t, "errors/warnings=" c, "per_kloc=" kloc(c, t)
+}
+{
+	if      ($2 ~ /^lnet(\/|$)/)   { g = "LNet" }
+	else if ($2 ~ /^lustre(\/|$)/) { g = "Lustre" }
+	else                           { g = "Other" }
+	loc[g] += $3; err[g] += $4
+	tloc   += $3; terr   += $4
+}
+END {
+	print "==== summary ===="
+	if ("LNet"   in loc) show("all-of-LNet",   err["LNet"],   loc["LNet"])
+	if ("Lustre" in loc) show("all-of-Lustre", err["Lustre"], loc["Lustre"])
+	if ("Other"  in loc) show("all-of-other",  err["Other"],  loc["Other"])
+	show("total", terr, tloc)
+}
+' "$RESULTS_FILE"
