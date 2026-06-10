@@ -2,25 +2,24 @@
 # SPDX-License-Identifier: GPL-2.0
 
 #
-# Folders/ which did not had any warnings to begin with
+# Count kernel-doc warnings across the Lustre tree.
+#
+# Folders which did not have any warnings to begin with:
 #
 # conf/ contrib/ ec/ include/ kernel_patches/ kunit/ scripts/ tests/
 #
 # Author: Arshad Hussain <arshad.hussain@aeoncomputing.com>
 #
 
-folder_lst0="fid/ fld/ fld/ ldlm/ llite/ lfsck/ lmv/ lod/ lov/ mdc/ mdd/ mdt/  \
-             mgc/ mgs/ obdclass/ obdecho/ ofd/ osc/ osd-ldiskfs/ osd-zfs/ osp/ \
-             ptlrpc/ quota/ target/ utils/"
+folder_lst0="fid/ fld/ ldlm/ llite/ lfsck/ lmv/ lod/ lov/ mdc/ mdd/ mdt/   \
+             mgc/ mgs/ obdclass/ obdecho/ ofd/ osc/ osd-ldiskfs/ osd-zfs/  \
+             osp/ ptlrpc/ quota/ target/ utils/"
 folder_lst1="lnet/lnet"
 
-KERNEL_DOC="/home/ktest/git/linux/scripts/kernel-doc"
+KERNEL_DOC=${KERNEL_DOC:-"/home/ktest/git/linux/scripts/kernel-doc"}
+LUSTRE_ROOT=${LUSTRE_ROOT:-"/home/ktest/git/lustre-release"}
 
 BIN="$0"
-BINPATH="$(dirname "$(readlink -f "$BIN")")"
-
-echo "$BINPATH"
-
 TOTAL=0
 
 show_usage()
@@ -28,30 +27,36 @@ show_usage()
 	echo "Usage:"
 	echo "$BIN [file.c]"
 	echo "Eg: $BIN ./lustre/llite/file.c # for single file (complete path)"
-	echo "Eg: $BIN # for all pre-defined folder"
+	echo "Eg: $BIN # for all pre-defined folders"
 	echo
 	echo "Pre-defined folders:"
 	echo "$folder_lst0 $folder_lst1"
-	exit
+	exit 1
 }
 
-get_kern_doc_warning()
+# Count warnings from both the old perl ("file:line: warning: ...")
+# and the new python ("Warning: file:line ...") kernel-doc output.
+count_warnings()
 {
-	if (( $# == 3 )); then
-		[[ -f "$3" ]] || show_usage
+	$KERNEL_DOC -none "$@" 2>&1 | grep -Eic '(^|: )warning:'
+}
 
-		warn=$($KERNEL_DOC -v -none ${3} 2>&1 |
-		       grep -c warning)
-		echo "$3:$warn"
-		(( TOTAL += warn ))
-	else
-		for f in $1; do
-			warn=$($KERNEL_DOC -v -none ${2}/$f/*.c 2>&1 |
-			       grep -c warning)
-			echo "$warn:$f"
-			(( TOTAL += warn ))
-		done
-	fi
+check_file()
+{
+	[[ -f "$1" ]] || show_usage
+
+	warn=$(count_warnings "$1")
+	echo "$warn:$1"
+	TOTAL=$((TOTAL + warn))
+}
+
+check_folders()
+{
+	for f in $1; do
+		warn=$(count_warnings "$2"/$f/*.c)
+		echo "$warn:$f"
+		TOTAL=$((TOTAL + warn))
+	done
 }
 
 #
@@ -60,10 +65,10 @@ get_kern_doc_warning()
 (( $# < 2 )) || show_usage
 
 if (( $# == 1 )); then
-	get_kern_doc_warning "$folder_lst0" "$BINPATH/../../lustre/" $1
+	check_file "$1"
 else
-	get_kern_doc_warning "$folder_lst0" "/home/ktest/git/lustre-release/lustre/"
-	get_kern_doc_warning "$folder_lst1" "/home/ktest/git/lustre-release/"
+	check_folders "$folder_lst0" "$LUSTRE_ROOT/lustre"
+	check_folders "$folder_lst1" "$LUSTRE_ROOT"
 fi
 
 echo "$TOTAL : Total"
