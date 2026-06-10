@@ -16,7 +16,7 @@ export CHECKPATCH=${CHECKPATCH:-"/home/ktest/git/linux/scripts/checkpatch.pl"}
 export NPROC=${NPROC:-$(nproc)}
 
 # Only check kernel code in the Lustre source tree.
-LUSTRE_ROOT=${LUSTRE_ROOT:-"$HOME/Programming/lustre-release"}
+LUSTRE_ROOT=${LUSTRE_ROOT:-"/home/ktest/git/lustre-release"}
 
 # Default to the kernel module trees; userspace-only subdirs are
 # pruned below.
