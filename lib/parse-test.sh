@@ -17,6 +17,12 @@ parse_test_deps()
 	ktest_timeout=6000
     fi
 
+    # Per-test timeouts predate the supervisor enforcing them and many are
+    # sized too small - floor them until they've been audited:
+    if (( ktest_timeout < 120 )); then
+	ktest_timeout=120
+    fi
+
     ktest_tests=$("$ktest_test" list-tests)
     ktest_tests=$(echo $ktest_tests)
 

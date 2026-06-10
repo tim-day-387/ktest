@@ -560,8 +560,38 @@ start_vm()
 
     set +o errexit
     save_env
-  
-    "${qemu_cmd[@]}"
+
+    if $ktest_interactive; then
+	"${qemu_cmd[@]}"
+	return
+    fi
+
+    # Non-interactive runs go through lib/supervisor, which enforces
+    # $ktest_timeout (refreshed by WATCHDOG lines from the VM), splits out
+    # per-test logs, and kills the VM as soon as it reports TEST
+    # SUCCESS/FAILED - so a wedged VM can't hang the run forever.  The
+    # supervisor's exit status reflects the test result.
+    make -C "$ktest_dir/lib" supervisor > /dev/null
+
+    local test_basename=$(basename -s .ktest "$ktest_test")
+    local test_logdir="$ktest_out/out"
+    local t
+
+    mkdir -p "$test_logdir"
+
+    for t in $ktest_tests; do
+	local tdir="$test_logdir/$test_basename.$(echo "$t" | tr / .)"
+	mkdir -p "$tdir"
+	echo "========= NOT STARTED" > "$tdir/status"
+    done
+
+    "$ktest_dir/lib/supervisor"				\
+	-S -F						\
+	-T "$ktest_timeout"				\
+	-b "$test_basename"				\
+	-o "$test_logdir"				\
+	-f "$test_basename.$(date -Iseconds).log"	\
+	-- "${qemu_cmd[@]}"
 }
 
 map_clang_version() {

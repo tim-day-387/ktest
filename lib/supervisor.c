@@ -91,13 +91,20 @@ static void set_timeout(unsigned long new_timeout)
 
 static FILE *test_file_open(const char *fname)
 {
-	char *path = mprintf("%s/%s.%s/%s", logdir, test_basename,
-			     current_test, fname);
+	char *dir = mprintf("%s/%s.%s", logdir, test_basename, current_test);
+
+	/* Test names come from the VM's output, so the caller can't
+	 * always pre-create the per-test log directory: */
+	if (mkdir(dir, 0755) && errno != EEXIST)
+		die("error creating %s: %m", dir);
+
+	char *path = mprintf("%s/%s", dir, fname);
 
 	FILE *f = fopen(path, "w");
 	if (!f)
 		die("error opening %s: %m", path);
 
+	free(dir);
 	free(path);
 	setlinebuf(f);
 	return f;
