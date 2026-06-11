@@ -123,6 +123,11 @@ def main():
         action="store_true",
         help="Do not remove containers after jobs complete (useful for debugging)",
     )
+    job_parser.add_argument(
+        "--plugin-args",
+        default=None,
+        help="Extra CLI options forwarded to the CC plugin (mainline_ccplugin jobs)",
+    )
 
     # Deploy command - deploy the CI container
     deploy_parser = subparsers.add_parser(

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Run the CC plugin (llvm-checks job) in a container, forwarding any
+# CLI options to the plugin binary, i.e.
+#
+#   ./ccplugin -filter 'lustre/llite/.*'
+#   ./ccplugin -list-lints
+#   ./ccplugin -lint unused-macros
+#   ./ccplugin -no-lint unused-functions
+#
+
+set -o nounset
+set -o errexit
+set -o errtrace
+
+ktest_dir=$(dirname "$(readlink -f "$0")")
+
+cmd=("$ktest_dir/podman-ktest" job --stdout llvm-checks)
+
+if [[ $# -gt 0 ]]; then
+    cmd+=(--plugin-args "$*")
+fi
+
+exec "${cmd[@]}"

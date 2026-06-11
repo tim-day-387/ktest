@@ -10,6 +10,7 @@
 #
 
 import json
+import shlex
 import shutil
 import sys
 import tempfile
@@ -258,6 +259,11 @@ def run_build_lustre(
 
     # Set backing storage environment variable for build scripts
     command = f"export BACKING_STORAGE={backing_storage} && {command}"
+
+    # Forward CC plugin options into the container (consumed by qlkbuild ccplugin)
+    plugin_args = job_config.get("plugin_args")
+    if plugin_args:
+        command = f"export KTEST_CCPLUGIN_ARGS={shlex.quote(plugin_args)} && {command}"
 
     start_time = time.time()
     with get_podman_client(podman_socket) as client:

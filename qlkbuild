@@ -657,8 +657,14 @@ function cmd_ccplugin()
 	exit 1
     fi
 
+    # Extra plugin options forwarded from podman-ktest job --plugin-args
+    local plugin_args=()
+    if [[ -n "${KTEST_CCPLUGIN_ARGS:-}" ]]; then
+	read -ra plugin_args <<< "$KTEST_CCPLUGIN_ARGS"
+    fi
+
     echo "PLUGIN"
-    "$ktest_ccplugin" "$ktest_lustre_build/compile_commands.json"
+    "$ktest_ccplugin" "${plugin_args[@]}" "$ktest_lustre_build/compile_commands.json"
 }
 
 # Install the freshly-built lustre/zfs kernel modules into the kernel's

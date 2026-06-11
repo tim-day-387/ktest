@@ -248,6 +248,13 @@ def cmd_job(
         jobs = load_job_file(arg, ktest_dir)
         all_jobs.extend(jobs)
 
+    # Forward --plugin-args to every job; only mainline_ccplugin builds
+    # consume it (exported as KTEST_CCPLUGIN_ARGS in the container).
+    plugin_args = getattr(args, "plugin_args", None)
+    if plugin_args:
+        for job in all_jobs:
+            job["plugin_args"] = plugin_args
+
     # Create source tarballs only if using tarball input mode.
     # Skip the kernel tarball when no job needs it (e.g. all distro platforms).
     tarball_paths = None

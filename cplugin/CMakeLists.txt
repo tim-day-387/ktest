@@ -46,7 +46,13 @@ link_directories(${CLANG_LIBRARY_DIRS})
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_executable(xunused main.cpp)
+add_executable(xunused
+               main.cpp
+               lint.cpp
+               unused_functions.cpp
+               unused_macros.cpp
+               global_headers.cpp
+               feature_macros.cpp)
 
 if (XUNUSED_LINK_CLANG_DYLIB)
     set(XUNUSED_CLANG_LIBS "clang-cpp")
