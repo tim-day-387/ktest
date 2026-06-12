@@ -18,6 +18,9 @@
 require-lustre-kernel-config
 require-lustre-debug-kernel-config
 
+require-kernel-config BLK_DEV_RAM=y
+require-kernel-config BLK_DEV_RAM_SIZE=524288
+
 config-mem 10G
 config-timeout 60
 
