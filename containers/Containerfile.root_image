@@ -3,71 +3,78 @@
 ARG BASE=docker.io/library/ubuntu:24.04
 FROM ${BASE}
 
+# Keep apt non-interactive and dpkg fast for this build
 ENV DEBIAN_FRONTEND=noninteractive \
     DEBCONF_NONINTERACTIVE_SEEN=true \
     LC_ALL=C \
     LANG=C
 
-# Pre-install setup, all before the one big apt-get so it takes effect during
-# dependency resolution:
-#   - disable man-db cache rebuilds (slow, useless in a test VM)
-#   - stub out initramfs generation (ktest boots kernels without an initramfs)
+# Pre-install setup:
+#   - disable man-db cache rebuilds (slow on Lustre)
+#   - stub out initramfs generation (we use UKI)
 #   - force-unsafe-io for faster dpkg
-#   - pin a set of packages to priority -1 so they can't be pulled in
-#     transitively (these were --exclude'd under the old debootstrap flow)
 RUN echo 'man-db man-db/auto-update boolean false' | debconf-set-selections \
  && printf 'INITRD=No\n' >> /etc/environment \
  && install -d /usr/local/sbin /etc/dpkg/dpkg.cfg.d \
  && printf '#!/bin/sh\nexit 0\n' > /usr/local/sbin/update-initramfs \
  && chmod +x /usr/local/sbin/update-initramfs \
- && echo force-unsafe-io > /etc/dpkg/dpkg.cfg.d/dpkg-unsafe \
- && for p in dmidecode nano rsyslog logrotate cron iptables nfacct \
-            debconf-i18n info libpam-systemd ; do \
-        printf 'Package: %s\nPin: release *\nPin-Priority: -1\n\n' "$p" \
-            >> /etc/apt/preferences.d/ktest-exclude ; \
-    done
+ && echo force-unsafe-io > /etc/dpkg/dpkg.cfg.d/dpkg-unsafe
 
-# Everything ktest needs in the VM, installed in a single layer. Groups:
-#   kernel/systemd | core tooling | build tools | stress testing |
-#   bcachefs-tools build deps | quota | xfstests/xfsprogs |
-#   fs servers & clients | ZFS userspace + Lustre build/userspace deps
-# linux-image-generic supplies a kernel + modules for the USB-boot path
-# (see Documentation/usb-boot.md); ktest itself boots a kernel externally.
-# linux-tools-generic provides perf and bpftool.
+# Packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
         linux-image-generic linux-tools-generic systemd systemd-sysv dbus udev \
-        ca-certificates curl gnupg \
-        kexec-tools less psmisc openssh-server pciutils \
-        pkg-config libtool-bin \
-        gdb strace trace-cmd blktrace sysstat iotop htop \
-        hdparm mdadm lvm2 \
-        btrfs-progs jfsutils nilfs-tools f2fs-tools \
-        bc attr gawk acl rsync git python3-docutils \
-        stress-ng lsof xxd zstd \
-        build-essential make gcc g++ clang \
-        autoconf automake autopoint bison pahole \
-        cargo mold rustc rust-src golang-go \
-        devscripts debhelper sbuild dh-sequence-dkms dkms \
-        fio dbench bonnie++ fsmark \
-        libblkid-dev uuid-dev libscrypt-dev libsodium-dev \
-        libkeyutils-dev liburcu-dev libudev-dev zlib1g-dev libattr1-dev \
-        libaio-dev libzstd-dev liblz4-dev libfuse3-dev valgrind \
-        llvm libclang-dev libldap2-dev \
-        acct bsdextrautils xfsprogs xfslibs-dev quota libcap2-bin \
-        libgdbm-dev libacl1-dev gettext \
-        libssl-dev libgdbm-compat-dev liburing-dev \
-        duperemove fsverity libcap-dev libinih-dev \
-        nfs-kernel-server ocfs2-tools \
-        openafs-dbserver openafs-fileserver \
-        nbd-client nbd-server cryptsetup \
-        multipath-tools sg3-utils srptools \
-        capnproto jq erofs-utils squashfs-tools-ng \
-        zfsutils-linux libyaml-0-2 libyaml-dev \
-        libnl-3-dev libnl-genl-3-dev libreadline-dev libmount-dev \
-        podman fuse-overlayfs bpftrace \
+        ca-certificates curl gnupg kmod \
+        less psmisc openssh-server pciutils rsync git \
+        zfsutils-linux libyaml-0-2 \
  && rm -rf /var/lib/apt/lists/*
 
-# Lustre util and test debs
+# Third-party apt repositories
+#   - apt.llvm.org        LLVM/Clang 22
+#   - cli.github.com      gh (GitHub CLI)
+RUN install -d /etc/apt/keyrings \
+ && curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+        -o /etc/apt/keyrings/apt.llvm.org.asc \
+ && echo 'deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' \
+        > /etc/apt/sources.list.d/llvm.list \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list
+
+# The GNOME desktop metapackage
+RUN apt-get update && apt-get install -y \
+        ubuntu-desktop-minimal \
+ && rm -rf /var/lib/apt/lists/*
+
+# The full dev/test/desktop package set
+RUN apt-get update && apt-get install -y \
+        build-essential make gcc g++ clang llvm clang-22 llvm-22 lld-22 \
+        autoconf automake autopoint bison flex pahole libtool-bin pkg-config \
+        cargo rustc rust-src golang-go python3-dev python3-docutils \
+        devscripts debhelper sbuild dh-sequence-dkms dkms \
+        bear quilt module-assistant git-review swig mold \
+        libelf-dev libbpf-dev libblkid-dev uuid-dev libscrypt-dev libsodium-dev \
+        libkeyutils-dev liburcu-dev libudev-dev zlib1g-dev libattr1-dev \
+        libaio-dev libzstd-dev liblz4-dev libfuse3-dev libclang-dev libldap2-dev \
+        libgdbm-dev libacl1-dev gettext libssl-dev libgdbm-compat-dev liburing-dev \
+        libcap-dev libcap2-bin libinih-dev libsnmp-dev mpi-default-dev \
+        libyaml-dev libnl-3-dev libnl-genl-3-dev libreadline-dev libmount-dev \
+        gdb strace trace-cmd blktrace sysstat iotop htop valgrind bpftrace \
+        stress-ng lsof xxd zstd fio dbench bonnie++ fsmark iperf3 \
+        duperemove fsverity tcpdump nmap kexec-tools libguestfs-tools \
+        hdparm mdadm lvm2 cryptsetup btrfs-progs jfsutils nilfs-tools f2fs-tools \
+        xfsprogs xfslibs-dev quota acct bsdextrautils erofs-utils squashfs-tools-ng \
+        nfs-kernel-server nfs-common ocfs2-tools openafs-dbserver openafs-fileserver \
+        nbd-client nbd-server multipath-tools sg3-utils srptools \
+        bc attr gawk acl capnproto jq smbclient minicom \
+        qemu-system-x86 qemu-utils \
+        podman podman-compose python3-podman fuse-overlayfs \
+        emacs keepassxc evolution tlp powertop firefox snapd gh \
+ && rm -rf /var/lib/apt/lists/*
+
+# Lustre client utils + dev/iokit/tests, pulled from the Lustre mirror. The
+# root filesystem is Lustre, so every image built on this base needs them.
 ARG LUSTRE_MIRROR=https://lustre.software/mirror/latest-feature-release/latest-feature-release/ubuntu2404/client
 RUN for pkg in lustre-client-utils lustre-dev lustre-iokit lustre-tests; do \
         deb=$(curl -fsSL "$LUSTRE_MIRROR/Packages" \
@@ -83,83 +90,13 @@ RUN for pkg in lustre-client-utils lustre-dev lustre-iokit lustre-tests; do \
         /tmp/lustre-iokit.deb /tmp/lustre-tests.deb \
  && rm -rf /var/lib/apt/lists/*
 
-# Static system config baked into the image.
-RUN install -d /etc /etc/network /etc/systemd /etc/udev/rules.d /var/log/core \
- && chmod 1777 /var/log/core
-
-COPY lib/fstab                /etc/fstab
-COPY lib/testrunner.wrapper   /sbin/testrunner.wrapper
-COPY lib/testrunner.service   /lib/systemd/system/testrunner.service
-
-RUN chmod 0644 /etc/fstab /lib/systemd/system/testrunner.service \
- && chmod 0755 /sbin/testrunner.wrapper \
- && ln -sf /lib/systemd/system/testrunner.service \
-        /etc/systemd/system/multi-user.target.wants/testrunner.service
-
-# Resolv.conf, hostname, root shell.
+# DNS fallback, a root shell from skel, and the root XDG runtime dir that
+# systemd's user machinery expects.
 RUN printf 'nameserver 8.8.8.8\nnameserver 8.8.4.4\n' > /etc/resolv.conf \
  && chmod 0644 /etc/resolv.conf \
- && echo ktest-kvm > /etc/hostname \
  && install -m 0644 /etc/skel/.bashrc  /root/.bashrc \
  && install -m 0644 /etc/skel/.profile /root/.profile \
- && printf 'export PROMPT_COMMAND="history -a; $PROMPT_COMMAND"\n' \
-        >> /root/.bashrc \
- && ln -sf /ktest-out/.bash_history /root/.bash_history
+ && install -d -m 0700 /run/user/0
 
-# journald: no on-disk storage, no console spam.
-RUN printf '[Journal]\nStorage=none\nForwardToConsole=no\nMaxLevelConsole=emerg\n' \
-        > /etc/systemd/journald.conf
-
-# Networking: DHCP on eth0 via systemd-networkd (ships with the systemd
-# package; Ubuntu has no ifupdown, so the old /etc/network/interfaces file
-# was inert and eth0 never came up). Disable predictable interface names so
-# the NIC is named eth0 - the testrunner waits for an address on eth0
-# specifically, and Lustre/LNet derives its tcp NID from it.
-RUN ln -sf /dev/null /etc/udev/rules.d/80-net-setup-link.rules \
- && install -d /etc/systemd/network \
- && printf '[Match]\nName=eth0\n\n[Network]\nDHCP=yes\n' \
-        > /etc/systemd/network/20-eth0.network \
- && ln -sf /lib/systemd/system/systemd-networkd.service \
-        /etc/systemd/system/multi-user.target.wants/systemd-networkd.service \
- && ln -sf /lib/systemd/system/systemd-networkd.socket \
-        /etc/systemd/system/sockets.target.wants/systemd-networkd.socket
-
-# udev rules we don't want firing in test VMs.
-RUN for pat in '*persistent*' '*lvm*' '*dm*' '*md-raid*' '*btrfs*' '*hdparm*' ; do \
-        rm -f /lib/udev/rules.d/$pat ; \
-    done || true
-
-# Mask systemd units that are noisy/unwanted in a test VM. `systemctl mask`
-# would do this on a running system; in an image we drop the symlinks
-# directly so it works regardless of arch (cross-built images can't run
-# systemctl).
-RUN cd /etc/systemd/system && for u in \
-        dev-hvc0.device \
-        getty.target \
-        getty-static.service \
-        avahi-daemon.service \
-        crond.service \
-        exim4.service \
-        kdump.service \
-        hdparm.service \
-        cdrom.mount \
-        mdadm-raid.service \
-        lvm2-activation-early.service \
-        aoetools.service \
-        sysstat.service \
-        kexec-load.service \
-        kexec.service \
-        systemd-ask-password-console.path \
-        systemd-ask-password-wall.path \
-        systemd-update-utmp-runlevel.service \
-        systemd-update-utmp.service \
-        time-sync.target \
-        multipathd.service ; do \
-        ln -sf /dev/null "$u" ; \
-    done
-
-# /run/user/0 must exist for systemd's xdg machinery.
-RUN install -d -m 0700 /run/user/0
-
-# Clean apt caches one last time to keep the image lean.
+# Keep the image lean.
 RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb

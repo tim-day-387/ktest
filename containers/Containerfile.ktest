@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: GPL-2.0
+
+ARG ROOT_BASE=localhost/ktest-root-base:latest
+FROM ${ROOT_BASE}
+
+# Static system config baked into the image.
+RUN install -d /etc/network /etc/udev/rules.d /var/log/core \
+ && chmod 1777 /var/log/core
+
+COPY lib/fstab                /etc/fstab
+COPY lib/testrunner.wrapper   /sbin/testrunner.wrapper
+COPY lib/testrunner.service   /lib/systemd/system/testrunner.service
+
+RUN chmod 0644 /etc/fstab /lib/systemd/system/testrunner.service \
+ && chmod 0755 /sbin/testrunner.wrapper \
+ && ln -sf /lib/systemd/system/testrunner.service \
+        /etc/systemd/system/multi-user.target.wants/testrunner.service
+
+# Boot to multi-user, not graphical - the base ships a full desktop, but this
+# is a headless test VM.
+RUN ln -sf /lib/systemd/system/multi-user.target \
+        /etc/systemd/system/default.target
+
+# Hostname and a root shell history persisted to the ktest-out 9p mount.
+RUN echo ktest-kvm > /etc/hostname \
+ && printf 'export PROMPT_COMMAND="history -a; $PROMPT_COMMAND"\n' \
+        >> /root/.bashrc \
+ && ln -sf /ktest-out/.bash_history /root/.bash_history
+
+# journald: no on-disk storage, no console spam.
+RUN printf '[Journal]\nStorage=none\nForwardToConsole=no\nMaxLevelConsole=emerg\n' \
+        > /etc/systemd/journald.conf
+
+# Networking: DHCP on eth0 via systemd-networkd. Disable predictable interface
+# names so the NIC is named eth0 - the testrunner waits for an address on eth0
+# specifically, and Lustre/LNet derives its tcp NID from it.
+RUN ln -sf /dev/null /etc/udev/rules.d/80-net-setup-link.rules \
+ && install -d /etc/systemd/network \
+ && printf '[Match]\nName=eth0\n\n[Network]\nDHCP=yes\n' \
+        > /etc/systemd/network/20-eth0.network \
+ && ln -sf /lib/systemd/system/systemd-networkd.service \
+        /etc/systemd/system/multi-user.target.wants/systemd-networkd.service \
+ && ln -sf /lib/systemd/system/systemd-networkd.socket \
+        /etc/systemd/system/sockets.target.wants/systemd-networkd.socket
+
+# udev rules we don't want firing in test VMs.
+RUN for pat in '*persistent*' '*lvm*' '*dm*' '*md-raid*' '*btrfs*' '*hdparm*' ; do \
+        rm -f /lib/udev/rules.d/$pat ; \
+    done || true
+
+# Mask systemd units that are noisy/unwanted in a test VM. `systemctl mask`
+# would do this on a running system; in an image we drop the symlinks
+# directly so it works regardless of arch (cross-built images can't run
+# systemctl). NetworkManager/gdm3 come from the desktop packages in the base
+# and must be masked so networkd owns eth0 and the VM never starts a GUI.
+RUN cd /etc/systemd/system && for u in \
+        dev-hvc0.device \
+        getty.target \
+        getty-static.service \
+        NetworkManager.service \
+        gdm.service \
+        gdm3.service \
+        display-manager.service \
+        avahi-daemon.service \
+        crond.service \
+        exim4.service \
+        kdump.service \
+        hdparm.service \
+        cdrom.mount \
+        mdadm-raid.service \
+        lvm2-activation-early.service \
+        aoetools.service \
+        sysstat.service \
+        kexec-load.service \
+        kexec.service \
+        systemd-ask-password-console.path \
+        systemd-ask-password-wall.path \
+        systemd-update-utmp-runlevel.service \
+        systemd-update-utmp.service \
+        time-sync.target \
+        multipathd.service ; do \
+        ln -sf /dev/null "$u" ; \
+    done

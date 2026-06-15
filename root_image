@@ -21,11 +21,17 @@ checkdep podman
 checkdep fallocate util-linux
 checkdep mkfs.ext4 e2fsprogs
 
-# Container image refs.
+# Container image refs. The base image (Containerfile.root_image) carries the
+# common Lustre-root foundation; the ktest and desktop images are built FROM
+# it (Containerfile.ktest / Containerfile.desktop).
+ROOT_BASE_TAG=${ROOT_BASE_TAG:-localhost/ktest-root-base:latest}
 ROOT_IMAGE_TAG=${ROOT_IMAGE_TAG:-localhost/ktest-root:latest}
+DESKTOP_IMAGE_TAG=${DESKTOP_IMAGE_TAG:-localhost/ktest-desktop:latest}
 ROOT_IMAGE_BASE=${ROOT_IMAGE_BASE:-docker.io/library/ubuntu:24.04}
 
-CONTAINERFILE="$ktest_dir/containers/Containerfile.root_image"
+CONTAINERFILE_BASE="$ktest_dir/containers/Containerfile.root_image"
+CONTAINERFILE_KTEST="$ktest_dir/containers/Containerfile.ktest"
+CONTAINERFILE_DESKTOP="$ktest_dir/containers/Containerfile.desktop"
 
 # ZFS pool and dataset names for Lustre (unchanged from the old script;
 # mount_lustre / umount_lustre still operate on these names).
@@ -43,8 +49,10 @@ usage()
     echo "root_image: create ktest virtual-machine root images"
     echo "Usage: root_image cmd [options]"
     echo "  create		Create a new raw ext4 root image"
-    echo "  create_lustre	Create a new image on Lustre (ZFS backend); prints"
+    echo "  create_lustre	Create a new ktest image on Lustre (ZFS backend); prints"
     echo "  			manual steps for deploying it to a bootable USB"
+    echo "  create_lustre_desktop	Like create_lustre, but a full GNOME desktop"
+    echo "  			image (see containers/Containerfile.desktop, ~/USER.md)"
     echo "  mount_lustre	Mount an existing Lustre image"
     echo "  umount_lustre	Unmount a Lustre image"
     echo
@@ -82,16 +90,45 @@ mkdir -p "$(dirname "$ktest_image")"
 
 # ----- container build helpers -------------------------------------------
 
-# Build the root container image. Idempotent — re-runs use podman's
+# Build the shared base container image. Idempotent — re-runs use podman's
 # layer cache, so a no-op rebuild is fast.
-build_root_image()
+build_base_image()
 {
-    echo "Building root container image ($ROOT_IMAGE_TAG)..."
+    echo "Building base container image ($ROOT_BASE_TAG)..."
     podman build \
 	--build-arg "BASE=$ROOT_IMAGE_BASE" \
-	-f "$CONTAINERFILE" \
-	-t "$ROOT_IMAGE_TAG" \
+	-f "$CONTAINERFILE_BASE" \
+	-t "$ROOT_BASE_TAG" \
 	"$ktest_dir"
+}
+
+# Build a variant image (ktest or desktop) on top of the base. Builds the
+# base first; podman's layer cache makes the base rebuild a no-op once warm.
+build_variant_image()
+{
+    local containerfile=$1 tag=$2
+
+    build_base_image
+
+    echo "Building container image ($tag)..."
+    podman build \
+	--build-arg "ROOT_BASE=$ROOT_BASE_TAG" \
+	-f "$containerfile" \
+	-t "$tag" \
+	"$ktest_dir"
+}
+
+# The ktest test-VM image. Named build_root_image so cmd_create (which builds
+# the ext4 root) keeps using it unchanged.
+build_root_image()
+{
+    build_variant_image "$CONTAINERFILE_KTEST" "$ROOT_IMAGE_TAG"
+}
+
+# The desktop dogfooding image.
+build_desktop_image()
+{
+    build_variant_image "$CONTAINERFILE_DESKTOP" "$DESKTOP_IMAGE_TAG"
 }
 
 # Extract the contents of an OCI image into $dest using podman export.
@@ -238,8 +275,16 @@ cmd_umount_lustre()
 
 # ----- cmd_create_lustre -------------------------------------------------
 
-cmd_create_lustre()
+# Shared implementation for create_lustre and create_lustre_desktop. Builds
+# the requested container image, lays down a fresh Lustre filesystem on a
+# ZFS-backed image file, extracts the image into the client mount, and seeds
+# an optional login user.
+#   $1 - build function to run (build_root_image / build_desktop_image)
+#   $2 - container image tag to extract from
+_create_lustre_image()
 {
+    local build_fn=$1 image_tag=$2
+
     if [[ -e $ktest_image ]]; then
 	echo "$ktest_image already exists"
 	exit 1
@@ -253,7 +298,7 @@ cmd_create_lustre()
 	_export_lustre
     fi
 
-    build_root_image
+    "$build_fn"
 
     trap '_cleanup_lustre_mount' EXIT
 
@@ -296,7 +341,7 @@ cmd_create_lustre()
     lctl set_param osc.*.max_rpcs_in_flight=256
 
     echo "Extracting root image into Lustre client mount..."
-    extract_image_to "$ROOT_IMAGE_TAG" "$LUSTRE_CLIENT_MNT"
+    extract_image_to "$image_tag" "$LUSTRE_CLIENT_MNT"
 
     # Optional interactive login user (was the point of the old create_usb).
     # The username comes from -u so it can't be baked into the Containerfile.
@@ -313,6 +358,16 @@ cmd_create_lustre()
     echo "Created $ktest_image"
     echo "To deploy this image to a bootable USB stick, see" \
 	"$ktest_dir/Documentation/usb-boot.md"
+}
+
+cmd_create_lustre()
+{
+    _create_lustre_image build_root_image "$ROOT_IMAGE_TAG"
+}
+
+cmd_create_lustre_desktop()
+{
+    _create_lustre_image build_desktop_image "$DESKTOP_IMAGE_TAG"
 }
 
 if [[ $(type -t "$CMD") != function ]]; then

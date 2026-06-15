@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-2.0
+
+ARG ROOT_BASE=localhost/ktest-root-base:latest
+FROM ${ROOT_BASE}
+
+# Passwordless sudo for the sudo group
+RUN echo '%sudo ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-nopasswd \
+ && chmod 0440 /etc/sudoers.d/90-nopasswd
+
+# Hostname.
+RUN echo ktest-lustre > /etc/hostname
+
+# The single human user
+ARG DESKTOP_USER=timothy
+ARG DESKTOP_UID=1000
+
+# Ubuntu 24.04's base image ships a default 'ubuntu' user at uid 1000; drop
+# whoever holds the target uid before creating our user.
+RUN if existing=$(getent passwd ${DESKTOP_UID} | cut -d: -f1) && [ -n "$existing" ]; then \
+        userdel -r "$existing" 2>/dev/null || userdel "$existing"; \
+    fi \
+ && useradd -m -u ${DESKTOP_UID} -s /bin/bash \
+        -G sudo,adm,cdrom,dip,plugdev,lpadmin ${DESKTOP_USER} \
+ && passwd -d ${DESKTOP_USER}
+
+# Boot to the graphical target. Done as a direct symlink rather than
+# `systemctl set-default` so it works offline / cross-arch.
+RUN ln -sf /lib/systemd/system/graphical.target \
+        /etc/systemd/system/default.target
