@@ -532,7 +532,8 @@ function build_zfs_full()
     ./autogen.sh
     ./configure \
         --with-linux="$ktest_kernel_source" \
-        --with-linux-obj="$LINUX_OBJ"
+        --with-linux-obj="$LINUX_OBJ" \
+        --enable-linux-experimental
 
     # Build ZFS modules to generate headers and Module.symvers
     make -j$ktest_njobs
@@ -558,6 +559,7 @@ function build_zfs()
     ./configure \
         --with-linux="$ktest_kernel_source" \
         --with-linux-obj="$LINUX_OBJ" \
+        --enable-linux-experimental \
         --enable-linux-builtin
 
     cd "$old"
