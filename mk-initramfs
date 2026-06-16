@@ -3,9 +3,11 @@
 #
 # mk-initramfs - Build a minimal initramfs for ktest VMs
 #
-# Compiles init.c and packages it into a zstd-compressed cpio initramfs.  The same
-# /init binary handles both standard root= boots and lustreroot= boots; the
-# decision is made at boot time from /proc/cmdline.
+# Compiles init.c (and the mount.lustreroot helper) and packages them into a
+# zstd-compressed cpio initramfs.  The same /init binary handles both standard
+# root= boots and lustreroot= boots; the decision is made at boot time from
+# /proc/cmdline.  On lustreroot= boots /init imports the ZFS pool and then
+# invokes /sbin/mount.lustreroot to mount the local servers and the client.
 #
 # Usage: mk-initramfs [--no-firmware] [--base <initramfs>] [--modules <path>]
 #                     [output-path]
@@ -57,9 +59,16 @@ if [[ -n "$MODULES_DIR" ]]; then
     cp -a "$MODULES_DIR/." "$INITRAMFS/lib/modules/"
 fi
 
-# Compile init statically so it runs without shared libs
+# Compile init and the mount.lustreroot helper statically so they run without
+# shared libs.  Both share init-common.c (kmsg logging + module loading).
 echo "Compiling init..."
-cc -Wall -static -o "$INITRAMFS/init" "$SCRIPT_DIR/init.c"
+cc -Wall -static -o "$INITRAMFS/init" \
+    "$SCRIPT_DIR/init.c" "$SCRIPT_DIR/init-common.c"
+
+echo "Compiling mount.lustreroot..."
+mkdir -p "$INITRAMFS/sbin"
+cc -Wall -g -static -o "$INITRAMFS/sbin/mount.lustreroot" \
+    "$SCRIPT_DIR/mount.lustreroot.c" "$SCRIPT_DIR/init-common.c"
 
 # Static busybox provides /init's rescue shell when boot setup fails.
 # busybox-static (Debian/Ubuntu) installs to /bin/busybox.
