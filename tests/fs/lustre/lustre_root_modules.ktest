@@ -35,7 +35,7 @@ require-kernel-config PINCTRL_METEORLAKE=y
 config-mem 10G
 config-timeout 60
 
-require-kernel-config DRM=m
+require-kernel-config DRM=y
 require-kernel-config DRM_TTM=m
 require-kernel-config DRM_NOUVEAU=m
 

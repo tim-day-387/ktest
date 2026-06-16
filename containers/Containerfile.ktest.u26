@@ -24,7 +24,7 @@ RUN echo 'man-db man-db/auto-update boolean false' | debconf-set-selections && \
 # provides the EFI stubs (linuxx64.efi.stub / linuxaa64.efi.stub) that the
 # UKI builder objcopy's the kernel and initramfs into.
 RUN apt-get update && apt-get install -y \
-    build-essential bc bison flex libelf-dev \
+    build-essential bc bison flex libelf-dev libdw-dev \
     libssl-dev qemu-system-x86 qemu-system-arm qemu-utils \
     ovmf qemu-efi-aarch64 systemd-boot-efi systemd-ukify \
     minicom socat vde2 git ssh rsync brotli \
@@ -92,9 +92,10 @@ ENV CCACHE_TEMPDIR=/tmp
 ENV CCACHE_MAXSIZE=50G
 ENV CCACHE_UMASK=000
 
-# Get Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+# Rust kernel tools
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --component rust-src
 ENV PATH="/home/ktest/.cargo/bin:${PATH}"
+RUN cargo install bindgen-cli --locked
 
 # Generate SSH key for ktest user (required for build-test-kernel ssh)
 RUN mkdir -p /home/ktest/.ssh && \

@@ -650,7 +650,15 @@ kernel_opt()
 
     case $cmd in
 	set)
-	    "$config_tool" --file "$kconfig" --set-val "$opt" "$val"
+	    # String symbols must be written quoted (--set-str); --set-val
+	    # writes the value bare, which is invalid for a string config and
+	    # gets silently reverted to its default by olddefconfig. Tristate
+	    # (y/m/n) and int/hex values use --set-val.
+	    if [[ $val =~ ^(y|m|n)$ || $val =~ ^-?[0-9]+$ || $val =~ ^0x[0-9a-fA-F]+$ ]]; then
+		"$config_tool" --file "$kconfig" --set-val "$opt" "$val"
+	    else
+		"$config_tool" --file "$kconfig" --set-str "$opt" "$val"
+	    fi
 	    ;;
 	check)
 	    local c=$("$config_tool" --file "$kconfig" -s "$opt")

@@ -129,6 +129,16 @@ require-kernel-config RTC_HCTOSYS
 require-kernel-config SERIAL_8250	# XXX can probably drop
 require-kernel-config SERIAL_8250_CONSOLE
 
+# DRM panic handler (Rust QR-code panic screen):
+require-kernel-config GENDWARFKSYMS=y
+require-kernel-config RUST=y
+require-kernel-config AGP=y
+require-kernel-config DRM=y
+require-kernel-config DRM_PANIC=y
+require-kernel-config DRM_PANIC_SCREEN_QR_CODE=y
+require-kernel-config DRM_PANIC_SCREEN_QR_CODE_URL="https://kdj0c.github.io/panic_report/"
+require-kernel-config DRM_PANIC_SCREEN="qr_code"
+
 # Block devices:
 require-kernel-config SCSI
 require-kernel-config SCSI_LOWLEVEL	# what's this for?
