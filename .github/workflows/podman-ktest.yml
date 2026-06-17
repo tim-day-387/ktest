@@ -55,7 +55,6 @@ jobs:
     - name: Build root image for ktest
       run: |
         df -h
-        sudo ./root_image init
         sudo ./root_image create
 
     - name: Enable KVM
