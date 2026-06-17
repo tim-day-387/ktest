@@ -130,6 +130,8 @@ require-kernel-config SERIAL_8250	# XXX can probably drop
 require-kernel-config SERIAL_8250_CONSOLE
 
 # DRM panic handler (Rust QR-code panic screen):
+require-kernel-config MODULES=y
+require-kernel-config MODVERSIONS=y
 require-kernel-config GENDWARFKSYMS=y
 require-kernel-config RUST=y
 require-kernel-config AGP=y
