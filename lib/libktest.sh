@@ -729,7 +729,7 @@ build_kernel()
 
     configure_kernel
 
-    do_make -k
+    do_make -k KCFLAGS="-Werror=thread-safety"
 
     local BOOT=$ktest_kernel_build/arch/$KERNEL_ARCH/boot
 

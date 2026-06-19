@@ -141,6 +141,9 @@ require-kernel-config DRM_PANIC_SCREEN_QR_CODE=y
 require-kernel-config DRM_PANIC_SCREEN_QR_CODE_URL="https://kdj0c.github.io/panic_report/"
 require-kernel-config DRM_PANIC_SCREEN="qr_code"
 
+# Context analysis
+require-kernel-config WARN_CONTEXT_ANALYSIS=y
+
 # Block devices:
 require-kernel-config SCSI
 require-kernel-config SCSI_LOWLEVEL	# what's this for?
