@@ -1,10 +1,14 @@
-From 5c3acb9147c2ccbec965e962c796485316aca7ab Mon Sep 17 00:00:00 2001
+From 640de5e2655ca68d7611838c6366c0be9b276b45 Mon Sep 17 00:00:00 2001
 From: Timothy Day <timday@thelustrecollective.com>
 Date: Sun, 3 May 2026 20:01:54 -0400
-Subject: [PATCH] LU-0000 osd-wbcfs: fix dentry pinning
+Subject: [PATCH] LU-20251 osd-wbcfs: fix dentry pinning
 
-Fix!
+Swapping kill_litter_super() to kill_anon_super() removes the
+implicit d_genocide() that cleans up stale dentry during umount.
+This causes warnings and hangs during umount. Refactor osd-wbcfs
+to handle these changes better.
 
+Fixes: 20527615330e ("LU-19837 build: Compatibility updates for kernel v6.19")
 Test-Parameters: trivial
 Signed-off-by: Timothy Day <timday@thelustrecollective.com>
 Change-Id: Ic70a2959a0ad20c9b3ef1a2fbcbf6a66b87ec2be
@@ -12,16 +16,17 @@ Change-Id: Ic70a2959a0ad20c9b3ef1a2fbcbf6a66b87ec2be
  config/lustre-core.m4            | 52 ++++++++++++++++++++++++++++++++
  include/lustre_compat/linux/fs.h | 28 +++++++++++++++++
  lustre/osd-wbcfs/osd_dirent.c    | 20 ++++++------
+ lustre/osd-wbcfs/osd_object.c    | 22 +++++++++++---
  lustre/osd-wbcfs/wbcfs.c         | 19 +++++++++---
- 4 files changed, 104 insertions(+), 15 deletions(-)
+ 5 files changed, 121 insertions(+), 20 deletions(-)
 
 diff --git a/config/lustre-core.m4 b/config/lustre-core.m4
-index 369a7cb81af5..0c2e612aaddd 100644
+index 9ebaa5e4272a..cb3fb03a5b49 100644
 --- a/config/lustre-core.m4
 +++ b/config/lustre-core.m4
-@@ -3608,6 +3608,54 @@ AC_DEFUN([LC_HAVE_ILOOKUP5_NOWAIT_ISNEW],[
+@@ -3631,6 +3631,54 @@ AC_DEFUN([LC_HAVE_FILEMAP_ALLOC_FOLIO_NUMA],[
  	])
- ]) # LC_HAVE_ILOOKUP5_NOWAIT_ISNEW
+ ]) # LC_HAVE_FILEMAP_ALLOC_FOLIO_NUMA
  
 +#
 +## LC_HAVE_KILL_LITTER_SUPER
@@ -74,19 +79,19 @@ index 369a7cb81af5..0c2e612aaddd 100644
  #
  # LC_HAVE_POSIX_ACL_TO_XATTR_ALLOC_BUFFER
  #
-@@ -3843,6 +3891,8 @@ AC_DEFUN([LC_PROG_LINUX_SRC], [
- 	LC_SRC_HAVE_INODE_STATE_READ
+@@ -3867,6 +3915,8 @@ AC_DEFUN([LC_PROG_LINUX_SRC], [
  	LC_SRC_HAVE_VFS_CREATE_DELEGATE
  	LC_SRC_HAVE_ILOOKUP5_NOWAIT_ISNEW
+ 	LC_SRC_HAVE_FILEMAP_ALLOC_FOLIO_NUMA
 +	LC_SRC_HAVE_KILL_LITTER_SUPER
 +	LC_SRC_HAVE_D_MAKE_PERSISTENT
  
  	# 7.0
  	LC_SRC_HAVE_POSIX_ACL_TO_XATTR_ALLOC_BUFFER
-@@ -4063,6 +4113,8 @@ AC_DEFUN([LC_PROG_LINUX_RESULTS], [
- 	LC_HAVE_INODE_STATE_READ
+@@ -4088,6 +4138,8 @@ AC_DEFUN([LC_PROG_LINUX_RESULTS], [
  	LC_HAVE_VFS_CREATE_DELEGATE
  	LC_HAVE_ILOOKUP5_NOWAIT_ISNEW
+ 	LC_HAVE_FILEMAP_ALLOC_FOLIO_NUMA
 +	LC_HAVE_KILL_LITTER_SUPER
 +	LC_HAVE_D_MAKE_PERSISTENT
  
@@ -173,6 +178,41 @@ index 724732a7d1ab..6ff9d092b966 100644
  		break;
  	default:
  		LBUG();
+diff --git a/lustre/osd-wbcfs/osd_object.c b/lustre/osd-wbcfs/osd_object.c
+index 3f6dac8e5d60..41a757da1099 100644
+--- a/lustre/osd-wbcfs/osd_object.c
++++ b/lustre/osd-wbcfs/osd_object.c
+@@ -86,13 +86,25 @@ static int osd_object_init(const struct lu_env *env, struct lu_object *l,
+ 			 (void *)fid);
+ 	obj->oo_dt.do_body_ops = &osd_wbcfs_body_ops;
+ 	if (inode) {
+-		obj->oo_inode = inode;
+-		__osd_object_init(obj);
+-
+ 		/*
+-		 * TODO: check LMA EA and convert LMAI flags to lustre
+-		 * LMA flags and cache it in object.
++		 * The inode may still be in the icache after its last link
++		 * was dropped because a persistent dentry pins it. Treat such
++		 * a stale inode as non-existent: returning it as a live object
++		 * would later trip the nlink==0 && !oo_destroyed assertion in
++		 * osd_object_release().
+ 		 */
++		if (inode->i_nlink == 0) {
++			iput(inode);
++			inode = NULL;
++		} else {
++			obj->oo_inode = inode;
++			__osd_object_init(obj);
++
++			/*
++			 * TODO: check LMA EA and convert LMAI flags to lustre
++			 * LMA flags and cache it in object.
++			 */
++		}
+ 	}
+ 
+ 	CDEBUG(D_INODE, "%s: object init for fid="DFID" inode@%pK nlink=%d\n",
 diff --git a/lustre/osd-wbcfs/wbcfs.c b/lustre/osd-wbcfs/wbcfs.c
 index 9667ca7e4147..0b8e2f4326c5 100644
 --- a/lustre/osd-wbcfs/wbcfs.c
