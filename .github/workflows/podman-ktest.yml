@@ -29,7 +29,8 @@ jobs:
     - name: Clone Linux kernel
       run: |
         mkdir -p ~/git
-        git clone --depth 1 --branch v6.14 \
+        KVER=$(awk '/^Linux-Maximum:/ {print $2}' META)
+        git clone --depth 1 --branch "v${KVER}" \
           https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
           ~/git/linux
 

@@ -32,9 +32,10 @@ su - ktest -c '
 # Create git directory
 mkdir -p /home/ktest/git
 
-# Clone Linux kernel v7.0
-echo "Cloning Linux kernel v7.0..."
-git clone --depth 1 --branch v7.0 https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git /home/ktest/git/linux
+# Clone Linux kernel (version from top-level META)
+KVER=$(awk "/^Linux-Maximum:/ {print \$2}" /home/ktest/ktest/META)
+echo "Cloning Linux kernel v${KVER}..."
+git clone --depth 1 --branch "v${KVER}" https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git /home/ktest/git/linux
 
 # Clone Lustre latest master
 echo "Cloning Lustre master branch..."
