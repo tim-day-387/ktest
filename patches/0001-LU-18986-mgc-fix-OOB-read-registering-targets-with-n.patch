@@ -1,0 +1,71 @@
+From 2333cb06d339b1198da913acd873ac88f39c49e7 Mon Sep 17 00:00:00 2001
+From: Timothy Day <timday@thelustrecollective.com>
+Date: Thu, 18 Jun 2026 22:48:53 -0400
+Subject: [PATCH] LU-18986 mgc: fix OOB read registering targets with numeric
+ NIDs
+
+mgc_target_register() has a KASAN slab-out-of-bounds read
+when registering a target whose NIDs are legacy NIDs while
+the MGS connection has OBD_CONNECT_MGS_NIDLIST:
+
+  BUG: KASAN: slab-out-of-bounds in mgc_target_register+0x8a1/0x1750 [mgc]
+  Read of size 64 at addr ffff88803eb811c0 by task lustre-ktest/1751
+
+server_lsi2mti() only allocates and fills the string NID list
+mti_nidlist[] when the target has large NIDs (LDD_F_LARGE_NID); for
+legacy NIDs it stores them in mti_nids[].
+
+However, the new registration protocol path was entered whenever the
+export had OBD_CONNECT_MGS_NIDLIST set, regardless of whether the mti
+actually carried a string NID list. It then read NIDLIST_SIZE() bytes
+from mti->mti_nidlist[], running off the end of the allocation.
+
+The MGS server side already supports receiving the NIDs in the mti
+body with an empty nidlist header.
+
+Gate the nidlist transfer on large_nids. When the MGS supports the
+nidlist protocol but the target has numeric NIDs, send an empty
+nidlist header and leave the NIDs in the mti body; the MGS reads
+them from mti_nids[] via its compatibility path.
+
+Fixes: e9c290e7dd2e ("LU-18986 mgc: client part of new registration protocol")
+Signed-off-by: Timothy Day <timday@thelustrecollective.com>
+Change-Id: Ic77d7dc3da8160d22d07657d1c7733330541cbe3
+---
+ lustre/mgc/mgc_request_server.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/lustre/mgc/mgc_request_server.c b/lustre/mgc/mgc_request_server.c
+index 1f01e28c232e..22abec0a263d 100644
+--- a/lustre/mgc/mgc_request_server.c
++++ b/lustre/mgc/mgc_request_server.c
+@@ -202,7 +202,7 @@ static int mgc_target_register(struct obd_export *exp,
+ 	if (!req)
+ 		RETURN(-ENOMEM);
+ 
+-	if (large_nids || nidlist) {
++	if (large_nids) {
+ 		bufsize = MGS_MAXREQSIZE - sizeof(struct ptlrpc_body) -
+ 			  sizeof(*mti) - sizeof(*mtn);
+ 		avail = bufsize / MTN_NIDSTR_SIZE;
+@@ -210,7 +210,7 @@ static int mgc_target_register(struct obd_export *exp,
+ 		nidlist_size = 0;
+ 	}
+ 
+-	if (nidlist) {
++	if (nidlist && large_nids) {
+ 		if (mti->mti_nid_count <= avail) { /* inline buffer */
+ 			req_capsule_set_size(&req->rq_pill,
+ 					     &RMF_MGS_TARGET_NIDLIST,
+@@ -270,7 +270,7 @@ static int mgc_target_register(struct obd_export *exp,
+ 		}
+ 		desc->bd_frag_ops->add_iov_frag(desc, mti->mti_nidlist,
+ 						nidlist_size);
+-	} else if (nidlist) {
++	} else if (nidlist && large_nids) {
+ 		mtn->mtn_nids = mti->mti_nid_count;
+ 		memcpy(mtn->mtn_inline_list, mti->mti_nidlist, nidlist_size);
+ 	} else if (large_nids) {
+-- 
+2.39.5
+
