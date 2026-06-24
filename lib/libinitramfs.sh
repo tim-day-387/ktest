@@ -83,6 +83,11 @@ function mk_initramfs() (
 	    echo "Copying firmware from $src..."
 	    cp -a "$src/i915" "$INITRAMFS/lib/firmware/" 2>/dev/null || true
 	    cp -a "$src/nvidia" "$INITRAMFS/lib/firmware/" 2>/dev/null || true
+	    # MediaTek Wi-Fi (mt7921e/RZ608) loads firmware by its mediatek/ path,
+	    # so preserve the subdir rather than flattening it.
+	    mkdir -p "$INITRAMFS/lib/firmware/mediatek"
+	    find "$src/mediatek" -maxdepth 1 -name 'WIFI_*MT796*.bin' \
+		| xargs -r cp -t "$INITRAMFS/lib/firmware/mediatek/" 2>/dev/null || true
 	    find "$src" \( -name 'iwlwifi-*.ucode' -o -name 'iwlwifi-*.pnvm' \) | xargs -r cp -t "$INITRAMFS/lib/firmware/" 2>/dev/null || true
 	done
 	cp "$FIRMWARE_DIR/regulatory.db" "$FIRMWARE_DIR/regulatory.db.p7s" "$INITRAMFS/lib/firmware/" 2>/dev/null || \

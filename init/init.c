@@ -63,8 +63,9 @@ static int load_modules(void)
 		"lustre",
 		"osd_zfs",
 		/* Hardware drivers */
-		"iwlwifi",
+		"iwlwifi",	/* laptop Wi-Fi (Intel) */
 		"iwlmvm",
+		"mt7921e",	/* desktop Wi-Fi (MediaTek MT7921K/RZ608) */
 		"i915",
 		"nouveau",
 		NULL,
