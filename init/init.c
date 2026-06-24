@@ -89,39 +89,6 @@ static int load_modules(void)
 }
 
 /*
- * load_input_modules - load HID/keyboard modules needed by the rescue shell
- *
- * In configs where USB/HID/keyboard drivers are built as modules (e.g.,
- * debian-modules.config) the kernel cannot receive keystrokes until they're
- * loaded — without this, the rescue shell shows a prompt but stdin is dead.
- * Missing modules are silently ignored (built-in is fine, not-bundled is fine).
- */
-static void load_input_modules(void)
-{
-	static const char * const modules[] = {
-		/* PS/2 keyboard (built-in laptop keyboards) */
-		"i8042",
-		"atkbd",
-		/* USB host controllers — usbhid pulls usbcore via modules.dep */
-		"xhci-pci",
-		"ehci-pci",
-		"ohci-pci",
-		/* HID layer */
-		"hid-generic",
-		"usbhid",
-		NULL,
-	};
-	struct utsname uts;
-	int i;
-
-	if (uname(&uts) < 0)
-		return;
-
-	for (i = 0; modules[i]; i++)
-		load_one_module(modules[i], uts.release);
-}
-
-/*
  * find_cmdline_arg - locate a named argument in a kernel cmdline string
  *
  * Searches @cmdline for a token starting with @name= and returns a pointer
@@ -971,46 +938,9 @@ static void copy_initramfs_to_newroot(void)
 }
 
 /*
- * rescue_shell - exec busybox sh as PID 1 instead of letting init exit
- *
- * When init exits the kernel panics ("attempted to kill init"), so on any
- * unrecoverable boot failure we exec a static busybox shell on /dev/console
- * to give a chance to inspect state.  Returns only if exec fails, in which
- * case the caller falls through to sleep+exit and the kernel panics as before.
- */
-static void rescue_shell(const char *reason)
-{
-	int fd;
-
-	kmsg_log(KMSG_ERR, "dropping to rescue shell: %s\n", reason);
-
-	/*
-	 * In configs with HID/keyboard as modules, stdin is dead until these
-	 * are loaded.  Brief sleep lets USB enumerate before exec'ing the shell.
-	 */
-	load_input_modules();
-	usleep(500000);
-
-	setsid();
-	fd = open("/dev/console", O_RDWR);
-	if (fd >= 0) {
-		/* Force-steal: /dev/console may still be CT of the prior session */
-		ioctl(fd, TIOCSCTTY, 1);
-		dup2(fd, 0);
-		dup2(fd, 1);
-		dup2(fd, 2);
-		if (fd > 2)
-			close(fd);
-	}
-
-	execl("/bin/busybox", "busybox", "sh", NULL);
-	kmsg_log(KMSG_ERR, "exec /bin/busybox: %s\n", strerror(errno));
-}
-
-/*
  * switch_root_and_exec - move /newroot on top of /, chroot in, exec init
  *
- * Returns only on failure (caller is expected to sleep and exit).
+ * Returns only on failure (caller is expected to exit, panicking PID 1).
  */
 static void switch_root_and_exec(void)
 {
@@ -1230,8 +1160,6 @@ int main(void)
 		kmsg_log(KMSG_ERR, "cannot read %s\n", CMDLINE_PATH);
 		if (f)
 			fclose(f);
-		rescue_shell("cannot read /proc/cmdline");
-		sleep(30);
 		return 1;
 	}
 	fclose(f);
@@ -1244,7 +1172,6 @@ int main(void)
 		standard_main(cmdline);
 
 	/* Boot path failed (success paths exec into the new root) */
-	rescue_shell("boot failed");
-	sleep(30);
+	kmsg_log(KMSG_ERR, "boot failed\n");
 	return 1;
 }
