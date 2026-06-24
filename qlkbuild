@@ -29,6 +29,7 @@ export FSTYPE="${BACKING_STORAGE:-wbcfs}"
 ktest_kernel_source="$(realpath -e ~/git/linux/ 2>/dev/null || true)"
 ktest_lustre_source="$ktest_kernel_source/../lustre-release/"
 ktest_zfs_source="$ktest_kernel_source/../zfs/"
+ktest_nvidia_source="$ktest_kernel_source/../open-gpu-kernel-modules/"
 ktest_boot_test="$ktest_dir/tests/fs/lustre/boot.ktest"
 ktest_ccplugin="$ktest_dir/cplugin/build/xunused"
 ktest_compiler="${CC:-clang-22}"
@@ -36,6 +37,9 @@ ktest_skip_kernel_config=false
 ktest_lustre_allow_warnings=0
 ktest_lustre_build_enable=1
 ktest_kernel_build_enable=1
+# Set to 1 by a test's config-nvidia-modules (emitted from its deps phase and
+# eval'd via parse_test_deps); gates build_nvidia/install of the NVIDIA modules.
+ktest_nvidia=0
 ktest_out="/tmp/ktest-out/"
 ktest_lustre_clean_git=0
 ktest_lustre_purge=0
@@ -127,10 +131,14 @@ ktest_kernel_source=$(readlink -e "$ktest_kernel_source")
 ktest_kernel_build="$ktest_out/kernel_build.$ktest_arch"
 ktest_lustre_build="$ktest_out/lustre-release"
 ktest_zfs_build="$ktest_out/zfs"
+ktest_nvidia_build="$ktest_out/open-gpu-kernel-modules"
 mkdir -p "$ktest_kernel_build"
 mkdir -p "$ktest_lustre_build"
 if [[ -d "$ktest_zfs_source" ]]; then
     mkdir -p "$ktest_zfs_build"
+fi
+if [[ -d "$ktest_nvidia_source" ]]; then
+    mkdir -p "$ktest_nvidia_build"
 fi
 
 if [[ -n $CROSS_COMPILE ]]; then
@@ -543,6 +551,63 @@ function build_zfs_full()
     cd "$old"
 }
 
+function validate_nvidia_build() {
+    check_file "$ktest_nvidia_build/kernel-open/nvidia.ko"
+    check_file "$ktest_nvidia_build/kernel-open/nvidia-drm.ko"
+    check_file "$ktest_nvidia_build/kernel-open/nvidia-modeset.ko"
+}
+
+# Build the NVIDIA open-gpu-kernel-modules out-of-tree against the kernel under
+# test.  Mirrors build_zfs_full: rsync the sibling checkout into the build dir,
+# then build with the same compiler/arch the kernel used.  SYSSRC/SYSOUT point
+# the NVIDIA Kbuild at our out-of-tree kernel build (source + O= obj dir), the
+# same split as ZFS's --with-linux/--with-linux-obj.  Output .ko land in
+# kernel-open/; install_fs_modules copies them into the initramfs module tree.
+function build_nvidia()
+{
+    local old="$PWD"
+
+    if [[ ! -d "$ktest_nvidia_source" ]]; then
+	echo "NVIDIA source not found at $ktest_nvidia_source"
+	echo "Clone github.com/NVIDIA/open-gpu-kernel-modules there (pinned to"
+	echo "the release matching the host driver) to build the NVIDIA modules."
+	exit 1
+    fi
+
+    # Create our own build dir rather than relying on the startup mkdir, which is
+    # gated on the source dir and skipped on build paths (e.g. package_native)
+    # that don't otherwise touch it.
+    mkdir -p "$ktest_nvidia_build"
+    cd "$ktest_nvidia_build"
+    rsync --archive -r "$ktest_nvidia_source" "$ktest_nvidia_build"
+
+    export ARCH="$(uname -m)"
+    export LLVM="$(map_clang_version)"
+
+    make -j$ktest_njobs modules			\
+	SYSSRC="$ktest_kernel_source"		\
+	SYSOUT="$ktest_kernel_build"		\
+	CC="$ktest_compiler"
+
+    validate_nvidia_build
+
+    cd "$old"
+}
+
+# Build the NVIDIA modules and install them into the kernel module tree when the
+# test opted in via config-nvidia-modules (ktest_nvidia=1, threaded through the
+# deps phase).  Shared by every UKI-producing path (cmd_build_native /
+# cmd_package_native) so the driver gets bundled consistently; cmd_build wires
+# the same steps inline because it already runs install_fs_modules for lustre/zfs.
+function maybe_build_nvidia()
+{
+    [[ "$ktest_nvidia" == "1" ]] || return 0
+
+    run_quiet_with_status "NVIDIA BUILD [$(basename "$ktest_test")]" "DONE" build_nvidia
+    purge_build_junk "$ktest_nvidia_build"
+    run_quiet_with_status "INSTALL FS MODULES [$(basename "$ktest_test")]" "DONE" install_fs_modules
+}
+
 function build_zfs()
 {
     local old="$PWD"
@@ -690,6 +755,13 @@ function install_fs_modules()
 	    \( -name '*.ko' ! -name 'conftest.ko' \) -exec cp -t "$moddir" {} +
     fi
 
+    # NVIDIA modules build under kernel-open/ (conftest.ko there are feature
+    # probes, same as lustre/zfs - skip them).
+    if [[ "$ktest_nvidia" == "1" && -d "$ktest_nvidia_build" ]]; then
+	find "$ktest_nvidia_build/kernel-open" \
+	    \( -name '*.ko' ! -name 'conftest.ko' \) -exec cp -t "$moddir" {} +
+    fi
+
     "$DEPMOD" -b "$ktest_kernel_binary" "$kernel_version"
 }
 
@@ -716,10 +788,15 @@ function cmd_build()
     fi
     run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
 
-    # Drop build intermediates from the lustre/zfs trees so the initramfs
+    if [[ "$ktest_nvidia" == "1" ]]; then
+	run_quiet_with_status "NVIDIA BUILD [$(basename "$ktest_test")]" "DONE" build_nvidia
+    fi
+
+    # Drop build intermediates from the lustre/zfs/nvidia trees so the initramfs
     # only carries the modules, libraries, and binaries the VM actually uses.
     purge_build_junk "$ktest_lustre_build"
     [[ "$FSTYPE" == "zfs" ]] && purge_build_junk "$ktest_zfs_build"
+    [[ "$ktest_nvidia" == "1" ]] && purge_build_junk "$ktest_nvidia_build"
 
     run_quiet_with_status "INSTALL FS MODULES [$(basename "$ktest_test")]" "DONE" install_fs_modules
     run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
@@ -836,7 +913,9 @@ function cmd_build_native()
 	#validate_native_zfs_build
     #fi
 
-    # Lustre/ZFS are in-kernel here, so the initramfs needs only modules.
+    # Lustre/ZFS are in-kernel here; the only out-of-tree modules are NVIDIA's,
+    # built and installed into the module tree before the initramfs is packed.
+    maybe_build_nvidia
     run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
     run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
 
@@ -858,6 +937,7 @@ function cmd_package_native()
 
     prepare_linux_source
     run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    maybe_build_nvidia
     run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
     run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
 

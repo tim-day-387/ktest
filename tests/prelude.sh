@@ -46,6 +46,7 @@ if [[ ! -v ktest_cpus ]]; then
     ktest_networking=
     ktest_root_image=
     ktest_uki_firmware=0
+    ktest_nvidia=0
 
     BUILD_ON_HOST=""
 fi
@@ -273,6 +274,15 @@ config-uki-firmware()
     ktest_uki_firmware=1
 }
 
+# Build the NVIDIA open-gpu-kernel-modules out-of-tree against the kernel under
+# test and bundle the resulting modules into the initramfs.  See build_nvidia in
+# qlkbuild.  The driver owns the GPU instead of nouveau, so a test opting into
+# this should disable DRM_NOUVEAU.
+config-nvidia-modules()
+{
+    ktest_nvidia=1
+}
+
 allow_taint()
 {
     ktest_allow_taint=true
@@ -456,6 +466,7 @@ main()
 	    echo "ktest_lustre_allow_warnings=$ktest_lustre_allow_warnings"
 	    echo "ktest_lustre_root=$ktest_lustre_root"
 	    echo "ktest_uki_firmware=$ktest_uki_firmware"
+	    echo "ktest_nvidia=$ktest_nvidia"
 	    if [[ -n $ktest_networking ]]; then
 		echo "ktest_networking=$ktest_networking"
 	    fi

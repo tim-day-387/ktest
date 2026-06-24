@@ -40,7 +40,17 @@ require-kernel-append panic_on_warn=1
 
 require-kernel-config DRM=y
 require-kernel-config DRM_TTM=m
+# Keep nouveau built as a module so it's bundled in the initramfs as a fallback
+# stack, but blacklist it on the kernel cmdline below so it doesn't bind the GPU
+# before the NVIDIA driver does. It can be modprobe'd by hand if NVIDIA fails.
 require-kernel-config DRM_NOUVEAU=m
+
+# Build NVIDIA open-gpu-kernel-modules against this kernel and bundle them into
+# the initramfs so the GPU comes up under the proprietary stack at boot. The
+# proprietary driver owns the GPU; nouveau is blacklisted so it can't bind first.
+config-nvidia-modules
+require-kernel-append nvidia-drm.modeset=1
+require-kernel-append modprobe.blacklist=nouveau
 
 config-uki-firmware
 

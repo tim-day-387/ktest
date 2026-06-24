@@ -106,11 +106,12 @@ RUN git clone --depth=1 \
     https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git \
     /home/ktest/linux-firmware
 
-# Supplement the upstream git clone with AD-series nvidia chips (ad103/104/106/107)
+# Supplement the upstream git clone with AD-series nvidia chips (ad102/103/104/106/107)
 # that are absent from the upstream git but present in Ubuntu's linux-firmware deb
 # (sourced from NVIDIA's proprietary driver package) as .zst files. Decompress
 # them so the firmware loader in the test VM can find them without zstd support.
-RUN for chip in ad103 ad104 ad106 ad107; do \
+# ad102 is the RTX 4090 (AD102) GSP firmware - required for the desktop GPU.
+RUN for chip in ad102 ad103 ad104 ad106 ad107; do \
         src="/lib/firmware/nvidia/$chip"; \
         dst="/home/ktest/linux-firmware/nvidia/$chip"; \
         [ -d "$src" ] || continue; \
@@ -120,6 +121,29 @@ RUN for chip in ad103 ad104 ad106 ad107; do \
             zstd -d "$f" -o "$dst/gsp/$(basename "${f%.zst}")"; \
         done; \
     done
+
+# Clone NVIDIA's open-gpu-kernel-modules as a sibling of the kernel tree so
+# qlkbuild's build_nvidia finds it at $ktest_kernel_source/../open-gpu-kernel-modules
+# (config-nvidia-modules tests only).  Pinned to the release matching the host
+# driver / the decompressed AD-series firmware above; bump this tag in lockstep
+# when the host driver is upgraded.
+RUN git clone --depth=1 --branch 610.43.02 \
+    https://github.com/NVIDIA/open-gpu-kernel-modules.git \
+    /home/ktest/git/open-gpu-kernel-modules
+
+# Stage the GSP firmware matching the driver above.  The container's
+# linux-firmware deb only carries the nouveau-style per-chip GSP blobs
+# (nvidia/adXXX/gsp/); the open/proprietary NVIDIA driver instead loads
+# nvidia/<driver-version>/gsp_*.bin, which ships only in NVIDIA's .run
+# installer.  Extract it (no install/build) and drop firmware/*.bin into the
+# baked linux-firmware tree so mk-initramfs bundles it.  Keep this version in
+# lockstep with the open-gpu-kernel-modules tag above.
+RUN cd /tmp && \
+    wget -q https://us.download.nvidia.com/XFree86/Linux-x86_64/610.43.02/NVIDIA-Linux-x86_64-610.43.02.run && \
+    sh NVIDIA-Linux-x86_64-610.43.02.run --extract-only --target nvidia-run && \
+    mkdir -p /home/ktest/linux-firmware/nvidia/610.43.02 && \
+    cp nvidia-run/firmware/*.bin /home/ktest/linux-firmware/nvidia/610.43.02/ && \
+    rm -rf nvidia-run NVIDIA-Linux-x86_64-610.43.02.run
 
 # Copy the ktest repository into the container (kept late so repo changes
 # don't invalidate the layers above)
