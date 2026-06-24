@@ -1065,10 +1065,6 @@ static int lustre_main(char *cmdline)
 
 	kmsg_log(KMSG_INFO, "starting lustre root filesystem setup\n");
 
-	/* Load ZFS and Lustre kernel modules before anything else */
-	if (load_modules() < 0)
-		kmsg_log(KMSG_INFO, "module loading failed, continuing anyway\n");
-
 	/*
 	 * Disable LNet Dynamic Peer Discovery before any Lustre mounts.
 	 * When discovery is enabled, the "network=" mount option is rejected.
@@ -1165,6 +1161,14 @@ int main(void)
 	fclose(f);
 
 	kmsg_log(KMSG_INFO, "cmdline: %s", cmdline);
+
+	/*
+	 * Load kernel modules before dispatching to either boot path: the
+	 * standard root may live on a device whose driver (e.g. nvme) is built
+	 * as a module, and the lustre path needs the ZFS/Lustre stack.
+	 */
+	if (load_modules() < 0)
+		kmsg_log(KMSG_INFO, "module loading failed, continuing anyway\n");
 
 	if (find_cmdline_arg(cmdline, "lustreroot"))
 		lustre_main(cmdline);
