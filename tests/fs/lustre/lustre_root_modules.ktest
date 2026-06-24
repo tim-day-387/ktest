@@ -16,7 +16,7 @@ require-lustre-base-kernel-config
 require-kernel-config IPV6=y
 require-kernel-config VLAN_8021Q=y
 require-kernel-config LNET=y
-require-kernel-config LUSTRE=y
+require-kernel-config LUSTRE_FS=y
 require-kernel-config ZFS=y
 require-kernel-config MODULES=y
 require-kernel-config MODULE_UNLOAD
@@ -34,6 +34,9 @@ require-kernel-config PINCTRL_METEORLAKE=y
 
 config-mem 10G
 config-timeout 60
+
+# Promote any WARN() to a panic so the test fails loudly
+require-kernel-append panic_on_warn=1
 
 require-kernel-config DRM=y
 require-kernel-config DRM_TTM=m

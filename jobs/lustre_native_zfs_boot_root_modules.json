@@ -3,21 +3,21 @@
     {
       "name": "lustre_patch",
       "platform": "native_1",
-      "build": "tests/fs/lustre/lustre_root_modules.ktest",
+      "build": "tests/fs/lustre/lockdep-lustre_root_modules.ktest",
       "backing_storage": "zfs"
     },
     {
       "name": "lustre_native",
       "platform": "native_2",
-      "build": "tests/fs/lustre/lustre_root_modules.ktest",
+      "build": "tests/fs/lustre/lockdep-lustre_root_modules.ktest",
       "backing_storage": "zfs",
       "depends_on": ["lustre_patch"]
     },
     {
       "name": "lustre_native_boot",
       "platform": "native_2",
-      "build": "tests/fs/lustre/lustre_root_modules.ktest",
-      "run": "tests/fs/lustre/lustre_root_modules.ktest",
+      "build": "tests/fs/lustre/lockdep-lustre_root_modules.ktest",
+      "run": "tests/fs/lustre/lockdep-lustre_root_modules.ktest",
       "backing_storage": "zfs",
       "depends_on": ["lustre_native"]
     }

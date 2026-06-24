@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Run a simple boot test (client and server). The backing OSD is
+# specified with FSTYPE. This variant builds LNET, Lustre, and ZFS
+# as loadable modules (=m) rather than built-in.
+#
+
+. "$(dirname $(readlink -e ${BASH_SOURCE[0]}))/../../lockdep-base.sh"
