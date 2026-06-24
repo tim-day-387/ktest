@@ -88,6 +88,16 @@ function mk_initramfs() (
 	cp "$FIRMWARE_DIR/regulatory.db" "$FIRMWARE_DIR/regulatory.db.p7s" "$INITRAMFS/lib/firmware/" 2>/dev/null || \
 	    cp /lib/firmware/regulatory.db /lib/firmware/regulatory.db.p7s "$INITRAMFS/lib/firmware/" 2>/dev/null || \
 	    echo "Warning: regulatory.db not found, WiFi regulatory domain will be unavailable"
+
+	# Drop the uncompressed firmware blob whenever a .zst/.xz counterpart is
+	# also present.  Distro firmware trees ship some blobs (notably the multi-
+	# tens-of-MB NVIDIA GSP images) as both raw and compressed; the loader needs
+	# only one, and the compressed form is smaller.  ktest kernels build with
+	# CONFIG_FW_LOADER_COMPRESS_{XZ,ZSTD}=y, so the compressed blob loads fine.
+	find "$INITRAMFS/lib/firmware" -type f \( -name '*.zst' -o -name '*.xz' \) \
+	    -print0 | while IFS= read -r -d '' comp; do
+		rm -f "${comp%.*}"
+	done
     fi
 
     # Pack into a compressed cpio archive.  zstd -T0 -10 ratios near gzip -9 but

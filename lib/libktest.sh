@@ -749,7 +749,13 @@ build_kernel()
     touch "$ktest_kernel_build/modules.order"
     touch "$ktest_kernel_build/modules.builtin"
 
-    do_make modules_install
+    # INSTALL_MOD_STRIP=1 runs `strip --strip-debug` on each installed module.
+    # With CONFIG_DEBUG_INFO=y the DWARF sections dominate module size (e.g.
+    # i915.ko 131M -> 11M, nouveau.ko 186M -> ~15M), bloating the initramfs and
+    # the UKI to the point GRUB runs out of memory loading it.  Stripping only
+    # removes debug info; the symbol table and .BTF are preserved, so module
+    # loading and BTF-based tooling still work.
+    do_make INSTALL_MOD_STRIP=1 modules_install
 
     local kernel_version=$(cat "$ktest_kernel_build/include/config/kernel.release")
     $DEPMOD -b "$ktest_kernel_binary/" -v $kernel_version
