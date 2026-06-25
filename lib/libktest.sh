@@ -572,8 +572,6 @@ start_vm()
     # per-test logs, and kills the VM as soon as it reports TEST
     # SUCCESS/FAILED - so a wedged VM can't hang the run forever.  The
     # supervisor's exit status reflects the test result.
-    make -C "$ktest_dir/lib" supervisor > /dev/null
-
     local test_basename=$(basename -s .ktest "$ktest_test")
     local test_logdir="$ktest_out/out"
     local t

@@ -33,9 +33,9 @@ endif
 quiet_cmd = printf '  %-8s %s\n' '[$(1)]' '$(2)'
 
 
-.PHONY: all build release check test clippy fmt clean help gen-tests cplugin init-bins
+.PHONY: all build release check test clippy fmt clean help gen-tests cplugin init-bins supervisor
 
-all: release cplugin init-bins
+all: release cplugin init-bins supervisor
 
 gen-tests:
 	$(Q)$(MAKE) --no-print-directory -C $(SANITY_DIR) Q=$(Q)
@@ -45,6 +45,10 @@ cplugin:
 
 init-bins:
 	$(Q)$(MAKE) --no-print-directory -C $(INIT_DIR) Q=$(Q)
+
+supervisor:
+	@$(call quiet_cmd,CC,lib/supervisor)
+	$(Q)$(MAKE) --no-print-directory -C lib supervisor $(if $(V),,>/dev/null)
 
 build: gen-tests
 	$(Q)$(call cargo_run,build)
@@ -72,6 +76,7 @@ clean:
 	$(Q)$(MAKE) --no-print-directory -C $(SANITY_DIR) clean Q=$(Q)
 	$(Q)$(MAKE) --no-print-directory -C $(CPLUGIN_DIR) clean Q=$(Q)
 	$(Q)$(MAKE) --no-print-directory -C $(INIT_DIR) clean Q=$(Q)
+	$(Q)rm -f lib/supervisor
 
 help:
 	@echo 'Targets:'
@@ -79,6 +84,7 @@ help:
 	@echo '  release   - optimized build'
 	@echo '  cplugin   - build the xunused C++ tool'
 	@echo '  init-bins - build the initramfs init + mount.lustreroot'
+	@echo '  supervisor - build the VM supervisor (lib/supervisor)'
 	@echo '  gen-tests - generate Lustre sanity test runners'
 	@echo '  check     - cargo check'
 	@echo '  test      - run tests'
