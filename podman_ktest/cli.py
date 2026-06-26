@@ -67,7 +67,12 @@ def main():
     build_parser.add_argument(
         "--local-only",
         action="store_true",
-        help="Only build ktest-runner container",
+        help="Only build ktest-runner container (this is the default)",
+    )
+    build_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Build all container images (default: only ktest-runner)",
     )
 
     # Stop command - stop running containers

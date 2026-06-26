@@ -39,16 +39,16 @@ def _build_image(dockerfile, tag, name, ktest_dir, podman_socket=None, buildargs
 def cmd_build(args, ktest_dir, podman_socket=None):
     """Build container images in parallel."""
     # Determine which images to build
-    if args.ci_only:
+    if args.all:
+        images_to_build = IMAGES
+    elif args.ci_only:
         # Only build ktest-runner and ci-lustre
         images_to_build = [
             img for img in IMAGES if img["name"] in ("ktest-runner", "ci-lustre")
         ]
-    elif args.local_only:
-        # Only build ktest-runner
-        images_to_build = [img for img in IMAGES if img["name"] == "ktest-runner"]
     else:
-        images_to_build = IMAGES
+        # Default (also --local-only): only build ktest-runner
+        images_to_build = [img for img in IMAGES if img["name"] == "ktest-runner"]
 
     # Fetch git version info from the host repo for the ci-lustre build arg
     git_tag, git_commit = get_git_version_info(ktest_dir)
