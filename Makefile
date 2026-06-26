@@ -11,6 +11,7 @@ BIN    := lustre-ktest
 FILTER := tools/cargo-quiet
 SANITY_DIR  := tests/fs/lustre/sanity
 CPLUGIN_DIR := cplugin
+INIT_DIR    := init
 JOBS := $(shell echo $$(( $$(nproc) / 2 > 1 ? $$(nproc) / 2 : 1 )))
 MAKEFLAGS += -j$(JOBS)
 
@@ -32,15 +33,18 @@ endif
 quiet_cmd = printf '  %-8s %s\n' '[$(1)]' '$(2)'
 
 
-.PHONY: all build release check test clippy fmt clean help gen-tests cplugin
+.PHONY: all build release check test clippy fmt clean help gen-tests cplugin init-bins
 
-all: release cplugin
+all: release cplugin init-bins
 
 gen-tests:
 	$(Q)$(MAKE) --no-print-directory -C $(SANITY_DIR) Q=$(Q)
 
 cplugin:
 	$(Q)$(MAKE) --no-print-directory -C $(CPLUGIN_DIR) Q=$(Q) V=$(V) JOBS=$(JOBS)
+
+init-bins:
+	$(Q)$(MAKE) --no-print-directory -C $(INIT_DIR) Q=$(Q)
 
 build: gen-tests
 	$(Q)$(call cargo_run,build)
@@ -67,12 +71,14 @@ clean:
 	$(Q)$(CARGO) clean $(if $(V),,--quiet)
 	$(Q)$(MAKE) --no-print-directory -C $(SANITY_DIR) clean Q=$(Q)
 	$(Q)$(MAKE) --no-print-directory -C $(CPLUGIN_DIR) clean Q=$(Q)
+	$(Q)$(MAKE) --no-print-directory -C $(INIT_DIR) clean Q=$(Q)
 
 help:
 	@echo 'Targets:'
 	@echo '  build     - debug build'
 	@echo '  release   - optimized build'
 	@echo '  cplugin   - build the xunused C++ tool'
+	@echo '  init-bins - build the initramfs init + mount.lustreroot'
 	@echo '  gen-tests - generate Lustre sanity test runners'
 	@echo '  check     - cargo check'
 	@echo '  test      - run tests'

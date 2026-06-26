@@ -59,27 +59,12 @@ if [[ -n "$MODULES_DIR" ]]; then
     cp -a "$MODULES_DIR/." "$INITRAMFS/lib/modules/"
 fi
 
-# Compile init and the mount.lustreroot helper statically so they run without
-# shared libs.  Both share init-common.c (kmsg logging + module loading).
-echo "Compiling init..."
-cc -Wall -static -o "$INITRAMFS/init" \
-    "$SCRIPT_DIR/init.c" "$SCRIPT_DIR/init-common.c"
+echo "Installing init..."
+cp "$SCRIPT_DIR/init/init" "$INITRAMFS/init"
 
-echo "Compiling mount.lustreroot..."
+echo "Installing mount.lustreroot..."
 mkdir -p "$INITRAMFS/sbin"
-cc -Wall -g -static -o "$INITRAMFS/sbin/mount.lustreroot" \
-    "$SCRIPT_DIR/mount.lustreroot.c" "$SCRIPT_DIR/init-common.c"
-
-# Static busybox provides /init's rescue shell when boot setup fails.
-# busybox-static (Debian/Ubuntu) installs to /bin/busybox.
-mkdir -p "$INITRAMFS/bin"
-if [[ -x /bin/busybox ]]; then
-    cp /bin/busybox "$INITRAMFS/bin/busybox"
-elif [[ -x /usr/bin/busybox ]]; then
-    cp /usr/bin/busybox "$INITRAMFS/bin/busybox"
-else
-    echo "Warning: busybox-static not found; rescue shell will be unavailable on init failure"
-fi
+cp "$SCRIPT_DIR/init/mount.lustreroot" "$INITRAMFS/sbin/mount.lustreroot"
 
 # Populate firmware. Copy /lib/firmware first as a base so distro-packaged
 # firmware fills any gaps (e.g. GPU firmware not yet in linux-firmware upstream),

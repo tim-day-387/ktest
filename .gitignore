@@ -11,6 +11,9 @@ lib/supervisor
 
 ltp-fsx/ltp-fsx
 
+init/init
+init/mount.lustreroot
+
 tests/fs/bcachefs/bcachefs-tools
 tests/fs/bcachefs/linuxquota
 tests/fs/xfstests
