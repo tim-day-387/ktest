@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0
+
+# Base rocky9 Lustre build image
+FROM lustre-rocky9:latest
+
+# Install ZFS build dependencies
+RUN dnf install -y epel-release
+RUN dnf install -y zlib-devel libudev-devel libattr-devel \
+	python3-setuptools python3-cffi libffi-devel ncompress
+
+# Build and install ZFS for Lustre server builds. Lustre's configure
+# autodetects ZFS only in versioned paths (/usr/src/zfs-${VERSION}).
+RUN git clone --depth 1 --branch zfs-2.4.0 \
+	https://github.com/openzfs/zfs.git /usr/src/zfs-2.4.0
+WORKDIR /usr/src/zfs-2.4.0
+RUN sh autogen.sh && \
+	./configure && \
+	make -j"$(nproc)" && \
+	make install
+
+# Copy coverity tool script
+COPY tools/coverity-run /usr/local/bin/coverity-run
+RUN chmod +x /usr/local/bin/coverity-run

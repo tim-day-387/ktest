@@ -18,10 +18,21 @@ RUN dnf install -y gcc autoconf libtool which make patch diffutils file \
 	binutils-devel python3 python3-devel elfutils-devel e2fsprogs-devel \
 	libselinux-devel libaio-devel dnf-plugins-core bc bison flex \
 	libyaml-devel libnl3-devel libmount-devel libtirpc-devel \
-	libblkid-devel openssl-devel libuuid-devel git kernel-devel \
-	keyutils-libs keyutils-libs-devel rpm-build kernel \
+	libblkid-devel openssl-devel libuuid-devel git \
+	keyutils-libs keyutils-libs-devel rpm-build \
 	kernel-abi-stablelists kernel-rpm-macros kmod pkgconfig
-RUN dnf install -y --enablerepo=*debug* kernel-debuginfo
+
+# Lustre's ldiskfs ext4 patch series supports RHEL kernels up to
+# el9_7, so pin the kernel packages to Rocky 9.7 from the vault
+ARG EL9_KERNEL=5.14.0-611.55.1.el9_7
+RUN printf '[vault-baseos]\nname=Rocky 9.7 Vault - BaseOS\nbaseurl=https://dl.rockylinux.org/vault/rocky/9.7/BaseOS/x86_64/os/\nenabled=0\ngpgcheck=0\n\n[vault-appstream]\nname=Rocky 9.7 Vault - AppStream\nbaseurl=https://dl.rockylinux.org/vault/rocky/9.7/AppStream/x86_64/os/\nenabled=0\ngpgcheck=0\n\n[vault-baseos-debug]\nname=Rocky 9.7 Vault - BaseOS debug\nbaseurl=https://dl.rockylinux.org/vault/rocky/9.7/BaseOS/x86_64/debug/tree/\nenabled=0\ngpgcheck=0\n' \
+	> /etc/yum.repos.d/vault-9.7.repo
+RUN dnf install -y --enablerepo=vault-* kernel-${EL9_KERNEL} \
+	kernel-devel-${EL9_KERNEL} kernel-debuginfo-${EL9_KERNEL}
+
+# Keep later dnf updates from pulling a newer, unsupported kernel
+RUN printf 'excludepkgs=kernel,kernel-core,kernel-modules*,kernel-devel,kernel-debuginfo*\n' \
+	>> /etc/dnf/dnf.conf
 
 # DOCA-OFED
 RUN printf '[mlnx_ofed]\nname=MLNX_OFED Repository - el9\nbaseurl=https://linux.mellanox.com/public/repo/mlnx_ofed/latest/rhel9.4/x86_64/\nenabled=1\ngpgcheck=0\n' \

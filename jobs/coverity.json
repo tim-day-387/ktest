@@ -1,0 +1,5 @@
+{
+  "name": "coverity",
+  "platform": "rocky9_coverity",
+  "package": "scan"
+}

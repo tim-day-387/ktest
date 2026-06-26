@@ -58,6 +58,7 @@ class ContainerJob:
     log_path: Optional[str] = None
     get_ktest_out_archive: bool = False
     mount_ktest_out: bool = False
+    mount_ktest_lib: bool = False
     package_dir: Optional[str] = None
     is_vm_run: bool = False
     no_cleanup: bool = False
@@ -124,7 +125,9 @@ class ContainerJob:
 
         # VM runs need the host root images as a backing file for qemu.
         # Read-only is fine: qemu's snapshot=on provides per-run COW.
-        if self.is_vm_run:
+        # Some platforms (e.g. coverity) need host tool tarballs from
+        # /var/lib/ktest and request the mount via mount_ktest_lib.
+        if self.is_vm_run or self.mount_ktest_lib:
             mounts.append(
                 {
                     "type": "bind",

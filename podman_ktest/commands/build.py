@@ -68,8 +68,22 @@ def cmd_build(args, ktest_dir, podman_socket=None):
             podman_socket,
         )
 
-    # Now build dependent images in parallel
-    if dependent_images:
+    # Now build dependent images in parallel, in waves: images that
+    # build FROM another locally-built image ("requires") wait until
+    # their base image has been built
+    built = {img["name"] for img in base_images}
+    remaining = list(dependent_images)
+    while remaining:
+        wave = [
+            img
+            for img in remaining
+            if img.get("requires") is None or img["requires"] in built
+        ]
+        if not wave:
+            unmet = ", ".join(img["name"] for img in remaining)
+            raise RuntimeError(f"Unsatisfiable image dependencies: {unmet}")
+        remaining = [img for img in remaining if img not in wave]
+
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {
                 executor.submit(
@@ -81,7 +95,7 @@ def cmd_build(args, ktest_dir, podman_socket=None):
                     podman_socket,
                     ci_buildargs if img["name"] == "ci-lustre" else None,
                 ): img["name"]
-                for img in dependent_images
+                for img in wave
             }
 
             for future in as_completed(futures):
@@ -91,3 +105,5 @@ def cmd_build(args, ktest_dir, podman_socket=None):
                 except Exception as e:
                     print(f"Error building {img_name}: {e}")
                     raise
+
+        built.update(img["name"] for img in wave)

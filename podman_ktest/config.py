@@ -39,6 +39,12 @@ IMAGES = [
         "name": "lustre-rocky9",
     },
     {
+        "dockerfile": "containers/Containerfile.lustre.rocky9.coverity",
+        "tag": "lustre-rocky9-coverity:latest",
+        "name": "lustre-rocky9-coverity",
+        "requires": "lustre-rocky9",
+    },
+    {
         "dockerfile": "containers/Containerfile.lustre.rocky10",
         "tag": "lustre-rocky10:latest",
         "name": "lustre-rocky10",
@@ -143,6 +149,13 @@ make --quiet -j$(nproc) rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
         "distro_platform": True,
+    },
+    "rocky9_coverity": {
+        "image": "lustre-rocky9-coverity:latest",
+        "package_script": "/usr/local/bin/coverity-run",
+        "working_dir": "/home/ktest/git/lustre-release/",
+        "distro_platform": True,
+        "mount_ktest_lib": True,
     },
     "rocky10": {
         "image": "lustre-rocky10:latest",

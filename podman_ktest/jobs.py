@@ -356,6 +356,7 @@ def run_package(
             log_path=log_path,
             get_ktest_out_archive=False,
             mount_ktest_out=True,
+            mount_ktest_lib=build_config.get("mount_ktest_lib", False),
             package_dir=package_dir,
             no_cleanup=no_cleanup,
         )

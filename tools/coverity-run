@@ -1,0 +1,59 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+#
+# Run a Coverity scan of Lustre within the rocky9 container.
+#
+# ZFS is pre-installed in the container image and auto-detected by
+# Lustre's configure. The Coverity tool tarball should be provided at
+# /var/lib/ktest/coverity-tool.tar.gz or via the COV_PATH environment
+# variable. The resulting tarball is written to /tmp/ktest-output/ for
+# upload to https://scan.coverity.com/projects/lustre.
+#
+
+set -e
+
+COV_TOOL_PATH="${COV_PATH:-/var/lib/ktest/coverity-tool.tar.gz}"
+
+if [[ ! -f "$COV_TOOL_PATH" ]]; then
+	echo "Error: Coverity tool tarball not found at $COV_TOOL_PATH"
+	echo "Place the tarball at /var/lib/ktest/coverity-tool.tar.gz"
+	echo "or set COV_PATH to the tarball path"
+	exit 1
+fi
+
+# Extract coverity tool
+echo "Extracting Coverity tool from $COV_TOOL_PATH..."
+cd /tmp
+tar xf "$COV_TOOL_PATH"
+
+COV_BUILD="$(find /tmp -name cov-build -type f | head -1)"
+if [[ -z "$COV_BUILD" ]]; then
+	echo "Error: cov-build not found after extracting $COV_TOOL_PATH"
+	exit 1
+fi
+
+echo "Using: $COV_BUILD"
+
+# Build Lustre and run Coverity scan
+echo "Configuring Lustre..."
+cd /home/ktest/git/lustre-release
+./autogen.sh
+./configure --enable-server
+
+# Run sequentially (cov-build limitation)
+echo "Running Coverity scan..."
+"$COV_BUILD" --dir /tmp/cov-int make -j$(nproc)
+
+# Report
+echo "KERNEL MODULES BUILT:"
+find . -name "*.ko"
+echo "LUSTRE VERSION:"
+cat LUSTRE-VERSION-FILE
+
+# Package results
+mkdir -p /tmp/ktest-output
+OUTPUT_FILE="/tmp/ktest-output/lustre-coverity-$(date +"%m-%d-%Y").tgz"
+tar czvf "$OUTPUT_FILE" -C /tmp cov-int
+
+echo "Coverity scan results: $OUTPUT_FILE"
+echo "Upload to https://scan.coverity.com/projects/lustre"
