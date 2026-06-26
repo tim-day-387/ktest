@@ -671,7 +671,7 @@ function cmd_ccplugin()
 
 # Install the freshly-built lustre/zfs kernel modules into the kernel's
 # /lib/modules/<release> tree so they get bundled into the initramfs (via
-# mk-initramfs --modules) and resolve under modprobe(8) in the VM.  Runs after
+# mk_initramfs --modules) and resolve under modprobe(8) in the VM.  Runs after
 # the kernel's own modules_install, so depmod here regenerates modules.dep with
 # the kernel + lustre + zfs modules together.
 function install_fs_modules()

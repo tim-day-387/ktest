@@ -1,0 +1,100 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+#
+# libinitramfs.sh - Build a minimal initramfs for ktest VMs
+#
+# Compiles init.c (and the mount.lustreroot helper) and packages them into a
+# zstd-compressed cpio initramfs.  The same /init binary handles both standard
+# root= boots and lustreroot= boots; the decision is made at boot time from
+# /proc/cmdline.  On lustreroot= boots /init imports the ZFS pool and then
+# invokes /sbin/mount.lustreroot to mount the local servers and the client.
+
+# mk_initramfs [--no-firmware] [--base <initramfs>] [--modules <path>]
+#              [output-path]
+#   --base       path to an existing initramfs to use as a base (optional)
+#   --modules    path to a modules directory (e.g. $ktest_kernel_binary/lib/modules) to include (optional)
+#   output-path  path for the resulting initramfs image (default: initramfs)
+#
+# Runs in a subshell so set -euo pipefail and the cleanup trap stay scoped to
+# this build and don't leak into the caller.
+
+function mk_initramfs() (
+    set -euo pipefail
+
+    local FIRMWARE=true
+    local BASE_INITRAMFS=""
+    local MODULES_DIR=""
+    while [[ $# -gt 0 ]]; do
+	case $1 in
+	    --no-firmware)	FIRMWARE=false; shift ;;
+	    --base)		BASE_INITRAMFS="$(readlink -f "$2")"; shift 2 ;;
+	    --modules)		MODULES_DIR="$(readlink -f "$2")"; shift 2 ;;
+	    *)			break ;;
+	esac
+    done
+
+    local OUTPUT="${1:-initramfs}"
+    OUTPUT="$(readlink -f "$OUTPUT")"
+
+    local FIRMWARE_DIR="$ktest_dir/../linux-firmware"
+    # Fall back to the distro firmware tree (e.g. the linux-firmware apt package
+    # inside the ktest container) if no upstream linux-firmware git checkout is
+    # present alongside ktest.
+    [[ -d $FIRMWARE_DIR ]] || FIRMWARE_DIR=/lib/firmware
+
+    local TMPDIR
+    TMPDIR="$(mktemp -d)"
+    trap 'rm -rf "$TMPDIR"' EXIT
+
+    local INITRAMFS="$TMPDIR/initramfs"
+    mkdir -p "$INITRAMFS"/{dev,proc,sys,tmp,mnt,newroot}
+
+    # Unpack base initramfs if provided
+    if [[ -n "$BASE_INITRAMFS" ]]; then
+	echo "Unpacking base initramfs: $BASE_INITRAMFS"
+	zstd -dcf "$BASE_INITRAMFS" | (cd "$INITRAMFS" && cpio -H newc -i --quiet --make-directories)
+    fi
+
+    # Copy kernel modules if provided
+    if [[ -n "$MODULES_DIR" ]]; then
+	echo "Copying modules from $MODULES_DIR..."
+	mkdir -p "$INITRAMFS/lib/modules"
+	cp -a "$MODULES_DIR/." "$INITRAMFS/lib/modules/"
+    fi
+
+    echo "Installing init..."
+    cp "$ktest_dir/init/init" "$INITRAMFS/init"
+
+    echo "Installing mount.lustreroot..."
+    mkdir -p "$INITRAMFS/sbin"
+    cp "$ktest_dir/init/mount.lustreroot" "$INITRAMFS/sbin/mount.lustreroot"
+
+    # Populate firmware. Copy /lib/firmware first as a base so distro-packaged
+    # firmware fills any gaps (e.g. GPU firmware not yet in linux-firmware upstream),
+    # then overlay the linux-firmware checkout on top so it takes precedence for
+    # chips it does have.
+    if $FIRMWARE; then
+	mkdir -p "$INITRAMFS/lib/firmware"
+	local fw_srcs=(/lib/firmware)
+	[[ "$FIRMWARE_DIR" != /lib/firmware ]] && fw_srcs+=("$FIRMWARE_DIR")
+	local src
+	for src in "${fw_srcs[@]}"; do
+	    [[ -d "$src" ]] || continue
+	    echo "Copying firmware from $src..."
+	    cp -a "$src/i915" "$INITRAMFS/lib/firmware/" 2>/dev/null || true
+	    cp -a "$src/nvidia" "$INITRAMFS/lib/firmware/" 2>/dev/null || true
+	    find "$src" \( -name 'iwlwifi-*.ucode' -o -name 'iwlwifi-*.pnvm' \) | xargs -r cp -t "$INITRAMFS/lib/firmware/" 2>/dev/null || true
+	done
+	cp "$FIRMWARE_DIR/regulatory.db" "$FIRMWARE_DIR/regulatory.db.p7s" "$INITRAMFS/lib/firmware/" 2>/dev/null || \
+	    cp /lib/firmware/regulatory.db /lib/firmware/regulatory.db.p7s "$INITRAMFS/lib/firmware/" 2>/dev/null || \
+	    echo "Warning: regulatory.db not found, WiFi regulatory domain will be unavailable"
+    fi
+
+    # Pack into a compressed cpio archive.  zstd -T0 -10 ratios near gzip -9 but
+    # at an order of magnitude higher throughput; kernel decompresses with
+    # CONFIG_RD_ZSTD (already on in all ktest configs).
+    echo "Packing initramfs..."
+    (cd "$INITRAMFS" && find . | cpio -H newc -o --quiet) | zstd -T0 -10 -q -f -o "$OUTPUT"
+
+    echo "Initramfs written to: $OUTPUT"
+)

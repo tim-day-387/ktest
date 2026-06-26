@@ -101,12 +101,7 @@ RUN cargo install bindgen-cli --locked
 RUN mkdir -p /home/ktest/.ssh && \
     ssh-keygen -t rsa -b 4096 -f /home/ktest/.ssh/id_rsa -N ""
 
-# Clone upstream linux-firmware so mk-initramfs picks it up via
-# FIRMWARE_DIR ($ktest_dir/../linux-firmware).  The upstream repo has the
-# flat layout mk-initramfs assumes (iwlwifi-*.ucode at the root, i915/ as a
-# subdir, regulatory.db at the root); Ubuntu's linux-firmware deb instead
-# stashes things under intel/iwlwifi/ and compresses with zstd, so the
-# existing find logic in mk-initramfs misses everything.
+# Clone upstream linux-firmware so mk_initramfs picks it up
 RUN git clone --depth=1 \
     https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git \
     /home/ktest/linux-firmware

@@ -2,6 +2,7 @@
 
 . "$ktest_dir/lib/util.sh"
 . "$ktest_dir/lib/parse-test.sh"
+. "$ktest_dir/lib/libinitramfs.sh"
 
 if [[ $(id -u) = 0 ]] ; then
     echo $0 should not be run as root
@@ -765,7 +766,7 @@ build_initramfs()
     # element and silently steal the output-path slot from mk-initramfs.
     initramfs_args+=(${ktest_initramfs_extra_args[@]+"${ktest_initramfs_extra_args[@]}"})
 
-    "$ktest_dir/mk-initramfs" "${initramfs_args[@]}" \
+    mk_initramfs "${initramfs_args[@]}" \
 	"$ktest_kernel_binary/initramfs"
 }
 
