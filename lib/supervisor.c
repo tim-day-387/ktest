@@ -372,9 +372,17 @@ again:
 			break;
 		}
 
+		/*
+		 * On a kernel crash, fail fast instead of waiting out the
+		 * watchdog. Match real oops/BUG signatures only -- a bare
+		 * "BUG" substring also matches Lustre's "DEBUG MARKER:"
+		 * console spam, which would kill every Lustre test 5s after
+		 * its last marker line.
+		 */
 		if (exit_on_failure &&
 		    (strstr(line, "Kernel panic") ||
-		     strstr(line, "BUG")))
+		     strstr(line, "kernel BUG at") ||
+		     strstr(line, "BUG:")))
 			alarm(5);
 
 		free(output);
