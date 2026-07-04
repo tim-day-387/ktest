@@ -339,10 +339,10 @@ start_vm()
     local qemu_cmd=("$QEMU_BIN" -nodefaults -nographic)
     case $ktest_arch in
 	x86_64)
-	    qemu_cmd+=(-cpu host -machine type=q35,accel=kvm,nvdimm=on)
+	    qemu_cmd+=(-cpu host -machine type=q35,accel=kvm,nvdimm=on,mem-merge=on)
 	    ;;
 	aarch64)
-	    qemu_cmd+=(-cpu host -machine type=virt,gic-version=max,accel=kvm)
+	    qemu_cmd+=(-cpu host -machine type=virt,gic-version=max,accel=kvm,mem-merge=on)
 	    ;;
     esac
 
