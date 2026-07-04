@@ -1,0 +1,163 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_patch",
+      "platform": "native_1",
+      "build": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs"
+    },
+    {
+      "name": "lustre_native",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_patch"
+      ]
+    },
+    {
+      "name": "racer-0",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-1",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-2",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-3",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-4",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-5",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-6",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-7",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-8",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-9",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-10",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-11",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-12",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-13",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-14",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    },
+    {
+      "name": "racer-15",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/racer.ktest",
+      "backing_storage": "zfs",
+      "depends_on": [
+        "lustre_native"
+      ]
+    }
+  ]
+}
