@@ -37,19 +37,46 @@ if ! which lcov > /dev/null; then
     exit 0
 fi
 
-# When the kernel is compiled with clang, use llvm-cov gcov to avoid
-# gcov format version mismatches between clang output and the system gcov.
+# When the kernel is compiled with clang, read the gcov data with llvm-cov.
+# Prefer the llvm-cov matching $CC (e.g. clang-22 -> llvm-cov-22) so the reader
+# understands the exact .gcno/.gcda format clang wrote; fall back to the newest
+# llvm-cov available (with a warning) rather than aborting the whole run.
 gcov_tool_opt=()
-for v in "" -20 -19 -18 -17; do
-    if command -v "llvm-cov$v" > /dev/null 2>&1; then
-        wrapper=$(mktemp /tmp/gcov-wrapper.XXXXXX)
-        printf '#!/bin/sh\nexec llvm-cov%s gcov "$@"\n' "$v" > "$wrapper"
-        chmod +x "$wrapper"
-        trap "rm -f $wrapper" EXIT
-        gcov_tool_opt=(--gcov-tool "$wrapper")
-        break
+if [[ "${CC:-}" =~ clang-([0-9]+) ]]; then
+    ver="${BASH_REMATCH[1]}"
+    llvm_cov=""
+    if command -v "llvm-cov-$ver" > /dev/null 2>&1; then
+        llvm_cov="llvm-cov-$ver"
+    elif command -v llvm-cov > /dev/null 2>&1 &&
+         llvm-cov --version 2>/dev/null | grep -qE "version $ver\."; then
+        llvm_cov="llvm-cov"
+    else
+        for c in llvm-cov-{40..14} llvm-cov; do
+            command -v "$c" > /dev/null 2>&1 && { llvm_cov="$c"; break; }
+        done
+        [ -n "$llvm_cov" ] && echo "coveragetool: warning: llvm-cov-$ver" \
+            "(matching $CC) not found; using $llvm_cov - coverage may be" \
+            "approximate" >&2
     fi
-done
+    if [ -z "$llvm_cov" ]; then
+        echo "coveragetool: no llvm-cov found to read $CC gcov data" >&2
+        exit 1
+    fi
+    wrapper=$(mktemp /tmp/gcov-wrapper.XXXXXX)
+    printf '#!/bin/sh\nexec %s gcov "$@"\n' "$llvm_cov" > "$wrapper"
+    chmod +x "$wrapper"
+    trap "rm -f $wrapper" EXIT
+    gcov_tool_opt=(--gcov-tool "$wrapper")
+fi
+
+# lcov 2.x promotes several llvm-cov quirks to fatal errors. llvm-cov gcov does
+# not emit gcc-9 function begin/end line records, so lcov *derives* them and
+# then its own consistency check rejects a function whose entry line reads as
+# not-hit while a body line is hit ("function 'foo' is not hit but line N is").
+# These are metadata artifacts, not wrong counts - tell lcov to warn and keep
+# going instead of aborting the report.
+lcov_ignore=(--ignore-errors gcov,unsupported,inconsistent,corrupt,range,mismatch)
+genhtml_ignore=(--ignore-errors inconsistent,corrupt,range,unsupported)
 
 lcov_out="$ktest_out/lcov"
 
@@ -66,7 +93,7 @@ for dir in $ktest_out/gcov.*; do
     out=$lcov_out/lcov.${n}.info
     tracefiles+=" --add-tracefile $out"
 
-    lcov --capture --quiet "${gcov_tool_opt[@]}" \
+    lcov --capture --quiet "${gcov_tool_opt[@]}" "${lcov_ignore[@]}" \
         --directory "$dir" --output-file "$out"
 
     n=$((n+1))
@@ -74,8 +101,8 @@ done
 
 [ -n "$tracefiles" ] || exit 0
 
-lcov --quiet --output-file "$info" $tracefiles
-genhtml --output-directory "$html" "$info"
+lcov --quiet "${lcov_ignore[@]}" --output-file "$info" $tracefiles
+genhtml "${genhtml_ignore[@]}" --output-directory "$html" "$info"
 
 echo
 echo "LCOV report: file://$html/index.html"
