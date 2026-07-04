@@ -1,0 +1,568 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0
+#
+# Download defect data from Coverity Scan (https://scan.coverity.com).
+#
+# Coverity Scan has no official, documented API for reading defects: the
+# project build token only authorizes build submission. This script drives
+# the same JSON endpoints the "View Defects" web UI uses, which authenticate
+# with your browser *login session cookie* rather than the project token.
+#
+# To get the cookie (Firefox):
+#   1. Log into scan.coverity.com and open the "View Defects" page for the
+#      project. You land on a scanN.scan.coverity.com host.
+#   2. DevTools (F12) -> Network -> filter XHR -> reload the page.
+#   3. Click the "reports/table.json" request. From it copy: the host
+#      (e.g. scan4.scan.coverity.com), the "projectId" and "viewId" query
+#      params, and the "COVJSESSIONID-build" cookie value.
+#
+# List all defects to JSON + CSV:
+#   COV_SCAN_COOKIE='COVJSESSIONID-build=<sessionid>' \
+#     ./tools/coverity-defects --host scan4.scan.coverity.com \
+#       --project-id 17272 --view-id 59232 \
+#       --json defects.json --csv defects.csv
+#
+# Grab the "code view" (event flow + annotated source) for one defect:
+#   COV_SCAN_COOKIE='COVJSESSIONID-build=<sessionid>' \
+#     ./tools/coverity-defects --view-id 59232 --cid 411234 --source \
+#       --text -
+#
+# Archive a whole view -- view.json plus one <cid>.json per defect:
+#   COV_SCAN_COOKIE='COVJSESSIONID-build=<sessionid>' \
+#     ./tools/coverity-defects --view-id 59232 --output-dir scan-dump/
+#
+# The session cookie value alone is sufficient for the GETs; you can also pass
+# just the bare id and it will be wrapped as COVJSESSIONID-build=<id>.
+#
+# Endpoints used (all reverse-engineered and unofficial -- they can change):
+#   reports/table.json          -- the defect list for a view (whole view in
+#                                  one response; capped at the view's row limit)
+#   sourcebrowser/defectdetails.json?defectInstanceId=N
+#                               -- per-defect checker + event tree (stateless)
+#   sourcebrowser/source.htm?fileInstanceId=F&fileStart=A&fileEnd=B&lineIdPrefix=main
+#                               -- source lines for a range, as HTML (stateless)
+#
+# The session cookie expires, so this is not suitable for long-running
+# unattended automation.
+#
+
+import argparse
+import csv
+import html
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Turn login redirects into a catchable error instead of following them."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+# Retry policy for a flaky backend. Auth failures (302/401/403) never retry.
+RETRIES = 4
+BACKOFF = 1.5
+
+
+def build_cookie(raw):
+    """Accept a full 'NAME=value; ...' cookie string or a bare session id."""
+    raw = raw.strip()
+    if "=" in raw:
+        return raw
+    return "COVJSESSIONID-build=%s" % raw
+
+
+class _Transient(Exception):
+    """A retryable server hiccup (5xx, 404 error page, empty body)."""
+
+
+def _get(host, cookie, path, params, accept="application/json, text/plain, */*"):
+    """GET a path+params under host; return (body, url). Retries transient
+    server errors; exits immediately on auth failure."""
+    url = "https://%s%s?%s" % (host, path, urllib.parse.urlencode(params))
+    last = None
+    for attempt in range(RETRIES):
+        req = urllib.request.Request(url)
+        req.add_header("Cookie", cookie)
+        req.add_header("Accept", accept)
+        req.add_header("Referer", "https://%s/" % host)
+        req.add_header("User-Agent", "coverity-defects/1.0")
+        try:
+            with _OPENER.open(req, timeout=90) as resp:
+                return resp.read().decode("utf-8", "replace"), url
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302, 303, 307, 308):
+                sys.exit(
+                    "Error: HTTP %d redirect (to login). The session cookie "
+                    "is missing or expired -- re-grab COVJSESSIONID-build "
+                    "from DevTools." % e.code
+                )
+            if e.code in (401, 403):
+                sys.exit(
+                    "Error: HTTP %d. The session cookie is not authorized "
+                    "for this project -- re-check it in DevTools." % e.code
+                )
+            # 404/5xx here are the flaky-backend error page; retry.
+            last = "HTTP %d" % e.code
+        except urllib.error.URLError as e:
+            last = str(e.reason)
+        if attempt < RETRIES - 1:
+            time.sleep(BACKOFF * (attempt + 1))
+    sys.exit(
+        "Error: %s fetching %s (after %d tries -- the Coverity backend "
+        "is flaky; retry shortly)." % (last, url, RETRIES)
+    )
+
+
+def _get_json(host, cookie, path, params):
+    # An HTTP 200 carrying the HTML error page is also a transient hiccup, so
+    # retry a non-JSON body a few times before giving up.
+    for attempt in range(RETRIES):
+        body, url = _get(host, cookie, path, params)
+        stripped = body.lstrip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                return json.loads(body)
+            except json.JSONDecodeError as e:
+                sys.exit("Error: could not parse JSON from %s: %s" % (url, e))
+        if attempt < RETRIES - 1:
+            time.sleep(BACKOFF * (attempt + 1))
+    sys.exit(
+        "Error: %s returned an HTML error page, not JSON, after %d tries. "
+        "Either the Coverity backend is flaky (retry shortly) or the session "
+        "cookie expired (re-grab COVJSESSIONID-build)." % (path, RETRIES)
+    )
+
+
+def fetch_view(host, project_id, view_id, cookie):
+    """Fetch the whole defect view. Returns (rows, total_count, raw_page)."""
+    page = _get_json(
+        host,
+        cookie,
+        "/reports/table.json",
+        {"projectId": project_id, "viewId": view_id},
+    )
+    if isinstance(page, list):
+        return page, None, page
+    rs = page.get("resultSet")
+    if isinstance(rs, dict):
+        total = rs.get("totalCount")
+        if total is None:
+            total = rs.get("overallCount")
+        return rs.get("results", []), total, page
+    for key in ("results", "rows", "data"):
+        if isinstance(page.get(key), list):
+            return page[key], page.get("totalCount"), page
+    sys.exit(
+        "Error: unexpected table.json shape; keys: %s" % ", ".join(sorted(page.keys()))
+    )
+
+
+def fetch_defect_details_raw(host, project_id, cookie, defect_instance_id):
+    """Raw defectdetails.json response for one defect (stateless endpoint)."""
+    return _get_json(
+        host,
+        cookie,
+        "/sourcebrowser/defectdetails.json",
+        {"projectId": project_id, "defectInstanceId": defect_instance_id},
+    )
+
+
+def normalize_details(d):
+    """Flatten a raw defectdetails.json payload to checker + event list."""
+    events = []
+    for occ in d.get("occurrences", []):
+        for es in occ.get("eventSets", []):
+            for e in es.get("eventTree", []):
+                events.append(
+                    {
+                        "file": e.get("filename"),
+                        "fileInstanceId": e.get("fileInstanceId"),
+                        "line": e.get("lineNumber"),
+                        "tag": e.get("tag"),
+                        "main": e.get("main", False),
+                        "description": _strip_html(e.get("description", "")),
+                    }
+                )
+    return {
+        "cid": d.get("mergedDefectCID"),
+        "checker": d.get("checkerName"),
+        "function": d.get("functionName"),
+        "shortDescription": _strip_html(d.get("shortDescription", "")),
+        "longDescription": _strip_html(d.get("longDescription", "")),
+        "localEffect": _strip_html(d.get("localEffect", "")),
+        "cweCategory": d.get("cweCategory"),
+        "events": events,
+    }
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_LINE_RE = re.compile(r'<div id="[^"]*source-line-(\d+)"[^>]*>(.*?)</div>', re.S)
+
+
+def _strip_html(s):
+    return html.unescape(_TAG_RE.sub("", s or "")).replace("\xa0", " ").strip()
+
+
+def parse_source_html(raw):
+    """Parse source.htm into {line_number: source_text}."""
+    lines = {}
+    for m in _LINE_RE.finditer(raw):
+        n = int(m.group(1))
+        text = html.unescape(_TAG_RE.sub("", m.group(2))).replace("\xa0", " ")
+        # The line-number span rendered the number as leading text; drop it.
+        text = re.sub(r"^\s*%d" % n, "", text, count=1)
+        lines[n] = text.rstrip()
+    return lines
+
+
+def fetch_source(host, project_id, cookie, file_instance_id, start, end, prefix="main"):
+    """Fetch source lines [start, end] for a file; returns {lineno: text}."""
+    body, _ = _get(
+        host,
+        cookie,
+        "/sourcebrowser/source.htm",
+        {
+            "projectId": project_id,
+            "fileInstanceId": file_instance_id,
+            "fileStart": start,
+            "fileEnd": end,
+            "lineIdPrefix": prefix,
+        },
+        accept="*/*",
+    )
+    return parse_source_html(body)
+
+
+def attach_source(host, project_id, cookie, detail, context):
+    """For each file referenced by the detail's events, fetch a source window
+    covering the events (+/- context lines) and attach {fileInstanceId: {...}}.
+    """
+    by_file = {}
+    for e in detail["events"]:
+        fid = e.get("fileInstanceId")
+        line = e.get("line")
+        if fid is None or not line:
+            continue
+        lo, hi = by_file.get(fid, (line, line))
+        by_file[fid] = (min(lo, line), max(hi, line))
+    windows = {}
+    for fid, (lo, hi) in by_file.items():
+        start = max(1, lo - context)
+        end = hi + context
+        windows[fid] = {
+            "start": start,
+            "end": end,
+            "lines": fetch_source(host, project_id, cookie, fid, start, end),
+        }
+    return windows
+
+
+def render_text(row, detail, windows):
+    """Render a defect as a readable 'code view': header, events, annotated
+    source. `windows` may be None (events only)."""
+    out = []
+    out.append("=" * 78)
+    out.append(
+        "CID %s  %s  [%s]"
+        % (
+            detail.get("cid") or row.get("cid"),
+            detail.get("checker") or row.get("checker") or "",
+            row.get("displayImpact") or row.get("severity") or "",
+        )
+    )
+    out.append(detail.get("shortDescription") or row.get("displayType") or "")
+    fn = detail.get("function") or row.get("displayFunction")
+    out.append(
+        "File: %s%s"
+        % (row.get("displayFile") or "", "  function %s" % fn if fn else "")
+    )
+    if detail.get("localEffect"):
+        out.append("Local effect: %s" % detail["localEffect"])
+    out.append("-" * 78)
+
+    # Map line -> list of event annotations, per fileInstanceId.
+    ev_by_file = {}
+    for i, e in enumerate(detail["events"], 1):
+        ev_by_file.setdefault(e.get("fileInstanceId"), {}).setdefault(
+            e.get("line"), []
+        ).append((i, e))
+
+    out.append("Events (%d):" % len(detail["events"]))
+    for i, e in enumerate(detail["events"], 1):
+        out.append(
+            "  %2d. %s:%s [%s]%s %s"
+            % (
+                i,
+                e.get("file"),
+                e.get("line"),
+                e.get("tag") or "",
+                " *main*" if e.get("main") else "",
+                e.get("description") or "",
+            )
+        )
+
+    if windows:
+        for fid, win in windows.items():
+            ev_lines = ev_by_file.get(fid, {})
+            out.append("")
+            fname = next(
+                (e["file"] for e in detail["events"] if e.get("fileInstanceId") == fid),
+                str(fid),
+            )
+            out.append(
+                "---- source: %s (lines %d-%d) ----" % (fname, win["start"], win["end"])
+            )
+            for n in range(win["start"], win["end"] + 1):
+                if n not in win["lines"]:
+                    continue
+                marker = ">>" if n in ev_lines else "  "
+                out.append("%s%6d| %s" % (marker, n, win["lines"][n]))
+                for idx, e in ev_lines.get(n, []):
+                    out.append(
+                        "       *---- event %d [%s]: %s"
+                        % (idx, e.get("tag") or "", e.get("description"))
+                    )
+    out.append("")
+    return "\n".join(out)
+
+
+def write_csv(rows, path):
+    """Flatten defect rows to CSV using the union of all keys as columns."""
+    if not rows:
+        sys.stderr.write("No rows to write to CSV.\n")
+        return
+    columns, seen = [], set()
+    for row in rows:
+        for key in row.keys():
+            if key not in seen:
+                seen.add(key)
+                columns.append(key)
+    out = sys.stdout if path == "-" else open(path, "w", newline="")
+    try:
+        writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {
+                    k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
+                    for k, v in row.items()
+                }
+            )
+    finally:
+        if out is not sys.stdout:
+            out.close()
+
+
+def _open_out(path):
+    return sys.stdout if path == "-" else open(path, "w")
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description="Download defect data (and code view) from Coverity Scan."
+    )
+    p.add_argument(
+        "--host",
+        default="scan4.scan.coverity.com",
+        help="Coverity host (default: scan4.scan.coverity.com)",
+    )
+    p.add_argument(
+        "--project-id", default="17272", help="projectId (default: 17272, Lustre)"
+    )
+    p.add_argument(
+        "--view-id", required=True, help="viewId from the table.json request"
+    )
+    p.add_argument(
+        "--cookie",
+        default=os.environ.get("COV_SCAN_COOKIE"),
+        help="'COVJSESSIONID-build=<id>' or a bare <id>. "
+        "Defaults to $COV_SCAN_COOKIE.",
+    )
+    p.add_argument(
+        "--cid",
+        action="append",
+        default=[],
+        help="Restrict to these CIDs (repeatable or comma-list)",
+    )
+    p.add_argument(
+        "--max-rows", type=int, default=0, help="Keep at most this many rows (0 = all)"
+    )
+    p.add_argument(
+        "--details",
+        action="store_true",
+        help="Fetch per-defect event flow (defectdetails.json)",
+    )
+    p.add_argument(
+        "--source",
+        action="store_true",
+        help="Also fetch annotated source windows (implies --details)",
+    )
+    p.add_argument(
+        "--context",
+        type=int,
+        default=10,
+        help="Source context lines around events (default: 10)",
+    )
+    p.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        help="Seconds to sleep between per-defect requests",
+    )
+    p.add_argument(
+        "--json",
+        dest="json_path",
+        default=None,
+        help="Write the defect list as JSON here ('-' = stdout). "
+        "Defaults to stdout only when no other output is set.",
+    )
+    p.add_argument("--csv", dest="csv_path", help="Also write flattened CSV")
+    p.add_argument(
+        "--text",
+        dest="text_path",
+        help="Write human-readable code view ('-' = stdout); " "implies --details",
+    )
+    p.add_argument(
+        "--output-dir",
+        dest="output_dir",
+        help="Archive raw JSON to this dir: view.json (the whole "
+        "table.json) plus <cid>.json (raw defectdetails.json) "
+        "for every defect. With --source, each <cid>.json "
+        "also gets a 'source' key.",
+    )
+    args = p.parse_args()
+
+    if not args.cookie:
+        sys.exit(
+            "Error: no session cookie. Pass --cookie or set "
+            "COV_SCAN_COOKIE (see header comment)."
+        )
+    cookie = build_cookie(args.cookie)
+    want_details = args.details or args.source or bool(args.text_path)
+    need_loop = want_details or bool(args.output_dir)
+
+    # Default the defect-list JSON to stdout only when nothing else is asked.
+    json_path = args.json_path
+    if json_path is None and not (args.output_dir or args.csv_path or args.text_path):
+        json_path = "-"
+
+    # --cid may be repeated and/or comma-separated.
+    wanted = set()
+    for c in args.cid:
+        wanted.update(x.strip() for x in c.split(",") if x.strip())
+
+    sys.stderr.write(
+        "Fetching defects for project %s view %s from %s ...\n"
+        % (args.project_id, args.view_id, args.host)
+    )
+    rows, total, raw_page = fetch_view(args.host, args.project_id, args.view_id, cookie)
+    if total is not None and len(rows) < total:
+        sys.stderr.write(
+            "Warning: received %d of %d defects -- the view is capped at its "
+            "server-side row limit. Raise the view's rows-per-page in the "
+            "Coverity UI to export the rest.\n" % (len(rows), total)
+        )
+
+    if wanted:
+        rows = [r for r in rows if str(r.get("cid")) in wanted]
+        missing = wanted - {str(r.get("cid")) for r in rows}
+        if missing:
+            sys.stderr.write(
+                "Warning: CIDs not in this view: %s\n" % ", ".join(sorted(missing))
+            )
+    if args.max_rows and len(rows) > args.max_rows:
+        rows = rows[: args.max_rows]
+    sys.stderr.write("Selected %d defects.\n" % len(rows))
+
+    # Archive the top-level view.json up front.
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
+        view_path = os.path.join(args.output_dir, "view.json")
+        with open(view_path, "w") as f:
+            json.dump(raw_page, f, indent=2)
+        sys.stderr.write("Wrote %s\n" % view_path)
+
+    # Per-defect enrichment: fetch each CID once, serving both the archive
+    # (raw defectdetails.json) and the normalized code view.
+    details = {}
+    if need_loop:
+        for i, r in enumerate(rows):
+            did = r.get("lastDefectInstanceId")
+            cid = str(r.get("cid"))
+            if not did:
+                sys.stderr.write(
+                    "  [%d/%d] CID %s: no defectInstanceId, "
+                    "skipping\n" % (i + 1, len(rows), cid)
+                )
+                continue
+            sys.stderr.write("  [%d/%d] CID %s details...\n" % (i + 1, len(rows), cid))
+            raw = fetch_defect_details_raw(args.host, args.project_id, cookie, did)
+            det = normalize_details(raw)
+            windows = None
+            if args.source:
+                windows = attach_source(
+                    args.host, args.project_id, cookie, det, args.context
+                )
+                det["source"] = windows
+            if want_details:
+                details[cid] = det
+                r["detail"] = det
+            if args.output_dir:
+                if windows is not None:
+                    raw["source"] = windows
+                with open(os.path.join(args.output_dir, "%s.json" % cid), "w") as f:
+                    json.dump(raw, f, indent=2)
+            if args.delay:
+                time.sleep(args.delay)
+        if args.output_dir:
+            sys.stderr.write(
+                "Wrote %d defect files to %s/\n" % (len(rows), args.output_dir)
+            )
+
+    sys.stderr.write("Done.\n")
+
+    # Outputs.
+    if json_path:
+        out = _open_out(json_path)
+        try:
+            json.dump(rows, out, indent=2)
+            out.write("\n")
+        finally:
+            if out is not sys.stdout:
+                out.close()
+                sys.stderr.write("Wrote JSON: %s\n" % json_path)
+
+    if args.csv_path:
+        # Drop the nested 'detail' from CSV rows to keep columns flat.
+        flat = [{k: v for k, v in r.items() if k != "detail"} for r in rows]
+        write_csv(flat, args.csv_path)
+        if args.csv_path != "-":
+            sys.stderr.write("Wrote CSV: %s\n" % args.csv_path)
+
+    if args.text_path:
+        out = _open_out(args.text_path)
+        try:
+            for r in rows:
+                det = details.get(str(r.get("cid")))
+                if not det:
+                    continue
+                out.write(render_text(r, det, det.get("source")))
+                out.write("\n")
+        finally:
+            if out is not sys.stdout:
+                out.close()
+                sys.stderr.write("Wrote code view: %s\n" % args.text_path)
+
+
+if __name__ == "__main__":
+    main()
