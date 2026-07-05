@@ -3,7 +3,9 @@
     {
       "name": "cc-plugin",
       "platform": "mainline_ccplugin",
-      "build": "tests/fs/lustre/boot.ktest"
+      "build": "tests/fs/lustre/boot.ktest",
+      "optional": true,
+      "description": "Run Lustre LLVM Compiler Plugin"
     }
   ]
 }

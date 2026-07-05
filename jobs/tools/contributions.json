@@ -1,5 +1,7 @@
 {
   "name": "contributions",
   "platform": "mainline",
-  "tool": "contributions"
+  "tool": "contributions",
+  "optional": true,
+  "description": "Fetch contribution statistics for Lustre tree"
 }

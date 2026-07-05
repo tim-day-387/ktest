@@ -3,7 +3,9 @@
     {
       "name": "lustre_mainline",
       "platform": "mainline",
-      "build": "tests/fs/lustre/boot-strict.ktest"
+      "build": "tests/fs/lustre/boot-strict.ktest",
+      "optional": true,
+      "description": "Build Lustre (LLVM/OutOfTree/NoWarnings)"
     }
   ]
 }

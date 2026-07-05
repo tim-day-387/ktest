@@ -1,5 +1,7 @@
 {
   "name": "license-status",
   "platform": "mainline",
-  "tool": "license-status"
+  "tool": "license-status",
+  "optional": true,
+  "description": "Fetch license info for Lustre tree"
 }

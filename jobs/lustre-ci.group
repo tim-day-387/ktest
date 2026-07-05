@@ -1,0 +1,7 @@
+# Lustre CI: per-patch test suite (run by gerrit for each change).
+tools/checkpatch
+distro/u24
+distro/al2023
+mainline/ml-strict
+mainline/ml
+mainline/ml-miscvm

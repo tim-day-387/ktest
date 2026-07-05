@@ -1,5 +1,6 @@
 {
   "name": "lustre_mainline",
   "platform": "mainline",
-  "build": "tests/fs/lustre/boot.ktest"
+  "build": "tests/fs/lustre/boot.ktest",
+  "description": "Build Lustre (LLVM/OutOfTree)"
 }

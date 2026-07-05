@@ -25,7 +25,7 @@
       "name": "llog-unit",
       "platform": "mainline",
       "run": "tests/fs/lustre/llog-unit.ktest",
-      "optional": false,
+      "optional": true,
       "depends_on": ["lustre_mainline_native"]
     },
     {

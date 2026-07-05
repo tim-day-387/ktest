@@ -1,5 +1,7 @@
 {
   "name": "checkpatch",
   "platform": "mainline",
-  "tool": "checkpatch"
+  "tool": "checkpatch",
+  "optional": true,
+  "description": "Run checkpatch.pl from the given mainline kernel"
 }

@@ -1,5 +1,6 @@
 {
   "name": "u24",
   "platform": "u24",
-  "build": "tests/fs/lustre/boot.ktest"
+  "build": "tests/fs/lustre/boot.ktest",
+  "description": "Build Lustre (U24/OutOfTree)"
 }

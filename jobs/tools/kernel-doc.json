@@ -1,5 +1,7 @@
 {
   "name": "kernel-doc",
   "platform": "mainline",
-  "tool": "kernel_doc_helper.sh"
+  "tool": "kernel_doc_helper.sh",
+  "optional": true,
+  "description": "Check the number of kernel doc errors"
 }

@@ -1,5 +1,6 @@
 {
   "name": "al2023",
   "platform": "al2023",
-  "build": "tests/fs/lustre/boot.ktest"
+  "build": "tests/fs/lustre/boot.ktest",
+  "description": "Build Lustre (AL2023/OutOfTree)"
 }

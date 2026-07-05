@@ -1,0 +1,11 @@
+# Lustre CI: branch-wide test suite (adds tree-wide tools and the CC plugin).
+tools/checkpatch-parallel
+tools/contributions
+tools/license-status
+tools/kernel-doc
+distro/u24
+distro/al2023
+mainline/ml-strict
+mainline/ml
+tools/llvm-checks
+mainline/ml-miscvm

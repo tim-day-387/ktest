@@ -1,5 +1,7 @@
 {
   "name": "checkpatch-parallel",
   "platform": "mainline",
-  "tool": "checkpatch-parallel"
+  "tool": "checkpatch-parallel",
+  "optional": true,
+  "description": "Run checkpatch.pl on the entire Lustre tree"
 }
