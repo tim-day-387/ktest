@@ -56,11 +56,25 @@ def load_job_file(job_name, ktest_dir):
     Returns:
         List of job configurations
     """
-    job_path = Path(ktest_dir) / "jobs" / f"{job_name}.json"
+    jobs_dir = Path(ktest_dir) / "jobs"
+    job_path = jobs_dir / f"{job_name}.json"
 
     if not job_path.exists():
-        print(f"Error: Job file {job_path} does not exist")
-        sys.exit(1)
+        # Fall back to searching subdirectories of jobs/ for a
+        # matching job file.
+        matches = sorted(jobs_dir.rglob(f"{job_name}.json"))
+
+        if not matches:
+            print(f"Error: Job file {job_path} does not exist")
+            sys.exit(1)
+
+        if len(matches) > 1:
+            print(f"Error: Multiple job files named '{job_name}.json' found:")
+            for match in matches:
+                print(f"  {match}")
+            sys.exit(1)
+
+        job_path = matches[0]
 
     try:
         with open(job_path, "r") as f:
