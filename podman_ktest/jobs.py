@@ -46,6 +46,27 @@ def valid_job_config(job_config):
     return True
 
 
+def namespace_jobs(jobs, prefix):
+    """Prefix each job's name with its job file name.
+
+    Two different job files can define jobs with the same "name"
+    (e.g. both ml-boot.json and ml-llmount.json define
+    "lustre_mainline"). Namespacing by the file name keeps them
+    distinct when several job files are run together. In-file
+    "depends_on" references are rewritten to match.
+    """
+    local_names = {job["name"] for job in jobs}
+    for job in jobs:
+        job["name"] = f"{prefix}:{job['name']}"
+        depends_on = job.get("depends_on")
+        if depends_on:
+            job["depends_on"] = [
+                f"{prefix}:{dep}" if dep in local_names else dep
+                for dep in depends_on
+            ]
+    return jobs
+
+
 def load_job_file(job_name, ktest_dir):
     """Load a job file by name.
 
@@ -88,7 +109,7 @@ def load_job_file(job_name, ktest_dir):
             print("Invalid job configuration")
             sys.exit(1)
 
-        return [job_config]
+        return namespace_jobs([job_config], job_path.stem)
 
     jobs = job_config["jobs"]
     if not isinstance(jobs, list):
@@ -100,7 +121,7 @@ def load_job_file(job_name, ktest_dir):
             print("Invalid job configuration")
             sys.exit(1)
 
-    return jobs
+    return namespace_jobs(jobs, job_path.stem)
 
 
 def topological_sort(jobs):
