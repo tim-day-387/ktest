@@ -1,0 +1,11 @@
+# Distro: build/boot tests across supported distributions.
+distro/al2
+distro/al2-pkg
+distro/al2023
+distro/al2023-pkg
+distro/rocky9
+distro/rocky9-pkg
+distro/rocky10
+distro/rocky10-pkg
+distro/u24
+distro/u24-pkg

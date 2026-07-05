@@ -1,0 +1,3 @@
+# Mainline lockdep: llmount and miscvm suites with lockdep (PROVE_LOCKING) enabled.
+mainline/ml-lockdep-llmount
+mainline/ml-lockdep-miscvm
