@@ -16,9 +16,6 @@ require-kernel-config ZFS_DEBUG=y
 require-kernel-config MODULES=y
 require-kernel-config MODULE_UNLOAD
 
-require-kernel-config BLK_DEV_RAM=y
-require-kernel-config BLK_DEV_RAM_SIZE=524288
-
 require-kernel-config GCOV_KERNEL
 require-kernel-config GCOV_PROFILE_LNET
 require-kernel-config GCOV_PROFILE_LUSTRE

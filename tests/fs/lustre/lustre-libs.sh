@@ -175,6 +175,12 @@ function require-lustre-kernel-config()
 {
     require-lustre-base-kernel-config
     require-lustre-modules-kernel-config
+
+    # ZFS uses a ramdisk for backing storage
+    if [[ "$FSTYPE" =~ "zfs" ]]; then
+	require-kernel-config BLK_DEV_RAM=y
+	require-kernel-config BLK_DEV_RAM_SIZE=524288
+    fi
 }
 
 function require-lustre-ebpf-config()

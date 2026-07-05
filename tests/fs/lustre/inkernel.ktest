@@ -22,9 +22,6 @@ require-kernel-config LNET=m
 require-kernel-config LUSTRE=m
 require-kernel-config ZFS=m
 
-require-kernel-config BLK_DEV_RAM=y
-require-kernel-config BLK_DEV_RAM_SIZE=524288
-
 config-mem 10G
 config-timeout 120
 
