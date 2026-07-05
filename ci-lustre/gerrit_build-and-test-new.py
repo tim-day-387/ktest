@@ -44,16 +44,9 @@ KTEST_DIR = "/home/ktest/ktest"
 LUSTRE_SOURCE = "/home/ktest/git/lustre-release"
 HOSTING_MODE = os.getenv("HOSTING_MODE", "github-pages")
 IGNORE_OLDER_THAN_DAYS = 60
-BRANCHES = [
-    {
-        "Branch": "master",
-        "Subject": "Main development branch",
-    },
-    {
-        "Branch": "master-next",
-        "Subject": "Staging branch for new changes",
-    },
-]
+BRANCH_CONFIG_PATH = os.getenv(
+    "BRANCH_CONFIG", os.path.join(KTEST_DIR, "ci-lustre/branch-ci.json")
+)
 
 
 def _now():
@@ -61,44 +54,58 @@ def _now():
     return int(time.time())
 
 
-def get_branch_head_hash(branch_name, repo_path=LUSTRE_SOURCE):
+def load_branch_config(config_path=BRANCH_CONFIG_PATH):
+    """
+    Load the list of branches and their test groups from the config file.
+
+    The config is a JSON list of objects, each with:
+      - "branch":  name of the branch to watch (e.g. "master")
+      - "repo":    git repository URL to fetch the branch from
+      - "subject": human-readable description shown on the status site
+      - "groups":  list of job group names to run when the branch updates
+
+    Every time a branch's head advances, each of its groups is run as a
+    separate podman-ktest invocation (and shows up as a separate row).
+
+    Returns a list of branch dicts, or an empty list if the config is
+    missing or malformed.
+    """
+    try:
+        with open(config_path, "r") as f:
+            return json.load(f)
+    except (IOError, json.JSONDecodeError) as e:
+        logging.error(f"Failed to load branch config {config_path}: {e}")
+        return []
+
+
+def get_branch_head_hash(repo_url, branch_name, repo_path=LUSTRE_SOURCE):
     """
     Get the latest commit hash for a given branch.
 
     Args:
+        repo_url: Git repository URL to fetch the branch from
         branch_name: Name of the branch (e.g., 'master', 'master-next')
-        repo_path: Path to the git repository
+        repo_path: Path to the local working clone used to run git
 
     Returns:
         The commit hash as a string, or None if the fetch fails
     """
     try:
-        # Fetch the latest from remote
-        fetch_cmd = f"cd {repo_path} && git fetch origin {branch_name}"
+        # Fetch the branch from the configured repository
+        fetch_cmd = f"cd {repo_path} && git fetch {repo_url} {branch_name}"
         subprocess.run(fetch_cmd, shell=True, check=True, capture_output=True)
 
-        # Get the hash of the remote branch
-        rev_parse_cmd = f"cd {repo_path} && git rev-parse origin/{branch_name}"
+        # Get the hash of the just-fetched branch head
+        rev_parse_cmd = f"cd {repo_path} && git rev-parse FETCH_HEAD"
         result = subprocess.run(
             rev_parse_cmd, shell=True, check=True, capture_output=True, text=True
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
-        logging.error(f"Failed to get branch head for {branch_name}: {e}")
+        logging.error(
+            f"Failed to get branch head for {branch_name} from {repo_url}: {e}"
+        )
         return None
-
-
-def make_change_from_hash(githash, subject, branch):
-    change = {
-        "branch": branch,
-        "_number": str(random.randint(1, 10000000)),
-        "branchwide": True,
-        "id": branch,
-        "subject": subject,
-        "current_revision": githash,
-    }
-
-    return change
 
 
 class Reviewer(object):
@@ -279,12 +286,11 @@ class Reviewer(object):
 
         return out, returncode, elapsed_time
 
-    def run_tests(self, branchwide, change_id, git_hash, subject):
+    def run_tests(self, job_name, change_id, git_hash, subject):
         # Build podman-ktest command with socket parameter and output flags
         # podman-ktest writes directly to OUTPUT_DIR with metadata_store.json
         # Note: change_id already contains git_hash (format: {raw_change_id}_{git_hash})
         socket_arg = "--podman-socket unix:///run/podman/podman.sock"
-        job_name = "lustre-ci-branch" if branchwide else "lustre-ci"
         # Escape subject for shell (replace quotes)
         escaped_subject = subject.replace("'", "'\\''") if subject else ""
         output_args = f"--output {OUTPUT_DIR} --git-hash {git_hash} --change-id {change_id} --subject '{escaped_subject}'"
@@ -311,6 +317,13 @@ class Reviewer(object):
         )
         return Reviewer.run_script(command)
 
+    def checkout_branch(self, repo_url, branch_name):
+        command = (
+            f"cd {LUSTRE_SOURCE} ; git fetch {repo_url} {branch_name}"
+            " && git checkout FETCH_HEAD"
+        )
+        return Reviewer.run_script(command)
+
     def analyze_patch(self, change):
         revision = change.get("current_revision")
 
@@ -324,7 +337,7 @@ class Reviewer(object):
         subject = subject[:90]
 
         self.checkout_patch(change)
-        self.run_tests(change.get("branchwide", False), change_id, revision, subject)
+        self.run_tests("lustre-ci", change_id, revision, subject)
 
         copy_static_site()
 
@@ -405,14 +418,38 @@ class Reviewer(object):
         self.timestamp = new_timestamp
         self.write_history("-", "-", 0)
 
+    def run_branch_group(self, branch_name, git_hash, subject, group):
+        """
+        Run a single test group against a branch head.
+
+        Each (branch, group) run is stored under its own metadata key,
+        "{git_hash}_{group}", so it shows up as a separate row on the
+        status site. The change_id is prefixed with the branch name and
+        suffixed with that same key so that, on restart, load_history()
+        reconstructs the identical history entry that in_history() checks.
+        """
+        storage_key = f"{git_hash}_{group}"
+        change_id = f"{branch_name}_{storage_key}"
+        group_subject = f"[{group}] {subject}"[:90]
+
+        self.podman_reset()
+        self.run_tests(group, change_id, storage_key, group_subject)
+
     def check_for_branches(self):
         if _now() - self.last_branch_review < self.branch_review_interval:
             return
 
-        for branch in BRANCHES:
-            branch_name = branch["Branch"]
+        for branch in load_branch_config():
+            branch_name = branch.get("branch")
+            repo_url = branch.get("repo")
+            subject = branch.get("subject", "")
+            groups = branch.get("groups", [])
+
+            if not branch_name or not repo_url or not groups:
+                continue
+
             # Get the latest commit hash for this branch
-            git_hash = get_branch_head_hash(branch_name)
+            git_hash = get_branch_head_hash(repo_url, branch_name)
 
             if git_hash is None:
                 self._error(
@@ -420,16 +457,28 @@ class Reviewer(object):
                 )
                 continue
 
-            # Check if we've already reviewed this hash
-            if self.in_history(branch_name, git_hash):
+            # Only run the groups we haven't already tested at this commit.
+            pending = [
+                group
+                for group in groups
+                if not self.in_history(branch_name, f"{git_hash}_{group}")
+            ]
+
+            if not pending:
                 self._debug(f"Branch {branch_name} at {git_hash} already reviewed")
                 continue
 
-            self._debug(f"Reviewing branch {branch_name} at commit {git_hash}")
-            change = make_change_from_hash(git_hash, branch["Subject"], branch_name)
-            self.review_change(change)
-            self.write_history(branch_name, git_hash, 0)
-            self.git_commit_and_push()
+            # Check out the branch head once, then run each group separately.
+            self.checkout_branch(repo_url, branch_name)
+
+            for group in pending:
+                self._debug(
+                    f"Reviewing branch {branch_name} group {group} at commit {git_hash}"
+                )
+                self.run_branch_group(branch_name, git_hash, subject, group)
+                self.write_history(branch_name, f"{git_hash}_{group}", 0)
+                copy_static_site()
+                self.git_commit_and_push()
 
         self.last_branch_review = _now()
 

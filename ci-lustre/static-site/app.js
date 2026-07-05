@@ -287,11 +287,16 @@ const app = {
       const enforcedSummary = summarize(enforcedResults);
       const optionalSummary = summarize(optionalResults);
 
+      // Branch-group runs are keyed as "{commitHash}_{group}" so each group
+      // gets its own row; strip the suffix for the gitiles commit link.
+      // Per-patch keys are bare 40-char hashes and are left untouched.
+      const commitHash = gitHash.split("_")[0];
+
       html += `
                 <tr>
                     <td><a href="#review/${this.escapeHtml(gitHash)}">Link</a></td>
                     <td>${this.escapeHtml(data.subject)}</td>
-                    <td><a href="https://review.whamcloud.com/plugins/gitiles/fs/lustre-release/+/${this.escapeHtml(gitHash)}" target="_blank">${this.escapeHtml(gitHash)}</a></td>
+                    <td><a href="https://review.whamcloud.com/plugins/gitiles/fs/lustre-release/+/${this.escapeHtml(commitHash)}" target="_blank">${this.escapeHtml(commitHash)}</a></td>
                     <td><a href="https://review.whamcloud.com/c/fs/lustre-release/+/${this.escapeHtml(data.change_id)}" target="_blank">${this.escapeHtml(data.change_id)}</a></td>
                     <td>${readable}</td>
                     <td>${this.escapeHtml(data.total_runtime || "N/A")}</td>

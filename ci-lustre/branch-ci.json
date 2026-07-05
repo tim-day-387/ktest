@@ -1,0 +1,14 @@
+[
+  {
+    "branch": "master",
+    "repo": "https://review.whamcloud.com/fs/lustre-release",
+    "subject": "Main development branch",
+    "groups": ["lustre-ci-branch"]
+  },
+  {
+    "branch": "master-next",
+    "repo": "https://review.whamcloud.com/fs/lustre-release",
+    "subject": "Staging branch for new changes",
+    "groups": ["lustre-ci-branch"]
+  }
+]
