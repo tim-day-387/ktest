@@ -543,8 +543,17 @@ function build_zfs_full()
         --with-linux-obj="$LINUX_OBJ" \
         --enable-linux-experimental
 
-    # Build ZFS modules to generate headers and Module.symvers
-    make -j$ktest_njobs
+    # Build ZFS modules to generate headers and Module.symvers.
+    #
+    # KASAN kernels: clang treats -fsanitize=kernel-address as the
+    # address_sanitizer feature, so ZFS's bundled ZSTD (which keys off
+    # __has_feature(address_sanitizer)) activates its workspace-poisoning
+    # path and emits __asan_{,un}poison_memory_region calls. The kernel does
+    # not export those to modules, so modpost fails with them undefined. The
+    # in-kernel zstd suppresses the same path via ZSTD_ASAN_DONT_POISON_WORKSPACE;
+    # do the same here. Command-line make vars propagate to the kernel sub-make
+    # via MAKEFLAGS, so this reaches the module compile. No-op off KASAN.
+    make -j$ktest_njobs KCFLAGS=-DZSTD_ASAN_DONT_POISON_WORKSPACE
 
     validate_zfs_build
 
