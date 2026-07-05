@@ -67,6 +67,71 @@ def namespace_jobs(jobs, prefix):
     return jobs
 
 
+def find_job_path(job_name, ktest_dir, suffix):
+    """Find a job or group file by name.
+
+    Looks for jobs/<job_name><suffix>, falling back to a recursive
+    search of subdirectories. Returns the resolved Path, or None if no
+    matching file exists. Exits if the name is ambiguous.
+    """
+    jobs_dir = Path(ktest_dir) / "jobs"
+    path = jobs_dir / f"{job_name}{suffix}"
+
+    if path.exists():
+        return path
+
+    matches = sorted(jobs_dir.rglob(f"{job_name}{suffix}"))
+
+    if not matches:
+        return None
+
+    if len(matches) > 1:
+        print(f"Error: Multiple files named '{job_name}{suffix}' found:")
+        for match in matches:
+            print(f"  {match}")
+        sys.exit(1)
+
+    return matches[0]
+
+
+def expand_job_args(job_args, ktest_dir):
+    """Expand any .group files in job_args into their member job names.
+
+    A .group file lives in jobs/ (e.g. jobs/myjobgroup.group) and lists
+    one job name per line. Passing its name expands to loading each
+    listed job, exactly as if the names were given on the command line.
+    Blank lines and lines starting with '#' are ignored. Groups may
+    reference other groups; cycles are detected and rejected.
+    """
+    resolved = []
+
+    def expand(name, stack):
+        group_path = find_job_path(name, ktest_dir, ".group")
+        if group_path is None:
+            resolved.append(name)
+            return
+
+        if name in stack:
+            cycle = " -> ".join(stack + [name])
+            print(f"Error: Circular group reference detected: {cycle}")
+            sys.exit(1)
+
+        with open(group_path, "r") as f:
+            members = [
+                line.strip()
+                for line in f
+                if line.strip() and not line.strip().startswith("#")
+            ]
+
+        for member in members:
+            expand(member, stack + [name])
+
+    for arg in job_args:
+        expand(arg, [])
+
+    return resolved
+
+
 def load_job_file(job_name, ktest_dir):
     """Load a job file by name.
 
@@ -77,25 +142,12 @@ def load_job_file(job_name, ktest_dir):
     Returns:
         List of job configurations
     """
-    jobs_dir = Path(ktest_dir) / "jobs"
-    job_path = jobs_dir / f"{job_name}.json"
+    job_path = find_job_path(job_name, ktest_dir, ".json")
 
-    if not job_path.exists():
-        # Fall back to searching subdirectories of jobs/ for a
-        # matching job file.
-        matches = sorted(jobs_dir.rglob(f"{job_name}.json"))
-
-        if not matches:
-            print(f"Error: Job file {job_path} does not exist")
-            sys.exit(1)
-
-        if len(matches) > 1:
-            print(f"Error: Multiple job files named '{job_name}.json' found:")
-            for match in matches:
-                print(f"  {match}")
-            sys.exit(1)
-
-        job_path = matches[0]
+    if job_path is None:
+        jobs_dir = Path(ktest_dir) / "jobs"
+        print(f"Error: Job file {jobs_dir / f'{job_name}.json'} does not exist")
+        sys.exit(1)
 
     try:
         with open(job_path, "r") as f:

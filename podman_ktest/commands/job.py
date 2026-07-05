@@ -20,7 +20,13 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from ..jobs import load_job_file, topological_sort, run_job_config, any_job_needs_kernel
+from ..jobs import (
+    load_job_file,
+    expand_job_args,
+    topological_sort,
+    run_job_config,
+    any_job_needs_kernel,
+)
 from ..utils import (
     get_ccache_dir,
     get_package_dir,
@@ -238,10 +244,11 @@ def cmd_job(
 
     use_tarball_input = args.tarball_input
 
-    job_args = args.job_names
     ktest_dir = dirs["ktest_dir"]
 
-    # Separate single-job names from multi-job file paths
+    # Expand any .group files into their member job names, then load
+    # each resulting job file.
+    job_args = expand_job_args(args.job_names, ktest_dir)
     all_jobs = []
 
     for arg in job_args:
