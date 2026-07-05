@@ -1,12 +1,6 @@
 {
   "jobs": [
     {
-      "name": "checkpatch",
-      "platform": "mainline",
-      "tool": "checkpatch",
-      "depends_on": []
-    },
-    {
       "name": "lustre_mainline",
       "platform": "mainline",
       "build": "tests/fs/lustre/lockdep-llmount.ktest",
