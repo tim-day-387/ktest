@@ -169,6 +169,7 @@ def valid_env(podman_socket=None, shared_filesystem=None):
     ccache_dir = get_ccache_dir(shared_filesystem)
     package_dir = get_package_dir(shared_filesystem)
     errors: List[ValidationError] = []
+    check_lines: List[str] = []
 
     try:
         with get_podman_client(podman_socket) as client:
@@ -203,14 +204,15 @@ def valid_env(podman_socket=None, shared_filesystem=None):
                     )
                 )
 
+            # Buffer the per-check results; they are only printed if a check
+            # fails, to keep successful runs (e.g. `job --stdout`) uncluttered.
             for description, validate_func in validations:
-                print(f"  {description}...", end=" ", flush=True)
                 error = validate_func()
                 if error:
-                    print("FAILED")
+                    check_lines.append(f"  {description}... FAILED")
                     errors.append(error)
                 else:
-                    print("OK")
+                    check_lines.append(f"  {description}... OK")
 
     except Exception as e:
         errors.append(
@@ -223,6 +225,8 @@ def valid_env(podman_socket=None, shared_filesystem=None):
 
     # Report all errors
     if errors:
+        for line in check_lines:
+            print(line)
         print()
         print(f"Environment validation failed with {len(errors)} error(s):")
         print()
@@ -233,6 +237,5 @@ def valid_env(podman_socket=None, shared_filesystem=None):
             print()
         return False
 
-    print()
     print("Environment validated successfully")
     return True
