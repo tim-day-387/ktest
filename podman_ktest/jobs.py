@@ -448,7 +448,7 @@ def run_package(
             no_cleanup=no_cleanup,
         )
         with job:
-            return_code = job.run(client)
+            return_code = job.run(client, podman_socket=podman_socket)
 
     runtime = int(time.time() - start_time)
     return return_code, runtime, task_name
