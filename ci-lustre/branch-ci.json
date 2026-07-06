@@ -3,12 +3,12 @@
     "branch": "master",
     "repo": "https://review.whamcloud.com/fs/lustre-release",
     "subject": "Main development branch",
-    "groups": ["distro", "lustre-ci-branch", "mainline-lockdep", "mainline-zfs"]
+    "groups": ["lustre-ci-branch", "distro", "mainline-lockdep", "mainline-zfs"]
   },
   {
     "branch": "master-next",
     "repo": "https://review.whamcloud.com/fs/lustre-release",
     "subject": "Staging branch for new changes",
-    "groups": ["distro", "lustre-ci-branch", "mainline-lockdep", "mainline-zfs"]
+    "groups": ["lustre-ci-branch", "distro", "mainline-lockdep", "mainline-zfs"]
   }
 ]
