@@ -1,0 +1,20 @@
+# Lustre config tester: build/boot each kernel config variant on ZFS.
+native/config/LGTM
+native/config/libcfs
+native/config/lnet_dump_on_panic
+native/config/lnet_efalnd
+native/config/lnet
+native/config/lnet_selftest
+native/config/lnet_xprt_ib
+native/config/lustre_debug_expensive_check
+native/config/lustre_fs_gss
+native/config/lustre_fs_gss_keyring
+native/config/lustre_fs_gss_ssk
+native/config/lustre_fs
+native/config/lustre_fs_ldiskfs
+native/config/lustre_fs_pinger
+native/config/lustre_fs_posix_acl
+native/config/lustre_fs_server
+native/config/lustre_fs_tests
+native/config/lustre_fs_wbcfs
+native/config/lustre_fs_zfs

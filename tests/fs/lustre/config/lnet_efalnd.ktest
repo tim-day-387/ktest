@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# LGTM coverage for CONFIG_LNET_EFALND.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lgtm.sh"
+
+require-lgtm-kernel-config
+require-kernel-config INFINIBAND=m
+require-kernel-config INFINIBAND_EFA=m
+require-kernel-config LNET_EFALND=y
+
+main "$@"

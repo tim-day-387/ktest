@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# LGTM coverage for CONFIG_LUSTRE_FS_LDISKFS.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lgtm.sh"
+
+require-lgtm-kernel-config
+require-kernel-config EXT4_FS=y
+require-kernel-config LUSTRE_FS_LDISKFS=m
+
+main "$@"

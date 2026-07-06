@@ -1,0 +1,25 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_patch",
+      "platform": "native_1",
+      "build": "tests/fs/lustre/config/lnet_xprt_ib.ktest",
+      "backing_storage": "zfs"
+    },
+    {
+      "name": "lustre_native",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/config/lnet_xprt_ib.ktest",
+      "backing_storage": "zfs",
+      "depends_on": ["lustre_patch"]
+    },
+    {
+      "name": "lustre_native_lnet_xprt_ib",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/config/lnet_xprt_ib.ktest",
+      "run": "tests/fs/lustre/config/lnet_xprt_ib.ktest",
+      "backing_storage": "zfs",
+      "depends_on": ["lustre_native"]
+    }
+  ]
+}

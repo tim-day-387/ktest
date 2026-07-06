@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# The LGTM base test with no extra Kconfig options: just the in-kernel
+# Lustre baseline. The config/*.ktest tests each layer a single Kconfig
+# option on top of this and run the same modprobe + llmount body.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lgtm.sh"
+
+require-lgtm-kernel-config
+
+main "$@"

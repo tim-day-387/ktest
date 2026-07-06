@@ -138,6 +138,18 @@ function require-lustre-debug-kernel-config()
     require-kernel-config DEBUG_PI_LIST
 }
 
+#
+# Baseline kernel config shared by every LGTM Kconfig-coverage run
+# (tests/fs/lustre/config/*.ktest): the in-kernel Lustre baseline plus debug
+# options. Each config/*.ktest layers its single option on top with
+# require-kernel-config.
+#
+function require-lgtm-kernel-config()
+{
+    require-lustre-kernel-config
+    require-lustre-debug-kernel-config
+}
+
 function require-lustre-efa-kernel-config()
 {
     require-kernel-config NETDEVICES
