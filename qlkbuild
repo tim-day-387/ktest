@@ -105,6 +105,20 @@ fi
 CMD="$1"
 shift
 
+# The native platform builds Lustre in-tree (into the kernel/module tree),
+# while mainline builds it out-of-tree from lustre-release. Export a flag so a
+# test's deps phase (run as a subprocess of this script) can request the
+# matching Lustre kernel config, e.g. llmount.ktest pulling in the in-kernel
+# modules on native.
+case "$CMD" in
+    build_native|run_native|package_native|generate_lustre_patch)
+	export ktest_lustre_intree=1
+	;;
+    *)
+	export ktest_lustre_intree=0
+	;;
+esac
+
 while getopts "h${ktest_args}" arg; do
     case $arg in
 	h)
@@ -492,6 +506,13 @@ function run_copy_builtin()
     if [[ ! -x ./copy-builtin ]]; then
 	rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
 	apply_lustre_patches
+    fi
+
+    # copy-builtin drops the osd-zfs tree unless CBI_WITH_ZFS is set. On a ZFS
+    # build the ZFS patch has already been applied above, so opt in and let
+    # copy-builtin wire up the osd-zfs Kconfig and in-tree header paths.
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	export CBI_WITH_ZFS=1
     fi
 
     ./copy-builtin "$ktest_kernel_source"

@@ -181,6 +181,14 @@ function require-lustre-kernel-config()
 	require-kernel-config BLK_DEV_RAM=y
 	require-kernel-config BLK_DEV_RAM_SIZE=524288
     fi
+
+    # On the native platform Lustre is built in-tree, so pull in the in-kernel
+    # modules (LNET/Lustre/OSD as =m) - they land in /lib/modules for
+    # load_lustre_modules to modprobe. On mainline Lustre comes from an
+    # out-of-tree lustre-release build, so this is skipped.
+    if [[ "${ktest_lustre_intree:-0}" == "1" ]]; then
+	require-lustre-inkernel-kernel-config
+    fi
 }
 
 function require-lustre-builtin-kernel-config()

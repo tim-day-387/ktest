@@ -1,0 +1,84 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_patch",
+      "platform": "native_1",
+      "build": "tests/fs/lustre/llmount.ktest",
+      "backing_storage": "zfs",
+      "optional": false,
+      "description": "Build Lustre (Native)"
+    },
+    {
+      "name": "lustre_native",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/llmount.ktest",
+      "backing_storage": "zfs",
+      "optional": false,
+      "depends_on": ["lustre_patch"]
+    },
+    {
+      "name": "boot",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/boot.ktest",
+      "backing_storage": "zfs",
+      "optional": false,
+      "depends_on": ["lustre_native"]
+    },
+    {
+      "name": "llmount",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/llmount.ktest",
+      "backing_storage": "zfs",
+      "optional": false,
+      "depends_on": ["lustre_native"]
+    },
+    {
+      "name": "llog-unit",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/llog-unit.ktest",
+      "backing_storage": "zfs",
+      "optional": true,
+      "depends_on": ["lustre_native"]
+    },
+    {
+      "name": "mgs-setup",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/mgs-setup.ktest",
+      "backing_storage": "zfs",
+      "optional": false,
+      "depends_on": ["lustre_native"]
+    },
+    {
+      "name": "sanity-1",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/sanity/sanity-1.ktest",
+      "backing_storage": "zfs",
+      "optional": false,
+      "depends_on": ["lustre_native"]
+    },
+    {
+      "name": "sanity-2",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/sanity/sanity-2.ktest",
+      "backing_storage": "zfs",
+      "optional": false,
+      "depends_on": ["lustre_native"]
+    },
+    {
+      "name": "sanity-3",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/sanity/sanity-3.ktest",
+      "backing_storage": "zfs",
+      "optional": false,
+      "depends_on": ["lustre_native"]
+    },
+    {
+      "name": "sanity-4",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/sanity/sanity-4.ktest",
+      "backing_storage": "zfs",
+      "optional": false,
+      "depends_on": ["lustre_native"]
+    }
+  ]
+}
