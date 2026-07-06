@@ -40,6 +40,14 @@ git clone --depth 1 --branch "v${KVER}" https://git.kernel.org/pub/scm/linux/ker
 # Clone Lustre latest master
 echo "Cloning Lustre master branch..."
 git clone git://git.whamcloud.com/fs/lustre-release.git /home/ktest/git/lustre-release
+
+# Clone OpenZFS (version from top-level META). qlkbuild builds it out-of-tree
+# (generate_zfs_patch) and bakes the result into the combined kernel, so it
+# must be present next to linux/ as ~/git/zfs -- otherwise the ZFS build fails
+# hunting for its source (no META).
+ZVER=$(awk "/^ZFS-Maximum:/ {print \$2}" /home/ktest/ktest/META)
+echo "Cloning OpenZFS zfs-${ZVER}..."
+git clone --depth 1 --branch "zfs-${ZVER}" https://github.com/openzfs/zfs.git /home/ktest/git/zfs
 '
 
 echo "Repository fetch complete"
