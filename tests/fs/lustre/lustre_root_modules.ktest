@@ -15,9 +15,7 @@ config-lustre-root
 require-lustre-base-kernel-config
 require-kernel-config IPV6=y
 require-kernel-config VLAN_8021Q=y
-require-kernel-config LNET=y
-require-kernel-config LUSTRE_FS=y
-require-kernel-config ZFS=y
+require-lustre-builtin-kernel-config
 require-kernel-config MODULES=y
 require-kernel-config MODULE_UNLOAD
 

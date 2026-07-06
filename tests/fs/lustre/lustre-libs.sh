@@ -183,6 +183,39 @@ function require-lustre-kernel-config()
     fi
 }
 
+function require-lustre-builtin-kernel-config()
+{
+    # Built-in Lustre: LNET/Lustre/ZFS compiled into the kernel.
+    require-kernel-config LIBCFS=y
+    require-kernel-config LNET=y
+    require-kernel-config LUSTRE_FS=y
+    require-kernel-config LUSTRE_FS_SERVER=y
+
+    if [[ "$FSTYPE" =~ "zfs" ]]; then
+	require-kernel-config ZFS=y
+	require-kernel-config LUSTRE_FS_ZFS=y
+    else
+	require-kernel-config LUSTRE_FS_WBCFS=y
+    fi
+}
+
+function require-lustre-inkernel-kernel-config()
+{
+    # In-kernel Lustre: modules built from the kernel tree, with
+    # server support and a ZFS OSD.
+    require-kernel-config LIBCFS=m
+    require-kernel-config LNET=m
+    require-kernel-config LUSTRE_FS=m
+    require-kernel-config LUSTRE_FS_SERVER=m
+
+    if [[ "$FSTYPE" =~ "zfs" ]]; then
+	require-kernel-config ZFS=m
+	require-kernel-config LUSTRE_FS_ZFS=m
+    else
+	require-kernel-config LUSTRE_FS_WBCFS=m
+    fi
+}
+
 function require-lustre-ebpf-config()
 {
     # More tracing support!
