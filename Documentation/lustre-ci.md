@@ -134,7 +134,7 @@ bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
 
 ## Enable ccache
 ```
-sudo ln -s /path/to/ccache /usr/local/bin/clang-22
+sudo ln -s /path/to/ccache /usr/local/bin/clang-23
 ```
 
 ## Enable login linger

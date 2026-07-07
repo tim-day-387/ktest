@@ -22,7 +22,7 @@ checkdep gcc
 checkdep bc
 
 # Lustre parameters
-export CC="${CC:-clang-22}"
+export CC="${CC:-clang-23}"
 export FSTYPE="${BACKING_STORAGE:-wbcfs}"
 
 # Ktest parameters
@@ -32,7 +32,7 @@ ktest_zfs_source="$ktest_kernel_source/../zfs/"
 ktest_nvidia_source="$ktest_kernel_source/../open-gpu-kernel-modules/"
 ktest_boot_test="$ktest_dir/tests/fs/lustre/boot.ktest"
 ktest_ccplugin="$ktest_dir/cplugin/build/xunused"
-ktest_compiler="${CC:-clang-22}"
+ktest_compiler="${CC:-clang-23}"
 ktest_skip_kernel_config=false
 ktest_lustre_allow_warnings=0
 ktest_lustre_build_enable=1

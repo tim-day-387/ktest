@@ -5,7 +5,13 @@
 #include "lint.h"
 
 #include "clang/Basic/SourceManager.h"
+// LLVM 23 moved USRGeneration.h from clang/Index to
+// clang/UnifiedSymbolResolution; the clang::index namespace is unchanged.
+#if __has_include("clang/UnifiedSymbolResolution/USRGeneration.h")
+#include "clang/UnifiedSymbolResolution/USRGeneration.h"
+#else
 #include "clang/Index/USRGeneration.h"
+#endif
 #include "llvm/Support/Path.h"
 
 std::vector<std::unique_ptr<Lint>> makeAllLints() {

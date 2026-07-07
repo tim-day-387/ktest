@@ -49,7 +49,7 @@ RUN apt-get update && apt-get install -y \
 
 # The full dev/test/desktop package set
 RUN apt-get update && apt-get install -y \
-        build-essential make gcc g++ clang llvm clang-22 llvm-22 lld-22 \
+        build-essential make gcc g++ clang llvm clang-23 llvm-23 lld-23 \
         autoconf automake autopoint bison flex pahole libtool-bin pkg-config \
         cargo rustc rust-src golang-go python3-dev python3-docutils \
         devscripts debhelper sbuild dh-sequence-dkms dkms \

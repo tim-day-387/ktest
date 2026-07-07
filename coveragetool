@@ -38,7 +38,7 @@ if ! which lcov > /dev/null; then
 fi
 
 # When the kernel is compiled with clang, read the gcov data with llvm-cov.
-# Prefer the llvm-cov matching $CC (e.g. clang-22 -> llvm-cov-22) so the reader
+# Prefer the llvm-cov matching $CC (e.g. clang-23 -> llvm-cov-23) so the reader
 # understands the exact .gcno/.gcda format clang wrote; fall back to the newest
 # llvm-cov available (with a warning) rather than aborting the whole run.
 gcov_tool_opt=()

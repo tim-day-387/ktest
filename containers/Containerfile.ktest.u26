@@ -46,16 +46,18 @@ RUN apt-get update && apt-get install -y \
     chmod 0644 /boot/vmlinuz* && \
     rm -rf /var/lib/apt/lists/*
 
-# Get LLVM and clean up in the same layer.  llvm-22-dev / libclang-22-dev
-# provide the headers and libs the cplugin (xunused) links against.  llvm.sh
-# installs the latest stable LLVM (22), which is what cplugin's CMake
-# find_package picks up, so the matching -dev packages must be version 22.
-RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)" && \
-    apt-get install -y clang-tidy-22 llvm-22-dev libclang-22-dev llvm-22 && \
+# Get LLVM and clean up in the same layer.  llvm-23-dev / libclang-23-dev
+# provide the headers and libs the cplugin (xunused) links against.  The kernel
+# context-analysis (Clang thread-safety analysis) feature requires Clang 23, so
+# pass the version explicitly to llvm.sh (23 is not yet the default "latest
+# stable") and pin the matching -dev packages so cplugin's CMake find_package
+# picks up version 23.
+RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)" llvm.sh 23 && \
+    apt-get install -y clang-tidy-23 llvm-23-dev libclang-23-dev llvm-23 && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup ccache symlink for Lustre/ZFS builds
-RUN ln -s /usr/bin/ccache /usr/local/bin/clang-22
+RUN ln -s /usr/bin/ccache /usr/local/bin/clang-23
 
 # Rename the default ubuntu user (UID 1000) to ktest so that --userns=keep-id
 # from a host UID 1000 invoker maps to ktest. Creating a fresh ktest user on
