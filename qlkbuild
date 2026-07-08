@@ -63,12 +63,12 @@ function compute_localversion()
 
     # Get Lustre commit (short hash)
     if [[ -d "$ktest_lustre_source/.git" ]]; then
-        lustre_commit=$(git -C "$ktest_lustre_source" rev-parse --short HEAD 2>/dev/null || echo "")
+        lustre_commit=$(git -C "$ktest_lustre_source" rev-parse --short=7 HEAD 2>/dev/null || echo "")
     fi
 
     # Get ZFS commit (short hash)
     if [[ -d "$ktest_zfs_source/.git" ]]; then
-        zfs_commit=$(git -C "$ktest_zfs_source" rev-parse --short HEAD 2>/dev/null || echo "")
+        zfs_commit=$(git -C "$ktest_zfs_source" rev-parse --short=7 HEAD 2>/dev/null || echo "")
     fi
 
     # Build version string: -ktest-<lustre>-<zfs>-<date>
