@@ -1,0 +1,6 @@
+{
+  "name": "lustre_mainline_kbuild",
+  "platform": "mainline_kbuild",
+  "build": "tests/fs/ext2/boot.ktest",
+  "description": "Kernel build only (build output visible)"
+}

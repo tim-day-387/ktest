@@ -339,7 +339,13 @@ def run_build_lustre(
     # Get backing storage (default: wbcfs)
     backing_storage = job_config.get("backing_storage", "wbcfs")
 
-    if job_config["platform"] in ("mainline", "native_2", "zfs_patch", "native_1"):
+    if job_config["platform"] in (
+        "mainline",
+        "mainline_kbuild",
+        "native_2",
+        "zfs_patch",
+        "native_1",
+    ):
         command = build_config["build_script"] + " " + job_config.get("build", "")
     else:
         command = build_config["build_script"]

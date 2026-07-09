@@ -842,6 +842,30 @@ function cmd_build()
     mv "$uki_keep" "$ktest_kernel_binary/uki.efi"
 }
 
+# Build only the kernel, with the compiler output streamed to stdout instead of
+# hidden behind run_quiet_with_status.  Handy for iterating on kernel config /
+# compile errors without waiting on the full lustre/zfs/initramfs/uki pipeline.
+function cmd_kbuild()
+{
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    if [[ -n $COVERAGE ]]; then
+	ktest_kernel_config_require+=(GCOV_KERNEL)
+    fi
+
+    # Run build_kernel directly (not via run_quiet_with_status) so the build
+    # output is visible in the job log.
+    build_kernel
+}
+
 function prepare_linux_source()
 {
     local old="$PWD"
