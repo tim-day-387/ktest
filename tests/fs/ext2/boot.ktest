@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Just boot using the Lustre kernel config, with ext2 enabled
+#
+
+. "$(dirname "$(dirname "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")")")/test-libs.sh"
+
+# Global kernel config requirements (require-lustre-*-kernel-config, etc.)
+# live in the top-level config/ dir so any test can pull them in.
+. "$ktest_dir/config/config.sh"
+
+require-lustre-kernel-config
+require-lustre-debug-kernel-config
+
+require-kernel-config EXT2_FS=y
+require-kernel-config EXT2_FS_XATTR=y
+require-kernel-config EXT2_FS_POSIX_ACL=y
+require-kernel-config EXT2_FS_SECURITY=y
+
+config-mem 10G
+config-timeout 60
+
+test_boot()
+{
+    echo boot
+}
+
+main "$@"

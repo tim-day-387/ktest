@@ -14,6 +14,10 @@
 
 . "$(dirname "$(dirname "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")")")/test-libs.sh"
 
+# Global kernel config requirements (require-lustre-*-kernel-config, etc.)
+# live in the top-level config/ dir so any test can pull them in.
+. "$ktest_dir/config/config.sh"
+
 # The lustre-release and zfs trees are built in place on the host and reached
 # in the VM over the /host 9p mount (the build runs in these checkouts, so the
 # compiled modules/binaries live there).  The Lustre test framework (llmount.sh,
@@ -129,148 +133,6 @@ function set_hostname_interface()
 
     sed -i '/$host_name/d' /etc/hosts
     echo "$local_ip" "$host_name" >> /etc/hosts
-}
-
-function require-lustre-base-kernel-config()
-{
-    # Minimal config required for Lustre to build
-    require-kernel-config TRANSPARENT_HUGEPAGE
-    require-kernel-config QUOTA
-    require-kernel-config KEYS
-    require-kernel-config NETWORK_FILESYSTEMS
-    require-kernel-config MULTIUSER
-    require-kernel-config NFS_FS
-    require-kernel-config BITREVERSE
-    require-kernel-config CRYPTO
-    require-kernel-config CRYPTO_DEFLATE
-    require-kernel-config ZLIB_DEFLATE
-
-    # More tracing support!
-    require-kernel-config BPF_SYSCALL
-    require-kernel-config DEBUG_INFO_BTF
-    # require-kernel-config DEBUG_INFO_BTF_MODULES
-    require-kernel-config BPF_JIT
-    require-kernel-config FUNCTION_GRAPH_RETVAL
-
-    # Expose kernel config via /proc/config.gz
-    require-kernel-config IKCONFIG
-    require-kernel-config IKCONFIG_PROC
-
-    # Enable zswap by default
-    require-kernel-config ZSWAP
-    require-kernel-config ZSWAP_DEFAULT_ON
-
-    # Profiling
-    # TODO: Fix me!
-    require-kernel-config MEM_ALLOC_PROFILING
-    require-kernel-config ERRNO_UNWIND
-}
-
-function require-lustre-modules-kernel-config()
-{
-    require-kernel-config MODULES,MODULE_UNLOAD
-}
-
-function require-lustre-kernel-config()
-{
-    require-lustre-base-kernel-config
-    require-lustre-modules-kernel-config
-
-    # ZFS uses a ramdisk for backing storage
-    if [[ "$FSTYPE" =~ "zfs" ]]; then
-	require-kernel-config BLK_DEV_RAM=y
-	require-kernel-config BLK_DEV_RAM_SIZE=524288
-    fi
-
-    # On the native platform Lustre is built in-tree, so pull in the in-kernel
-    # modules (LNET/Lustre/OSD as =m) - they land in /lib/modules for
-    # load_lustre_modules to modprobe. On mainline Lustre comes from an
-    # out-of-tree lustre-release build, so this is skipped.
-    if [[ "${ktest_lustre_intree:-0}" == "1" ]]; then
-	require-lustre-inkernel-kernel-config
-    fi
-}
-
-function require-lustre-builtin-kernel-config()
-{
-    # Built-in Lustre: LNET/Lustre/ZFS compiled into the kernel.
-    require-kernel-config LIBCFS=y
-    require-kernel-config LNET=y
-    require-kernel-config LUSTRE_FS=y
-    require-kernel-config LUSTRE_FS_SERVER=y
-
-    if [[ "$FSTYPE" =~ "zfs" ]]; then
-	require-kernel-config ZFS=y
-	require-kernel-config LUSTRE_FS_ZFS=y
-    else
-	require-kernel-config LUSTRE_FS_WBCFS=y
-    fi
-}
-
-function require-lustre-inkernel-kernel-config()
-{
-    # In-kernel Lustre: modules built from the kernel tree, with
-    # server support and a ZFS OSD.
-    require-kernel-config LIBCFS=m
-    require-kernel-config LNET=m
-    require-kernel-config LUSTRE_FS=m
-    require-kernel-config LUSTRE_FS_SERVER=m
-
-    if [[ "$FSTYPE" =~ "zfs" ]]; then
-	require-kernel-config ZFS=m
-	require-kernel-config LUSTRE_FS_ZFS=m
-    else
-	require-kernel-config LUSTRE_FS_WBCFS=m
-    fi
-}
-
-function require-lustre-ebpf-config()
-{
-    # More tracing support!
-    require-kernel-config BPF_SYSCALL=y
-    require-kernel-config DEBUG_INFO_BTF=y
-    require-kernel-config DEBUG_INFO_BTF_MODULES=y
-    require-kernel-config BPF_JIT=y
-}
-
-function require-lustre-debug-kernel-config()
-{
-    # Basic debugging stuff
-    require-kernel-config KASAN
-    require-kernel-config KASAN_VMALLOC
-
-    # ZFS doesn't support some options
-    if [[ "$FSTYPE" =~ "zfs" ]]; then
-	return
-    fi
-
-    # Extra debug (probably expensive)
-    require-kernel-config DEBUG_INFO
-    require-kernel-config DEBUG_FS
-    require-kernel-config DEBUG_KERNEL
-    require-kernel-config DEBUG_MEMORY_INIT
-    require-kernel-config DEBUG_RT_MUTEXES
-    require-kernel-config DEBUG_SPINLOCK
-    require-kernel-config DEBUG_MUTEXES
-    require-kernel-config DEBUG_WW_MUTEX_SLOWPATH
-    require-kernel-config DEBUG_RWSEMS
-    require-kernel-config DEBUG_IRQFLAGS
-    require-kernel-config DEBUG_BUGVERBOSE
-    require-kernel-config DEBUG_PI_LIST
-}
-
-function require-lustre-efa-kernel-config()
-{
-    require-kernel-config NETDEVICES
-    require-kernel-config PCI_MSI
-    require-kernel-config NET_VENDOR_AMAZON
-    require-kernel-config ETHERNET
-    require-kernel-config PCI
-    require-kernel-config AMAZON_DRIVER_UPDATES
-    require-kernel-config AMAZON_ENA_ETHERNET
-    require-kernel-config INFINIBAND
-    require-kernel-config INFINIBAND_USER_ACCESS
-    require-kernel-config AMAZON_EFA_INFINIBAND
 }
 
 function load_lustre_modules()
