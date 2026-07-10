@@ -726,6 +726,10 @@ build_kernel()
     rm -rf "$ktest_kernel_binary"
     mkdir -p "$ktest_kernel_binary"
 
+    if declare -f apply_linux_patches >/dev/null; then
+	apply_linux_patches
+    fi
+
     configure_kernel
 
     do_make -k KCFLAGS="-Werror=thread-safety"

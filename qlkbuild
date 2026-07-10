@@ -401,8 +401,9 @@ function build_lustre()
     cd "$old"
 }
 
-function apply_lustre_patches() {
-    local patches_dir="$ktest_dir/patches"
+function apply_patches() {
+    local patches_dir="$1"
+    local target_repo="$2"
 
     [[ -d "$patches_dir" ]] || return 0
 
@@ -414,12 +415,20 @@ function apply_lustre_patches() {
 
     for patch in "${patches[@]}"; do
 	local name=$(basename "$patch")
-	if git -C "$ktest_lustre_build" apply --whitespace=nowarn "$patch"; then
+	if git -C "$target_repo" apply --whitespace=nowarn "$patch"; then
 	    echo "Applied patch: $name"
 	else
 	    echo "WARNING: Failed to apply patch $name (continuing)"
 	fi
     done
+}
+
+function apply_lustre_patches() {
+    apply_patches "$ktest_dir/patches/lustre" "$ktest_lustre_build"
+}
+
+function apply_linux_patches() {
+    apply_patches "$ktest_dir/patches/linux" "$ktest_kernel_source"
 }
 
 function purge_build_junk() {

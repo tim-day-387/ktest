@@ -1,0 +1,24 @@
+From 6857030f62db094a74f41c194ce810e8a6e58e9f Mon Sep 17 00:00:00 2001
+From: Timothy Day <timday@thelustrecollective.com>
+Date: Fri, 10 Jul 2026 00:42:47 -0400
+Subject: [PATCH] Fix compile error
+
+---
+ arch/x86/boot/compressed/Makefile | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/x86/boot/compressed/Makefile b/arch/x86/boot/compressed/Makefile
+index b8b2b7bea1d31..61ef0cf46f2d0 100644
+--- a/arch/x86/boot/compressed/Makefile
++++ b/arch/x86/boot/compressed/Makefile
+@@ -42,6 +42,7 @@ KBUILD_CFLAGS += -Wno-microsoft-anon-tag
+ endif
+ KBUILD_CFLAGS += -Wno-pointer-sign
+ KBUILD_CFLAGS += -fno-asynchronous-unwind-tables
++KBUILD_CFLAGS += -fno-jump-tables
+ KBUILD_CFLAGS += -D__DISABLE_EXPORTS
+ # Disable relocation relaxation in case the link is not PIE.
+ KBUILD_CFLAGS += $(call cc-option,-Wa$(comma)-mrelax-relocations=no)
+-- 
+2.39.5
+
