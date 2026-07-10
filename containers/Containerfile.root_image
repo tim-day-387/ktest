@@ -29,12 +29,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # Third-party apt repositories
-#   - apt.llvm.org        LLVM/Clang 22
+#   - apt.llvm.org        LLVM/Clang 23 (the development branch; apt.llvm.org
+#                         only ships it in the unversioned noble suite — the
+#                         versioned llvm-toolchain-noble-NN suites stop at 22)
 #   - cli.github.com      gh (GitHub CLI)
 RUN install -d /etc/apt/keyrings \
  && curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
         -o /etc/apt/keyrings/apt.llvm.org.asc \
- && echo 'deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' \
+ && echo 'deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble main' \
         > /etc/apt/sources.list.d/llvm.list \
  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
