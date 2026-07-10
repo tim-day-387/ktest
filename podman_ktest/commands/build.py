@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from ..config import IMAGES
-from ..utils import get_git_version_info, get_podman_client
+from ..utils import get_git_version_info, get_podman_client, get_zfs_version
 
 
 def _build_image(dockerfile, tag, name, ktest_dir, podman_socket=None, buildargs=None):
@@ -54,6 +54,9 @@ def cmd_build(args, ktest_dir, podman_socket=None):
     git_tag, git_commit = get_git_version_info(ktest_dir)
     ci_buildargs = {"GIT_TAG": git_tag, "GIT_COMMIT": git_commit}
 
+    # The coverity image pins the ZFS tag from the top-level META file
+    zfs_buildargs = {"ZFS_VERSION": get_zfs_version(ktest_dir)}
+
     # Build ktest-runner first since ci-lustre depends on it
     base_images = [img for img in images_to_build if img["name"] == "ktest-runner"]
     dependent_images = [img for img in images_to_build if img["name"] != "ktest-runner"]
@@ -84,6 +87,11 @@ def cmd_build(args, ktest_dir, podman_socket=None):
             raise RuntimeError(f"Unsatisfiable image dependencies: {unmet}")
         remaining = [img for img in remaining if img not in wave]
 
+        buildargs_by_name = {
+            "ci-lustre": ci_buildargs,
+            "lustre-rocky9-coverity": zfs_buildargs,
+        }
+
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {
                 executor.submit(
@@ -93,7 +101,7 @@ def cmd_build(args, ktest_dir, podman_socket=None):
                     img["name"],
                     ktest_dir,
                     podman_socket,
-                    ci_buildargs if img["name"] == "ci-lustre" else None,
+                    buildargs_by_name.get(img["name"]),
                 ): img["name"]
                 for img in wave
             }

@@ -346,6 +346,25 @@ def get_git_version_info(repo_path):
     return tag, commit
 
 
+def get_zfs_version(ktest_dir):
+    """Get the ZFS version from the top-level META file.
+
+    Args:
+        ktest_dir: Path to the ktest directory (where META lives)
+
+    Returns:
+        The ZFS version string (e.g. "2.4.2")
+
+    Raises:
+        RuntimeError: if the ZFS-Maximum field cannot be found
+    """
+    meta_path = Path(ktest_dir) / "META"
+    for line in meta_path.read_text().splitlines():
+        if line.startswith("ZFS-Maximum:"):
+            return line.split(":", 1)[1].strip()
+    raise RuntimeError(f"ZFS-Maximum not found in {meta_path}")
+
+
 class TeeWriter:
     """Write to multiple streams simultaneously."""
 
