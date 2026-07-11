@@ -13,7 +13,14 @@
 function require-lustre-base-kernel-config()
 {
     # Minimal config required for Lustre to build
-    require-kernel-config TRANSPARENT_HUGEPAGE
+    #
+    # TRANSPARENT_HUGEPAGE is "depends on !PREEMPT_RT" in the kernel, so it
+    # can never be enabled on an RT build -- olddefconfig would drop it and
+    # the config check would then fail. Only require it when we're not
+    # building a PREEMPT_RT kernel.
+    if [[ ! " ${ktest_kernel_config_require[*]} " = *" PREEMPT_RT "* ]]; then
+	require-kernel-config TRANSPARENT_HUGEPAGE
+    fi
     require-kernel-config QUOTA
     require-kernel-config KEYS
     require-kernel-config NETWORK_FILESYSTEMS
@@ -130,10 +137,16 @@ function require-lustre-debug-kernel-config()
     require-kernel-config DEBUG_MEMORY_INIT
     require-kernel-config DEBUG_RT_MUTEXES
     require-kernel-config DEBUG_SPINLOCK
-    require-kernel-config DEBUG_MUTEXES
     require-kernel-config DEBUG_WW_MUTEX_SLOWPATH
-    require-kernel-config DEBUG_RWSEMS
     require-kernel-config DEBUG_IRQFLAGS
+
+    # DEBUG_MUTEXES/DEBUG_RWSEMS are "depends on !PREEMPT_RT" -- on an RT
+    # build the mutex/rwsem implementations are replaced by rtmutexes, so
+    # these debug options can't be enabled. Skip them for PREEMPT_RT.
+    if [[ ! " ${ktest_kernel_config_require[*]} " = *" PREEMPT_RT "* ]]; then
+	require-kernel-config DEBUG_MUTEXES
+	require-kernel-config DEBUG_RWSEMS
+    fi
     require-kernel-config DEBUG_BUGVERBOSE
     require-kernel-config DEBUG_PI_LIST
 }

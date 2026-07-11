@@ -1,0 +1,22 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_patch",
+      "platform": "native_1",
+      "build": "tests/fs/lustre/preempt_rt-llmount.ktest"
+    },
+    {
+      "name": "lustre_native",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/preempt_rt-llmount.ktest",
+      "depends_on": ["lustre_patch"]
+    },
+    {
+      "name": "lustre_native_boot",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/preempt_rt-llmount.ktest",
+      "run": "tests/fs/lustre/preempt_rt-llmount.ktest",
+      "depends_on": ["lustre_native"]
+    }
+  ]
+}

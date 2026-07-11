@@ -140,6 +140,105 @@ require-kernel-config()
     IFS=$OLDIFS
 }
 
+# Enable CONFIG_EXPERT along with the pile of core options it unhides.
+#
+# CONFIG_EXPERT gives a Kconfig prompt to a large set of infrastructure
+# options that are otherwise invisible and simply default to y (BLOCK,
+# SHMEM, PROC_FS, SYSFS, PRINTK, the syscall knobs, ...). new_config()
+# builds the base config by running allnoconfig and then marking every
+# symbol "is not set"; for invisible options olddefconfig restores their
+# default y, but once EXPERT gives them a prompt the "is not set" sticks
+# and they stay off. That knocks out huge swaths of the kernel -- e.g.
+# BLOCK=n drags SWAP, SCSI, EXT4 and friends down with it, failing the
+# config check. Any test that needs EXPERT (PREEMPT_RT depends on it)
+# must therefore re-require the defaults EXPERT would otherwise have
+# left enabled. This list is the set of default-y options that EXPERT
+# unhides on x86_64, derived by diffing the generated config against a
+# non-EXPERT build.
+require-expert-kernel-config()
+{
+    require-kernel-config EXPERT
+
+    # Core
+    require-kernel-config PRINTK
+    require-kernel-config BUG
+
+    # procfs / sysfs / sysctl
+    require-kernel-config PROC_FS
+    require-kernel-config PROC_SYSCTL
+    require-kernel-config PROC_PAGE_MONITOR
+    require-kernel-config SYSFS
+    require-kernel-config SYSCTL
+    require-kernel-config SYSVIPC_SYSCTL
+
+    # Block layer (SWAP/SCSI/EXT4/... hang off this)
+    require-kernel-config BLOCK
+
+    # Memory management
+    require-kernel-config SHMEM
+    require-kernel-config MEMFD_CREATE
+    require-kernel-config SECRETMEM
+    require-kernel-config VM_EVENT_COUNTERS
+    require-kernel-config ZONE_DMA
+
+    # Syscall interfaces
+    require-kernel-config FUTEX
+    require-kernel-config EPOLL
+    require-kernel-config EVENTFD
+    require-kernel-config SIGNALFD
+    require-kernel-config TIMERFD
+    require-kernel-config AIO
+    require-kernel-config IO_URING
+    require-kernel-config MEMBARRIER
+    require-kernel-config RSEQ
+    require-kernel-config ADVISE_SYSCALLS
+    require-kernel-config CACHESTAT_SYSCALL
+    require-kernel-config SGETMASK_SYSCALL
+    require-kernel-config POSIX_TIMERS
+    require-kernel-config FHANDLE
+    require-kernel-config FILE_LOCKING
+    require-kernel-config NAMESPACES
+
+    # Core dumps
+    require-kernel-config COREDUMP
+    require-kernel-config ELF_CORE
+    require-kernel-config ALLOW_DEV_COREDUMP
+
+    # TTY / console
+    require-kernel-config UNIX98_PTYS
+    require-kernel-config VT_CONSOLE
+    require-kernel-config VT_CONSOLE_SLEEP
+    require-kernel-config VGA_CONSOLE
+    require-kernel-config CONSOLE_TRANSLATIONS
+    require-kernel-config EARLY_PRINTK
+
+    # Firmware loading
+    require-kernel-config FW_LOADER
+    require-kernel-config FW_CACHE
+    require-kernel-config FIRMWARE_MEMMAP
+
+    # CRC implementations
+    require-kernel-config CRC32_ARCH
+    require-kernel-config CRC_OPTIMIZATIONS
+
+    # x86 platform bits
+    require-kernel-config MODIFY_LDT_SYSCALL
+    require-kernel-config X86_16BIT
+    require-kernel-config X86_ESPFIX64
+    require-kernel-config X86_PAT
+    require-kernel-config X86_UMIP
+    require-kernel-config MTRR
+    require-kernel-config DMI
+    require-kernel-config DMI_SCAN_MACHINE_NON_EFI_FALLBACK
+    require-kernel-config ARCH_MAY_HAVE_PC_FDC
+    require-kernel-config ARCH_USES_PG_ARCH_2
+    require-kernel-config ISA_DMA_API
+    require-kernel-config GENERIC_ISA_DMA
+    require-kernel-config I8253_LOCK
+    require-kernel-config PCSPKR_PLATFORM
+    require-kernel-config RANDOMIZE_KSTACK_OFFSET
+}
+
 require-kernel-config-soft()
 {
     ktest_kernel_config_require_soft+=("$1")
