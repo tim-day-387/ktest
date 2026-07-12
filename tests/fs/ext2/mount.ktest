@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Boot using the Lustre kernel config, then mkfs, mount and exercise ext2.
+#
+
+. "$(dirname "$(dirname "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")")")/test-libs.sh"
+
+# Global kernel config requirements (require-lustre-*-kernel-config, etc.)
+# live in the top-level config/ dir so any test can pull them in.
+. "$ktest_dir/config/config.sh"
+
+require-lustre-kernel-config
+require-lustre-debug-kernel-config
+
+# ext2 is in-tree; there is no reason to build (or patch in) Lustre for it.
+config-no-lustre
+
+require-kernel-config EXT2_FS=y
+require-kernel-config EXT2_FS_XATTR=y
+require-kernel-config EXT2_FS_POSIX_ACL=y
+require-kernel-config EXT2_FS_SECURITY=y
+
+config-mem 10G
+config-timeout 60
+config-scratch-devs 4G
+
+test_ext2()
+{
+    local dev=${ktest_scratch_dev[0]}
+    local mnt=/mnt/ext2
+
+    echo "Creating ext2 filesystem on $dev"
+    mkfs.ext2 -F -q "$dev"
+
+    mkdir -p "$mnt"
+    mount -t ext2 "$dev" "$mnt"
+
+    echo "Writing test data"
+    dd if=/dev/urandom of="$mnt/testfile" bs=1M count=64
+    cp -a /usr/bin "$mnt/bin"
+    sync
+
+    echo "Verifying data survives remount"
+    local sum=$(md5sum "$mnt/testfile" | cut -d' ' -f1)
+    umount "$mnt"
+
+    mount -t ext2 "$dev" "$mnt"
+    local sum2=$(md5sum "$mnt/testfile" | cut -d' ' -f1)
+    if [[ $sum != $sum2 ]]; then
+	echo "checksum mismatch after remount: $sum != $sum2"
+	return 1
+    fi
+
+    umount "$mnt"
+
+    echo "Running fsck"
+    fsck.ext2 -fn "$dev"
+
+    echo "ext2 mount test passed"
+}
+
+main "$@"

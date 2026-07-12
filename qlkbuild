@@ -825,7 +825,9 @@ function cmd_build()
     if [[ "$FSTYPE" == "zfs" ]]; then
 	 run_quiet_with_status "ZFS BUILD [$(basename "$ktest_test")]" "DONE" build_zfs_full
     fi
-    run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
+    if [[ "$ktest_lustre" != "0" ]]; then
+	run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
+    fi
 
     if [[ "$ktest_nvidia" == "1" ]]; then
 	run_quiet_with_status "NVIDIA BUILD [$(basename "$ktest_test")]" "DONE" build_nvidia

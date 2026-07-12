@@ -47,6 +47,7 @@ if [[ ! -v ktest_cpus ]]; then
     ktest_root_image=
     ktest_uki_firmware=0
     ktest_nvidia=0
+    ktest_lustre=1
 
     BUILD_ON_HOST=""
 fi
@@ -382,6 +383,14 @@ config-nvidia-modules()
     ktest_nvidia=1
 }
 
+# Skip building Lustre (and applying its kernel patch) for tests that only need
+# the kernel itself - e.g. plain in-tree filesystem tests.  See cmd_build in
+# qlkbuild.
+config-no-lustre()
+{
+    ktest_lustre=0
+}
+
 allow_taint()
 {
     ktest_allow_taint=true
@@ -566,6 +575,7 @@ main()
 	    echo "ktest_lustre_root=$ktest_lustre_root"
 	    echo "ktest_uki_firmware=$ktest_uki_firmware"
 	    echo "ktest_nvidia=$ktest_nvidia"
+	    echo "ktest_lustre=$ktest_lustre"
 	    if [[ -n $ktest_networking ]]; then
 		echo "ktest_networking=$ktest_networking"
 	    fi

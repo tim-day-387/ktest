@@ -1,0 +1,17 @@
+{
+  "jobs": [
+    {
+      "name": "ext2_build",
+      "platform": "mainline",
+      "build": "tests/fs/ext2/mount.ktest",
+      "description": "Build kernel with ext2 enabled (no Lustre)"
+    },
+    {
+      "name": "ext2-mount",
+      "platform": "mainline",
+      "run": "tests/fs/ext2/mount.ktest",
+      "depends_on": ["ext2_build"],
+      "description": "Mount and test ext2"
+    }
+  ]
+}
