@@ -53,11 +53,12 @@ RUN apt-get update && apt-get install -y \
 RUN apt-get update && apt-get install -y \
         build-essential make gcc g++ clang llvm clang-23 llvm-23 lld-23 \
         autoconf automake autopoint bison flex pahole libtool-bin pkg-config \
-        cargo rustc rust-src golang-go python3-dev python3-docutils \
+        golang-go python3-dev python3-docutils \
         devscripts debhelper sbuild dh-sequence-dkms dkms \
         bear quilt module-assistant git-review swig mold \
         libelf-dev libbpf-dev libblkid-dev uuid-dev libscrypt-dev libsodium-dev \
         libkeyutils-dev liburcu-dev libudev-dev zlib1g-dev libattr1-dev \
+        libunwind-dev \
         libaio-dev libzstd-dev liblz4-dev libfuse3-dev libclang-dev libldap2-dev \
         libgdbm-dev libacl1-dev gettext libssl-dev libgdbm-compat-dev liburing-dev \
         libcap-dev libcap2-bin libinih-dev libsnmp-dev mpi-default-dev \
@@ -74,6 +75,21 @@ RUN apt-get update && apt-get install -y \
         podman podman-compose python3-podman fuse-overlayfs \
         emacs keepassxc evolution tlp powertop firefox snapd gh \
  && rm -rf /var/lib/apt/lists/*
+
+# Rust toolchain via rustup (as in Containerfile.ktest.u26). Ubuntu 24.04's apt
+# cargo is 1.75, too old to parse the version 4 Cargo.lock that bcachefs-tools
+# now ships ("lock file version 4 requires -Znext-lockfile-bump"); rustup gives
+# us current stable.
+#
+# The toolchain lives under /opt so it survives testrunner remapping
+# /root/.cargo -> $HOME/.cargo, and we symlink the *real* toolchain binaries
+# (not the rustup proxies, which need RUSTUP_HOME in the environment at runtime)
+# into /usr/local/bin so cargo/rustc are found inside the VM with no env setup.
+RUN export RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo \
+ && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --no-modify-path --profile minimal --component rust-src \
+ && ln -sf /opt/rustup/toolchains/*/bin/* /usr/local/bin/ \
+ && chmod -R a+rwX /opt/rustup /opt/cargo
 
 # Lustre client utils + dev/iokit/tests, pulled from the Lustre mirror. The
 # root filesystem is Lustre, so every image built on this base needs them.

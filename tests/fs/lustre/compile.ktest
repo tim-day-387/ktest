@@ -7,7 +7,7 @@
 #
 
 #
-# Build and run bcachefs-tools.
+# Build and run dummyc.
 #
 # Author: Timothy Day <timday@amazon.com>
 #
@@ -34,15 +34,21 @@ get_dir_checksum()
 reset_mounts()
 {
     local chk_file_a="/tmp/chk.$RANDOM"
-    local chk_a="$(get_dir_checksum /mnt/lustre/bcachefs-tools $chk_file_a)"
+    local chk_a="$(get_dir_checksum /mnt/lustre/dummyc $chk_file_a)"
 
     sync; echo 3 > /proc/sys/vm/drop_caches
     cd /
     umount /mnt/lustre
-    run_tf mountcli
+
+    # Remount against the loopback NID. Going through test-framework's mountcli
+    # would derive the NID from the hostname (h2nettype(hostname) ->
+    # localhost.localdomain@tcp), which is invalid here since LNet has no real
+    # interface in the native VM - only 0@lo. This matches how the rust setup
+    # (LNET_INTF=0@lo) and racer.ktest (MGSNID=0@lo) mount the client.
+    mount -t lustre -o flock,user_xattr "0@lo:/lustre" /mnt/lustre
 
     local chk_file_b="/tmp/chk.$RANDOM"
-    local chk_b="$(get_dir_checksum /mnt/lustre/bcachefs-tools $chk_file_b)"
+    local chk_b="$(get_dir_checksum /mnt/lustre/dummyc $chk_file_b)"
 
     if [[ "$chk_a" != "$chk_b" ]]; then
 	echo "Corruption found! A=$chk_a B=$chk_b"
@@ -60,16 +66,22 @@ test_compile()
 
     # Get source
     cd /mnt/lustre
-    git clone https://github.com/koverstreet/bcachefs-tools.git
+    git clone https://github.com/tim-day-387/dummyc.git
     reset_mounts
 
     # Build
-    cd /mnt/lustre/bcachefs-tools
-    make -j$(nproc)
+    #
+    # The VM root filesystem is read-only, so cargo cannot use its default
+    # CARGO_HOME (/root/.cargo) for the crate registry cache. Point it at a
+    # writable location on lustre, but outside dummyc so it is not
+    # included in the tree that reset_mounts checksums.
+    cd /mnt/lustre/dummyc
+    export CARGO_HOME=/mnt/lustre/cargo
+    cargo build -j$(nproc)
     reset_mounts
 
     # Run
-    bash -c "/mnt/lustre/bcachefs-tools/bcachefs" || true
+    bash -c "/mnt/lustre/dummyc/target/debug/dummyc" || true
 
     cleanup_lustrefs
 }
