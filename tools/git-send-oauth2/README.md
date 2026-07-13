@@ -188,6 +188,102 @@ on thread.
       ... v2-0*.patch
   ```
 
+## Replying to a message in a thread
+
+Sometimes you're not sending a patch at all — you just want to reply to a
+review comment or question in an existing thread. `git send-email` can do
+this too: it will send any file that looks like an email, so you hand it
+a plain message with the right threading headers and let the wrapper
+authenticate.
+
+The threading headers are the whole point. Get them right and your reply
+nests under the correct message in everyone's mail client and on lore;
+get them wrong and it shows up as a detached new thread.
+
+### 1. Generate the template
+
+`reply-template.py` (in this directory) builds the reply file for you —
+correct threading headers, reply-all recipients, and the original message
+quoted. Point it at the message you're answering; that can be a lore
+permalink, a bare Message-ID, or a local `.eml`/mbox file:
+
+```sh
+# by lore permalink or Message-ID (fetched from lore.kernel.org):
+./reply-template.py '<reply-msgid@example.com>' -o reply.eml
+./reply-template.py 'https://lore.kernel.org/linux-subsystem/<reply-msgid@example.com>/' -o reply.eml
+
+# or from a thread you already downloaded — picks the last message,
+# or use --select to answer a specific one:
+curl -sL "https://lore.kernel.org/linux-subsystem/<cover-msgid@example.com>/t.mbox.gz" \
+    | gunzip > thread.mbox
+./reply-template.py thread.mbox --select '<reply-msgid@example.com>' -o reply.eml
+```
+
+It's standard-library only (no `pip install`), and without `-o` it writes
+the template to stdout. The result looks like:
+
+```
+From: Your Name <you@example.com>
+To: Maintainer Name <maintainer@example.com>
+Cc: linux-subsystem@vger.kernel.org,
+        Reviewer Name <reviewer@example.com>,
+        linux-kernel@vger.kernel.org
+Subject: Re: [PATCH v1 1/9] subsystem: fix the thing
+In-Reply-To: <reply-msgid@example.com>
+References: <cover-msgid@example.com>
+ <patch1-msgid@example.com>
+ <reply-msgid@example.com>
+
+On Mon, 13 Jul 2026 10:32:56 -0400, Maintainer Name wrote:
+> Is there any other way we could fix this?
+
+<< write your reply here >>
+
+Thanks,
+Your Name
+```
+
+### 2. Fill in the body
+
+Replace the `<< write your reply here >>` marker with your response, and
+trim the quoted lines down to the parts you're actually addressing. The
+headers are already correct, but it's worth knowing what they mean:
+
+- **`From:`** is taken from your `sendemail.smtpuser` (falling back to
+  `user.email`) — it must be the account you authenticate as, or the mail
+  is rejected.
+- **`To:`** is the author you're answering; **`Cc:`** is everyone else who
+  was on the message (the subsystem list, other reviewers, `linux-kernel`)
+  minus your own address — i.e. a reply-all.
+- **`In-Reply-To:`** is the `Message-ID` of the one message you're
+  answering.
+- **`References:`** is that message's `References` chain *plus* its own
+  `Message-ID`. This is what threads the reply; `git send-email` preserves
+  the header verbatim, so a full chain here beats passing a bare
+  `--in-reply-to` (which references only a single message).
+
+If you'd rather hand-write the file, just reproduce that header block —
+the rules above are all there is to it.
+
+### 3. Dry run, then send
+
+Because every header is already in the file, you don't repeat them on the
+command line — `git send-email` reads and preserves them:
+
+```sh
+/path/to/ktest/tools/git-send-oauth2/git-send-oauth2.sh --dry-run reply.eml
+```
+
+Confirm the dry run shows your `In-Reply-To`/`References` intact and the
+right To/Cc, then drop `--dry-run` to send:
+
+```sh
+/path/to/ktest/tools/git-send-oauth2/git-send-oauth2.sh reply.eml
+```
+
+Add `--8bit-encoding=UTF-8` if your reply contains any non-ASCII
+characters, otherwise `git send-email` will stop to ask.
+
 ## Troubleshooting
 
 - **Device-code prompt appears every time** — the cache file is missing
