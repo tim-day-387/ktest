@@ -127,14 +127,16 @@ make --quiet -j$(nproc) rpms
     },
     "al2": {
         "image": "lustre-al2:latest",
+        # The default gcc 7.3 cannot build against the amzn2 kernel, which
+        # was configured with a newer compiler (CONFIG_CC_HAS_ASM_INLINE).
         "build_script": """
 ./autogen.sh
-./configure
+CC=gcc10-gcc ./configure
 make --quiet -j$(nproc)
 """,
         "package_script": """
 ./autogen.sh
-./configure
+CC=gcc10-gcc ./configure
 make --quiet -j$(nproc) rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",

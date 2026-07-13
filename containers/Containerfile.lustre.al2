@@ -13,6 +13,7 @@ FROM public.ecr.aws/amazonlinux/amazonlinux:2
 
 # Install ktest dependencies
 RUN amazon-linux-extras install epel -y
+RUN amazon-linux-extras enable kernel-5.10
 RUN yum install -y asciidoc audit-libs-devel automake bc binutils-devel \
     bison device-mapper-devel elfutils-devel elfutils-libelf-devel expect \
     flex gcc gcc-c++ git glib2 glib2-devel hmaccalc keyutils-libs-devel \
