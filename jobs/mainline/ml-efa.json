@@ -1,0 +1,6 @@
+{
+  "name": "efa_build",
+  "platform": "mainline",
+  "build": "tests/drivers/infiniband/hw/efa/boot.ktest",
+  "description": "Build kernel with the Amazon EFA driver enabled (no Lustre)"
+}

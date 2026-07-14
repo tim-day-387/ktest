@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Just boot using the Lustre kernel config, with the Amazon Elastic
+# Fabric Adapter (EFA) driver (drivers/infiniband/hw/efa) enabled -
+# i.e. a build test for the driver.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/../../../../test-libs.sh"
+
+# Global kernel config requirements (require-lustre-*-kernel-config, etc.)
+# live in the top-level config/ dir so any test can pull them in.
+. "$ktest_dir/config/config.sh"
+
+require-lustre-kernel-config
+require-lustre-debug-kernel-config
+
+# EFA is in-tree; there is no reason to build (or patch in) Lustre for it.
+config-no-lustre
+
+# INFINIBAND_EFA depends on PCI_MSI, which the base config doesn't enable.
+require-kernel-config PCI_MSI=y
+require-kernel-config INFINIBAND=y
+require-kernel-config INFINIBAND_USER_ACCESS=y
+require-kernel-config INFINIBAND_EFA=y
+
+config-mem 10G
+config-timeout 60
+
+test_boot()
+{
+    echo boot
+}
+
+main "$@"
