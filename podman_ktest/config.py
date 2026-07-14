@@ -34,6 +34,11 @@ IMAGES = [
         "name": "lustre-al2",
     },
     {
+        "dockerfile": "containers/Containerfile.lustre.rocky8",
+        "tag": "lustre-rocky8:latest",
+        "name": "lustre-rocky8",
+    },
+    {
         "dockerfile": "containers/Containerfile.lustre.rocky9",
         "tag": "lustre-rocky9:latest",
         "name": "lustre-rocky9",
@@ -139,6 +144,23 @@ make --quiet -j$(nproc)
         "package_script": """
 ./autogen.sh
 CC=gcc10-gcc ./configure
+make --quiet -j$(nproc) rpms
+""",
+        "working_dir": "/home/ktest/git/lustre-release/",
+        "distro_platform": True,
+    },
+    "rocky8": {
+        "image": "lustre-rocky8:latest",
+        "build_script": """
+O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
+./autogen.sh
+./configure --disable-server
+make --quiet -j$(nproc)
+""",
+        "package_script": """
+O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
+./autogen.sh
+./configure --disable-server
 make --quiet -j$(nproc) rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",

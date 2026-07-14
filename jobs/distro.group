@@ -3,6 +3,8 @@ distro/al2
 distro/al2-pkg
 distro/al2023
 distro/al2023-pkg
+distro/rocky8
+distro/rocky8-pkg
 distro/rocky9
 distro/rocky9-pkg
 distro/rocky10

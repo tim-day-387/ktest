@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0
+
+# Distro
+FROM docker.io/rockylinux/rockylinux:8
+
+# Install ktest dependencies
+RUN dnf install -y dnf-plugins-core
+RUN dnf config-manager --set-enabled powertools
+RUN dnf install -y gcc autoconf libtool which make patch diffutils file \
+	binutils-devel python3 python3-devel elfutils-devel e2fsprogs-devel \
+	libselinux-devel libaio-devel dnf-plugins-core bc bison flex \
+	libyaml-devel libnl3-devel libmount-devel libtirpc-devel \
+	libblkid-devel openssl-devel libuuid-devel git kernel-devel \
+	keyutils-libs keyutils-libs-devel rpm-build kernel \
+	kernel-abi-stablelists kernel-rpm-macros kmod pkgconfig
+RUN dnf install -y --enablerepo=*debug* kernel-debuginfo
+
+# DOCA-OFED
+RUN printf '[mlnx_ofed]\nname=MLNX_OFED Repository - el8\nbaseurl=https://linux.mellanox.com/public/repo/mlnx_ofed/latest/rhel8.10/x86_64/\nenabled=1\ngpgcheck=0\n' \
+	> /etc/yum.repos.d/mlnx_ofed.repo
+RUN dnf install -y mlnx-ofa_kernel-devel mlnx-ofa_kernel-source
+
+# Git config
+RUN git config --global safe.directory '*'
