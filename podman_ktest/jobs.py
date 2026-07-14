@@ -388,6 +388,8 @@ def run_build_lustre(
             sync_kernel=sync_kernel,
             sync_lustre=True,
             sync_zfs=sync_zfs,
+            # A custom LLVM toolchain is only relevant where the kernel is built
+            sync_llvm=sync_kernel,
             dirs=dirs,
             use_tarball_input=use_tarball_input,
             ccache_dir=ccache_dir,
@@ -443,6 +445,8 @@ def run_package(
             sync_kernel=sync_kernel,
             sync_lustre=True,
             sync_zfs=sync_zfs,
+            # A custom LLVM toolchain is only relevant where the kernel is built
+            sync_llvm=sync_kernel,
             dirs=dirs,
             use_tarball_input=use_tarball_input,
             ccache_dir=ccache_dir,

@@ -52,6 +52,7 @@ class ContainerJob:
     sync_kernel: bool = False
     sync_lustre: bool = False
     sync_zfs: bool = False
+    sync_llvm: bool = False
     dirs: Optional[Dict[str, str]] = None
     use_tarball_input: bool = False
     ccache_dir: Optional[str] = None
@@ -111,6 +112,13 @@ class ContainerJob:
                     {
                         "source": self.dirs["ktest_zfs_source"],
                         "destination": "/home/ktest/git/zfs",
+                    }
+                )
+            if self.sync_llvm and self.dirs.get("ktest_llvm_source"):
+                overlay_volumes.append(
+                    {
+                        "source": self.dirs["ktest_llvm_source"],
+                        "destination": "/home/ktest/git/llvm-project",
                     }
                 )
 

@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y \
     lsb-release wget software-properties-common \
     gnupg clang bear pahole kmod swig quilt \
     libstdc++-16-dev \
-    cmake libtool pkg-config libpython3-dev libmount-dev \
+    cmake ninja-build libtool pkg-config libpython3-dev libmount-dev \
     libaio-dev libssl-dev libnl-genl-3-dev \
     libkeyutils-dev libyaml-dev libreadline-dev \
     module-assistant debhelper libsnmp-dev quota \
@@ -76,6 +76,7 @@ RUN install -d -m 0777 \
     /home/ktest/git/linux \
     /home/ktest/git/lustre-release \
     /home/ktest/git/zfs \
+    /home/ktest/git/llvm-project \
     /var/lib/ktest
 
 # Switch to ktest user

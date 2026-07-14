@@ -30,6 +30,7 @@ ktest_kernel_source="$(realpath -e ~/git/linux/ 2>/dev/null || true)"
 ktest_lustre_source="$ktest_kernel_source/../lustre-release/"
 ktest_zfs_source="$ktest_kernel_source/../zfs/"
 ktest_nvidia_source="$ktest_kernel_source/../open-gpu-kernel-modules/"
+ktest_llvm_source="$ktest_kernel_source/../llvm-project/"
 ktest_boot_test="$ktest_dir/tests/fs/lustre/boot.ktest"
 ktest_ccplugin="$ktest_dir/cplugin/build/xunused"
 ktest_compiler="${CC:-clang-23}"
@@ -146,6 +147,10 @@ ktest_kernel_build="$ktest_out/kernel_build.$ktest_arch"
 ktest_lustre_build="$ktest_out/lustre-release"
 ktest_zfs_build="$ktest_out/zfs"
 ktest_nvidia_build="$ktest_out/open-gpu-kernel-modules"
+# Deliberately outside $ktest_out: several paths (purge_previous_results,
+# cmd_build's final strip-to-UKI) wipe $ktest_out mid-flow, and the toolchain
+# must survive them.  /tmp is per-container, so no cross-run staleness.
+ktest_llvm_build="/tmp/ktest-llvm"
 mkdir -p "$ktest_kernel_build"
 mkdir -p "$ktest_lustre_build"
 if [[ -d "$ktest_zfs_source" ]]; then
@@ -649,6 +654,88 @@ function maybe_build_nvidia()
     run_quiet_with_status "INSTALL FS MODULES [$(basename "$ktest_test")]" "DONE" install_fs_modules
 }
 
+# Build a custom LLVM/Clang toolchain from an llvm-project checkout sitting as
+# a sibling of the kernel tree (podman-ktest overlay-mounts ktest_llvm_source
+# there).  Only the tools kbuild's LLVM=1 mode actually invokes are built, not
+# the default all target.  Compiles route through ccache (LLVM_CCACHE_BUILD)
+# against the persistent /tmp/ccache mount, so rebuilding an unchanged
+# checkout in a fresh container is mostly link time.
+function build_llvm()
+{
+    local cmake_args=()
+    local extra_args=()
+    local lld
+
+    # Bootstrap with the packaged clang when available.  Name it by full path:
+    # /usr/local/bin/clang-23 is a ccache symlink, and LLVM_CCACHE_BUILD
+    # already provides the launcher, so avoid wrapping ccache twice.
+    if [[ -x /usr/bin/clang-23 ]]; then
+	cmake_args+=(-DCMAKE_C_COMPILER=/usr/bin/clang-23)
+	cmake_args+=(-DCMAKE_CXX_COMPILER=/usr/bin/clang++-23)
+    fi
+
+    # lld keeps link memory/time manageable next to bfd
+    for lld in ld.lld-23 ld.lld; do
+	if command -v "$lld" > /dev/null; then
+	    cmake_args+=("-DLLVM_USE_LINKER=$(command -v "$lld")")
+	    break
+	fi
+    done
+
+    # Extra CMake options forwarded from the environment, e.g.
+    # KTEST_LLVM_CMAKE_ARGS="-DLLVM_ENABLE_ASSERTIONS=OFF"
+    if [[ -n "${KTEST_LLVM_CMAKE_ARGS:-}" ]]; then
+	read -ra extra_args <<< "$KTEST_LLVM_CMAKE_ARGS"
+    fi
+
+    cmake -G Ninja					\
+	-S "$ktest_llvm_source/llvm"			\
+	-B "$ktest_llvm_build"				\
+	-DCMAKE_BUILD_TYPE=Release			\
+	-DLLVM_ENABLE_PROJECTS="clang;lld"		\
+	-DLLVM_TARGETS_TO_BUILD="X86;AArch64"		\
+	-DLLVM_ENABLE_ASSERTIONS=ON			\
+	-DLLVM_CCACHE_BUILD=ON				\
+	-DLLVM_ENABLE_BINDINGS=OFF			\
+	"${cmake_args[@]}"				\
+	"${extra_args[@]}"
+
+    # Everything kbuild's LLVM=<bin>/ prefix mode invokes: CC/LD plus the
+    # llvm binutils substituted for AR/NM/OBJCOPY/OBJDUMP/READELF/STRIP.
+    ninja -C "$ktest_llvm_build" -j"$ktest_njobs"	\
+	clang lld llvm-ar llvm-nm llvm-objcopy		\
+	llvm-objdump llvm-readelf llvm-strip llvm-size
+
+    check_file "$ktest_llvm_build/bin/clang"
+    check_file "$ktest_llvm_build/bin/ld.lld"
+}
+
+# Build and adopt the custom toolchain when an LLVM source tree is present.
+# The mount point exists (empty) in every container, so key off the tree's
+# content; without a mount this is a no-op and the packaged clang is used.
+function maybe_build_llvm()
+{
+    [[ -f "$ktest_llvm_source/llvm/CMakeLists.txt" ]] || return 0
+
+    checkdep cmake
+    checkdep ninja ninja-build
+
+    run_quiet_with_status "LLVM BUILD [$(basename "$ktest_test")]" "DONE" build_llvm
+
+    # Repoint every subsequent kernel/lustre/zfs/nvidia build at the fresh
+    # toolchain; map_clang_version turns the path into LLVM=<bin>/ for kbuild.
+    ktest_compiler="$ktest_llvm_build/bin/clang"
+    export CC="$ktest_compiler"
+    export PATH="$ktest_llvm_build/bin:$PATH"
+
+    echo "LLVM VERSION: $("$ktest_compiler" --version | head -n1)"
+
+    # The kernel build wraps $ktest_compiler in ccache, whose default
+    # compiler check is mtime -- always fresh here, so every object would
+    # miss.  Hash the binary instead: identical rebuilds keep their hits.
+    export CCACHE_COMPILERCHECK=content
+}
+
 function build_zfs()
 {
     local old="$PWD"
@@ -734,6 +821,7 @@ function cmd_generate_zfs_patch()
 	ktest_kernel_config_require+=(GCOV_KERNEL)
     fi
 
+    maybe_build_llvm
     run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
     run_quiet_with_status "ZFS BUILD [$(basename "$ktest_test")]" "DONE" build_zfs
 
@@ -752,6 +840,7 @@ function cmd_ccplugin()
     ktest_testargs="$@"
     parse_test_deps "$ktest_test"
 
+    maybe_build_llvm
     run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
     run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
 
@@ -822,6 +911,7 @@ function cmd_build()
 	ktest_kernel_config_require+=(GCOV_KERNEL)
     fi
 
+    maybe_build_llvm
     run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
 
     if [[ "$FSTYPE" == "zfs" ]]; then
@@ -873,6 +963,8 @@ function cmd_kbuild()
     if [[ -n $COVERAGE ]]; then
 	ktest_kernel_config_require+=(GCOV_KERNEL)
     fi
+
+    maybe_build_llvm
 
     # Run build_kernel directly (not via run_quiet_with_status) so the build
     # output is visible in the job log.
@@ -972,6 +1064,7 @@ function cmd_build_native()
     fi
 
     prepare_linux_source
+    maybe_build_llvm
     run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
     #validate_native_lustre_build
 
@@ -1003,6 +1096,7 @@ function cmd_package_native()
     parse_test_deps "$ktest_test"
 
     prepare_linux_source
+    maybe_build_llvm
     run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
     maybe_build_nvidia
     run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
@@ -1039,6 +1133,7 @@ function cmd_generate_lustre_patch()
     if [[ -f "$ktest_kernel_source/lustre_config.h" ]]; then
 	echo "Using cached lustre_config.h from kernel tree"
     else
+	maybe_build_llvm
 	run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
 	run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre_intree
     fi

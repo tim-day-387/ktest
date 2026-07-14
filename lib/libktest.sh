@@ -597,6 +597,9 @@ map_clang_version() {
     case "$ktest_compiler" in
         clang) echo "1" ;;
         clang-[0-9]*) echo "-${ktest_compiler#clang-}" ;;
+        # Custom toolchain: kbuild takes the bin directory (trailing slash
+        # required) and prefixes every tool with it, e.g. LLVM=/foo/bin/
+        */clang) echo "${ktest_compiler%clang}" ;;
         *) echo "" ;;
     esac
 }
@@ -731,6 +734,8 @@ build_kernel()
     fi
 
     configure_kernel
+
+    echo "compiler: $("$ktest_compiler" --version | head -n1)"
 
     do_make -k KCFLAGS="-Werror=thread-safety"
 

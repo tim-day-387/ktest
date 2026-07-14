@@ -146,6 +146,11 @@ def create_source_tarballs(dirs, include_kernel=True):
     """
     tarball_paths = {}
 
+    # The LLVM tree is only synced via overlay mounts: a tarball of a full
+    # llvm-project checkout would be several GB per job.
+    if dirs.get("ktest_llvm_source"):
+        print("Note: custom LLVM is not synced in tarball input mode")
+
     # Create kernel tarball using git archive (skipped for distro platforms)
     if include_kernel:
         kernel_tarball = "/tmp/ktest-kernel.tar.gz"
@@ -270,11 +275,23 @@ def get_ktest_dirs(ktest_dir):
         if zfs_path.exists():
             ktest_zfs_source = str(zfs_path.resolve())
 
+    # Get LLVM source from environment, ktestrc, or default location. When
+    # present it is overlay-mounted into build containers and qlkbuild builds
+    # and uses that toolchain instead of the packaged clang.
+    ktest_llvm_source = os.environ.get("ktest_llvm_source")
+    if not ktest_llvm_source:
+        ktest_llvm_source = ktestrc_vars.get("ktest_llvm_source")
+    if not ktest_llvm_source:
+        llvm_path = Path(ktest_kernel_source).parent / "llvm-project"
+        if llvm_path.exists():
+            ktest_llvm_source = str(llvm_path.resolve())
+
     return {
         "ktest_dir": str(ktest_dir),
         "ktest_kernel_source": ktest_kernel_source,
         "ktest_lustre_source": ktest_lustre_source,
         "ktest_zfs_source": ktest_zfs_source,
+        "ktest_llvm_source": ktest_llvm_source,
     }
 
 
