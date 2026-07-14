@@ -528,7 +528,9 @@ function run_copy_builtin()
     cd "$ktest_kernel_source"
     git add *
     git add -f lustre_config.h
-    git add include/lustre_compat
+    if [[ -d include/lustre_compat ]]; then
+	git add include/lustre_compat
+    fi
     git commit -m "Lustre"
 
     # Save patches to /tmp before purging
