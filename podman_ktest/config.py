@@ -98,11 +98,13 @@ CONFIGS = {
     "u24": {
         "image": "lustre-u24:latest",
         "build_script": """
+export HOME=/tmp
 ./autogen.sh
 ./configure --disable-server
 make --quiet -j$(nproc)
 """,
         "package_script": """
+export HOME=/tmp
 ./autogen.sh
 ./configure --disable-server
 make --quiet -j$(nproc) debs
