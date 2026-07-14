@@ -1,0 +1,5 @@
+{
+  "name": "u26-pkg",
+  "platform": "u26",
+  "package": "tests/fs/lustre/boot.ktest"
+}

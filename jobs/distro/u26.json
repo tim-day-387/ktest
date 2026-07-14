@@ -1,0 +1,5 @@
+{
+  "name": "u26",
+  "platform": "u26",
+  "build": "tests/fs/lustre/boot.ktest"
+}

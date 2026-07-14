@@ -24,6 +24,11 @@ IMAGES = [
         "name": "lustre-u24",
     },
     {
+        "dockerfile": "containers/Containerfile.lustre.u26",
+        "tag": "lustre-u26:latest",
+        "name": "lustre-u26",
+    },
+    {
         "dockerfile": "containers/Containerfile.lustre.al2023",
         "tag": "lustre-al2023:latest",
         "name": "lustre-al2023",
@@ -112,6 +117,26 @@ make --quiet -j$(nproc)
 export HOME=/tmp
 ./autogen.sh
 ./configure --disable-server
+make --quiet -j$(nproc) debs
+""",
+        "working_dir": "/home/ktest/git/lustre-release/",
+        "distro_platform": True,
+    },
+    "u26": {
+        "image": "lustre-u26:latest",
+        # On u26 the common headers package (linux-headers-X) sorts before
+        # linux-headers-X-generic in configure's /usr/src/linux* glob but has
+        # no generated/autoconf.h, so point configure at the -generic tree.
+        "build_script": """
+export HOME=/tmp
+./autogen.sh
+./configure --disable-server --with-linux=$(ls -d /usr/src/linux-headers-*-generic)
+make --quiet -j$(nproc)
+""",
+        "package_script": """
+export HOME=/tmp
+./autogen.sh
+./configure --disable-server --with-linux=$(ls -d /usr/src/linux-headers-*-generic)
 make --quiet -j$(nproc) debs
 """,
         "working_dir": "/home/ktest/git/lustre-release/",

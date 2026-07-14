@@ -11,3 +11,5 @@ distro/rocky10
 distro/rocky10-pkg
 distro/u24
 distro/u24-pkg
+distro/u26
+distro/u26-pkg
