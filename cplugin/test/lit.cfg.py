@@ -24,6 +24,17 @@ config.test_format = lit.formats.ShTest()
 config.suffixes = ['.c', '.cpp', '.test']
 config.test_source_root = os.path.dirname(__file__)
 
+# Where the per-test Output/ directories go. Defaults to the test tree;
+# set CCPLUGIN_TEST_OUT when that is not writable (the cplugin-tests job
+# runs from the read-only ktest checkout in the container). The lints
+# report paths relative to the first "lustre-release" component, so the
+# fake tree each test builds must be the only one in the path.
+exec_root = os.environ.get('CCPLUGIN_TEST_OUT', config.test_source_root)
+if 'lustre-release' in exec_root:
+    lit_config.fatal('test output path contains "lustre-release", which '
+                     'breaks the lints\' path reporting: %s' % exec_root)
+config.test_exec_root = exec_root
+
 plugin_dir = os.path.dirname(config.test_source_root)
 
 # The tool under test; set XUNUSED to test a binary elsewhere.

@@ -63,11 +63,15 @@ make check
 ```
 
 `lit` is taken from `PATH`, from the copy the `llvm-NN-tools` package
-ships under `/usr/lib/llvm-*/build/utils/lit`, or passed explicitly, e.g.
+ships (`/usr/lib/llvm-*/bin/lit` on apt.llvm.org,
+`/usr/lib/llvm-*/build/utils/lit/lit.py` on Debian/Ubuntu), or passed
+explicitly, e.g.
 `make check LIT="python3 ~/src/llvm-project/llvm/utils/lit/lit.py"`.
 `FileCheck`, `split-file` and `not` are found on `PATH` or in the newest
 `/usr/lib/llvm-*/bin`. Set `XUNUSED=/path/to/xunused` to test a binary
-other than `build/xunused`.
+other than `build/xunused`, and `CCPLUGIN_TEST_OUT=/writable/dir` to
+put the per-test `Output/` directories outside the test tree (used by
+the `cplugin-tests` job, where the checkout is read-only).
 
 Test conventions: symbols named `bad_*`/`BAD_*` must appear in the
 output, `good_*`/`GOOD_*` must not (enforced with

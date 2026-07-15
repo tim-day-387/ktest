@@ -1,0 +1,7 @@
+{
+  "name": "cplugin-tests",
+  "platform": "mainline",
+  "tool": "cplugin-tests",
+  "optional": true,
+  "description": "Run the CC plugin lit test suite"
+}

@@ -1,0 +1,14 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+
+#
+# Run the CC plugin (cplugin/) lit test suite. Everything the suite needs
+# is already in the ktest-runner image: the top-level make builds
+# cplugin/build/xunused, and the llvm-NN-tools package provides lit,
+# FileCheck, split-file and not (found by cplugin/test/lit.cfg.py and the
+# cplugin Makefile).
+#
+
+# The ktest checkout is not writable inside job containers, so send the
+# suite's per-test Output/ directories to a temp dir instead.
+CCPLUGIN_TEST_OUT=$(mktemp -d) exec make -C /home/ktest/ktest/cplugin check

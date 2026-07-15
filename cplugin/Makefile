@@ -9,9 +9,12 @@ JOBS  ?= $(shell echo $$(( $$(nproc) / 2 > 1 ? $$(nproc) / 2 : 1 )))
 quiet_cmd = printf '  %-8s %s\n' '[$(1)]' '$(2)'
 
 # lit (the LLVM test driver) for 'make check': taken from PATH, from the
-# newest llvm-NN-tools copy in /usr/lib/llvm-*/build/utils/lit, or pass
+# newest llvm-NN-tools copy (apt.llvm.org ships /usr/lib/llvm-NN/bin/lit,
+# Debian/Ubuntu ship /usr/lib/llvm-NN/build/utils/lit/lit.py), or pass
 # LIT explicitly, e.g. LIT="python3 ~/src/llvm-project/llvm/utils/lit/lit.py"
 LIT ?= $(shell command -v lit 2> /dev/null || command -v llvm-lit 2> /dev/null || \
+	{ lit=$$(ls /usr/lib/llvm-*/bin/lit 2> /dev/null | sort -V | tail -1); \
+	  test -n "$$lit" && echo "$$lit"; } || \
 	{ lit=$$(ls /usr/lib/llvm-*/build/utils/lit/lit.py 2> /dev/null | sort -V | tail -1); \
 	  test -n "$$lit" && echo "python3 $$lit"; })
 
