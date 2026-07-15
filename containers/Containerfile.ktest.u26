@@ -152,9 +152,11 @@ RUN cd /tmp && \
 # don't invalidate the layers above)
 COPY --chown=ktest:ktest . /home/ktest/ktest
 
-# Build ktest with cargo
+# Build ktest with cargo. Clean out untracked and ignored files first so
+# host build artifacts (e.g. cplugin/build linked against the host's LLVM)
+# don't leak into the image and shadow the in-container build.
 WORKDIR /home/ktest/ktest
-RUN make
+RUN git clean -xdf && make
 
 # Default command
 CMD ["/bin/bash"]
