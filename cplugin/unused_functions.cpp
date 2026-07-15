@@ -73,8 +73,9 @@ std::vector<DeclLoc> getDeclarations(const FunctionDecl *F,
     if (R->doesThisDeclarationHaveABody())
       continue;
     auto Begin = R->getSourceRange().getBegin();
-    Decls.emplace_back(SM.getFilename(Begin).str(), SM.getSpellingLineNumber(Begin));
-    SM.getFileManager().makeAbsolutePath(Decls.back().Filename);
+    Decls.emplace_back(canonicalizePath(SM, SM.getFileID(Begin),
+                                        SM.getFilename(Begin)),
+                       SM.getSpellingLineNumber(Begin));
   }
   return Decls;
 }
@@ -103,7 +104,8 @@ public:
       it_inserted.first->second.Name = F->getQualifiedNameAsString();
 
       auto Begin = F->getSourceRange().getBegin();
-      it_inserted.first->second.Filename = SM.getFilename(Begin);
+      it_inserted.first->second.Filename =
+          canonicalizePath(SM, SM.getFileID(Begin), SM.getFilename(Begin));
       it_inserted.first->second.Line = SM.getSpellingLineNumber(Begin);
 
       it_inserted.first->second.Declarations = getDeclarations(F, SM);
@@ -161,6 +163,12 @@ public:
 
       auto Begin = F->getSourceRange().getBegin();
       if (Result.SourceManager->isInSystemHeader(Begin))
+        return;
+
+      // Functions synthesized by macro expansion (module_param's __check_*,
+      // DEFINE_GUARD cleanup helpers, ...) have no source file of their own
+      // to report against.
+      if (Begin.isMacroID())
         return;
 
       auto *MD = dyn_cast<CXXMethodDecl>(F);
