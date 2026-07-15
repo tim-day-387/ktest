@@ -51,6 +51,29 @@ Implement a `Lint` subclass (cross-TU state plus `report()`) and a
 a new `.cpp` file, then register the factory in `lint.h`/`lint.cpp` and add
 the file to `CMakeLists.txt`. See `lint.h` for the interface.
 
+## Testing
+
+The `test/` directory holds an LLVM-style [lit](https://llvm.org/docs/CommandGuide/lit.html)
+test suite: each test builds a tiny fake `lustre-release` tree with
+`split-file`, generates a compilation database for it, runs the built
+`xunused` on it and checks the findings with `FileCheck`. Run it with
+
+```
+make check
+```
+
+`lit` is taken from `PATH`, from the copy the `llvm-NN-tools` package
+ships under `/usr/lib/llvm-*/build/utils/lit`, or passed explicitly, e.g.
+`make check LIT="python3 ~/src/llvm-project/llvm/utils/lit/lit.py"`.
+`FileCheck`, `split-file` and `not` are found on `PATH` or in the newest
+`/usr/lib/llvm-*/bin`. Set `XUNUSED=/path/to/xunused` to test a binary
+other than `build/xunused`.
+
+Test conventions: symbols named `bad_*`/`BAD_*` must appear in the
+output, `good_*`/`GOOD_*` must not (enforced with
+`--implicit-check-not`), and findings use `CHECK-DAG` since TUs are
+processed in parallel.
+
 ## Building and Installation
 
 First download or build the necessary versions of LLVM and Clang with

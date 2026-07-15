@@ -1,0 +1,7 @@
+# An unknown -lint name is rejected with a list of the available lints.
+#
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: %gen_db %t
+# RUN: not %xunused -lint bogus %t/compile_commands.json 2>&1 | FileCheck %s
+
+# CHECK: unknown lint 'bogus'; available lints: unused-functions unused-macros global-headers feature-macros

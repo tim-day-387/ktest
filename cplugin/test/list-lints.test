@@ -1,0 +1,9 @@
+# -list-lints prints every registered lint, in report order, and works
+# without a compilation database.
+#
+# RUN: %xunused -list-lints | FileCheck %s
+
+# CHECK: unused-functions
+# CHECK-NEXT: unused-macros
+# CHECK-NEXT: global-headers
+# CHECK-NEXT: feature-macros
