@@ -262,6 +262,13 @@ def cmd_job(
         for job in all_jobs:
             job["plugin_args"] = plugin_args
 
+    # Forward --custom-llvm to every job: the LLVM source overlay is
+    # mounted, so qlkbuild's maybe_build_llvm builds a custom toolchain
+    # instead of using the packaged clang.
+    if getattr(args, "custom_llvm", False):
+        for job in all_jobs:
+            job["custom_llvm"] = True
+
     # Create source tarballs only if using tarball input mode.
     # Skip the kernel tarball when no job needs it (e.g. all distro platforms).
     tarball_paths = None

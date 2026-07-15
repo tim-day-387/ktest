@@ -133,6 +133,12 @@ def main():
         default=None,
         help="Extra CLI options forwarded to the CC plugin (mainline_ccplugin jobs)",
     )
+    job_parser.add_argument(
+        "--custom-llvm",
+        action="store_true",
+        help="Mount the LLVM source tree into build containers so kernel "
+        "builds use a custom toolchain instead of the packaged clang",
+    )
 
     # Deploy command - deploy the CI container
     deploy_parser = subparsers.add_parser(

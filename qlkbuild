@@ -150,7 +150,10 @@ ktest_nvidia_build="$ktest_out/open-gpu-kernel-modules"
 # Deliberately outside $ktest_out: several paths (purge_previous_results,
 # cmd_build's final strip-to-UKI) wipe $ktest_out mid-flow, and the toolchain
 # must survive them.  /tmp is per-container, so no cross-run staleness.
-ktest_llvm_build="/tmp/ktest-llvm"
+# No dashes in this path: lustre's LTC_LLVM_TOOLCHAIN on older branches
+# treats any LLVM value containing '-' as a version suffix, so a dashed
+# prefix path would be appended to the tool names as well.
+ktest_llvm_build="/tmp/ktest_llvm"
 mkdir -p "$ktest_kernel_build"
 mkdir -p "$ktest_lustre_build"
 if [[ -d "$ktest_zfs_source" ]]; then
