@@ -1,0 +1,7 @@
+{
+  "name": "clang-analyzer",
+  "platform": "mainline_analyzer",
+  "build": "tests/fs/lustre/boot.ktest",
+  "optional": true,
+  "description": "Run Clang Static Analyzer refcount checks on Lustre"
+}

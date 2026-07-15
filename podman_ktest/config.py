@@ -98,6 +98,12 @@ CONFIGS = {
         "working_dir": "/home/ktest/ktest/",
         "sync_zfs": True,
     },
+    "mainline_analyzer": {
+        "image": "ktest-runner:latest",
+        "build_script": "./qlkbuild analyzer",
+        "working_dir": "/home/ktest/ktest/",
+        "sync_zfs": True,
+    },
     # Kernel-only build with the compiler output visible in the job log. No
     # lustre/zfs, so no ZFS source sync and no build artifact archive needed.
     "mainline_kbuild": {

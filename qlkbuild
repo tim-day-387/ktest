@@ -91,6 +91,7 @@ function usage()
     ktest_usage_cmds
     echo "  build <test>        Build kernel for a test configuration"
     echo "  ccplugin <test>     Build and run CC plugin"
+    echo "  analyzer <test>     Build and run Clang Static Analyzer"
     echo "  oldconfig           Run make oldconfig"
     echo "  config              Run make nconfig"
     echo
@@ -695,7 +696,7 @@ function build_llvm()
 	-S "$ktest_llvm_source/llvm"			\
 	-B "$ktest_llvm_build"				\
 	-DCMAKE_BUILD_TYPE=Release			\
-	-DLLVM_ENABLE_PROJECTS="clang;lld"		\
+	-DLLVM_ENABLE_PROJECTS="clang;lld;clang-tools-extra" \
 	-DLLVM_TARGETS_TO_BUILD="X86;AArch64"		\
 	-DLLVM_ENABLE_ASSERTIONS=ON			\
 	-DLLVM_CCACHE_BUILD=ON				\
@@ -705,9 +706,12 @@ function build_llvm()
 
     # Everything kbuild's LLVM=<bin>/ prefix mode invokes: CC/LD plus the
     # llvm binutils substituted for AR/NM/OBJCOPY/OBJDUMP/READELF/STRIP.
+    # clang-tidy is included so the analyzer runs with any local checker
+    # patches in the LLVM tree.
     ninja -C "$ktest_llvm_build" -j"$ktest_njobs"	\
 	clang lld llvm-ar llvm-nm llvm-objcopy		\
-	llvm-objdump llvm-readelf llvm-strip llvm-size
+	llvm-objdump llvm-readelf llvm-strip llvm-size	\
+	clang-tidy
 
     check_file "$ktest_llvm_build/bin/clang"
     check_file "$ktest_llvm_build/bin/ld.lld"
@@ -865,6 +869,52 @@ function cmd_ccplugin()
 
     echo "PLUGIN"
     "$ktest_ccplugin" "${plugin_args[@]}" "$ktest_lustre_build/compile_commands.json"
+}
+
+# Run the Clang Static Analyzer over the Lustre build via clang-tidy. The
+# default check is the retain-count checker, which consumes the reference
+# ownership annotations (__ref_returns/__ref_consumes) in the kernel's
+# include/linux/ref_analysis.h to find function-local refcount bugs:
+# error-path leaks, double-put, and use-after-put. Findings fail the job
+# via -warnings-as-errors.
+function cmd_analyzer()
+{
+    local checks="${KTEST_ANALYZER_CHECKS:--*,clang-analyzer-osx.cocoa.RetainCount}"
+    local tidy=run-clang-tidy
+
+    if [[ $# = 0 ]]; then
+	ktest_test="$ktest_boot_test"
+    else
+	ktest_test=$(realpath "$1")
+	shift
+    fi
+
+    ktest_testargs="$@"
+    parse_test_deps "$ktest_test"
+
+    maybe_build_llvm
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
+
+    if [[ ! -f "$ktest_lustre_build/compile_commands.json" ]]; then
+	echo "compile_commands.json not found at $ktest_lustre_build/compile_commands.json"
+	exit 1
+    fi
+
+    command -v run-clang-tidy-23 > /dev/null && tidy=run-clang-tidy-23
+    checkdep "$tidy" clang-tidy-23
+
+    # Prefer the freshly-built clang-tidy over the packaged one.
+    local tidy_args=()
+    if [[ -x "$ktest_llvm_build/bin/clang-tidy" ]]; then
+	tidy_args+=(-clang-tidy-binary "$ktest_llvm_build/bin/clang-tidy")
+    fi
+
+    echo "ANALYZER"
+    "$tidy" -quiet -p "$ktest_lustre_build"	\
+	"${tidy_args[@]}"			\
+	-checks="$checks"			\
+	-warnings-as-errors='clang-analyzer-*'
 }
 
 # Install the freshly-built lustre/zfs kernel modules into the kernel's
