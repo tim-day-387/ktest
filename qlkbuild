@@ -84,28 +84,9 @@ function compute_localversion()
 
 export KTEST_LOCALVERSION=$(compute_localversion)
 
-function usage()
-{
-    echo "qlkbuild: Quick Lustre Kernel Build"
-    echo "Usage: qlkbuild cmd [options]"
-    ktest_usage_cmds
-    echo "  build <test>        Build kernel for a test configuration"
-    echo "  ccplugin <test>     Build and run CC plugin"
-    echo "  analyzer <test>     Build and run Clang Static Analyzer"
-    echo "  oldconfig           Run make oldconfig"
-    echo "  config              Run make nconfig"
-    echo
-    ktest_usage_post
-}
-
-if [[ $# = 0 ]]; then
-    usage
-    exit 1
-fi
-
 # Parse command
-CMD="$1"
-shift
+CMD="${1:-}"
+shift $(( $# ? 1 : 0 ))
 
 # The native platform builds Lustre in-tree (into the kernel/module tree),
 # while mainline builds it out-of-tree from lustre-release. Export a flag so a
@@ -121,13 +102,8 @@ case "$CMD" in
 	;;
 esac
 
-while getopts "h${ktest_args}" arg; do
-    case $arg in
-	h)
-	    usage
-	    exit 0
-	    ;;
-    esac
+while getopts "${ktest_args}" arg; do
+    [[ $arg == '?' ]] && exit 1
     parse_ktest_arg $arg
 done
 shift $(( OPTIND - 1 ))
@@ -188,18 +164,6 @@ function validate_lustre_build() {
 	check_file "$ktest_lustre_build/lustre/osd-zfs/osd_zfs.ko"
     else
 	check_file "$ktest_lustre_build/lustre/osd-wbcfs/osd_wbcfs.ko"
-    fi
-}
-
-function validate_native_lustre_build() {
-    check_file "$ktest_kernel_build/net/lnet/lnet/lnet.ko"
-    check_file "$ktest_kernel_build/fs/lustre/llite/lustre.ko"
-
-    # Check OSD module based on FSTYPE (backing storage)
-    if [[ "$FSTYPE" == "zfs" ]]; then
-	check_file "$ktest_kernel_build/fs/lustre/osd-zfs/osd_zfs.ko"
-    else
-	check_file "$ktest_kernel_build/fs/lustre/osd-wbcfs/osd_wbcfs.ko"
     fi
 }
 
@@ -1095,11 +1059,6 @@ function validate_zfs_build() {
     check_file "$ktest_zfs_build/module/zfs/zfs.ko"
 }
 
-function validate_native_zfs_build() {
-    check_file "$ktest_kernel_build/fs/zfs/zfs.ko"
-    check_file "$ktest_kernel_build/fs/zfs/spl.ko"
-}
-
 function cmd_build_native()
 {
     if [[ $# = 0 ]]; then
@@ -1119,12 +1078,6 @@ function cmd_build_native()
     prepare_linux_source
     maybe_build_llvm
     run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
-    #validate_native_lustre_build
-
-    # Validate ZFS build if ZFS patch was applied
-    #if [[ -f "$ktest_out/zfs.patch" ]]; then
-	#validate_native_zfs_build
-    #fi
 
     # Lustre/ZFS are in-kernel here; the only out-of-tree modules are NVIDIA's,
     # built and installed into the module tree before the initramfs is packed.
@@ -1194,17 +1147,12 @@ function cmd_generate_lustre_patch()
     run_copy_builtin
 }
 
-function cmd_help()
-{
-    usage
-}
-
 if [[ $(type -t "cmd_$CMD") == function ]]; then
     CMD="cmd_$CMD"
 elif [[ $(type -t "ktest_$CMD") == function ]]; then
     CMD="ktest_$CMD"
 else
-    usage
+    echo "Invalid command!"
     exit 1
 fi
 
