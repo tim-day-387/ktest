@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-only
 
 # Builds the initramfs /init and the mount.lustreroot helper.  Both are
 # linked statically so they run without shared libs, and both share

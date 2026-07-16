@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-only
 
 # Use bash so that pipefail propagates cargo's exit status through the
 # JSON output filter (otherwise a compile failure would be masked).

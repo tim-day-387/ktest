@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-only
 
 #
 # Copyright (c) 2024, Amazon and/or its affiliates. All rights reserved.

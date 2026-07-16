@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-only
 
 ARG BASE=docker.io/library/ubuntu:24.04
 FROM ${BASE}

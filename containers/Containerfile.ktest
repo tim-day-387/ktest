@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-only
 
 ARG ROOT_BASE=localhost/ktest-root-base:latest
 FROM ${ROOT_BASE}

@@ -1,0 +1,11 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: ktest
+Source: https://github.com/tim-day-387/ktest
+
+Files: *
+Copyright: ktest contributors
+License: GPL-2.0-only
+
+Files: cplugin/*
+Copyright: ktest contributors
+License: Apache-2.0
