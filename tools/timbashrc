@@ -1,0 +1,127 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (c) 2023 - Timothy Day <tday141@gmail.com>
+#
+#  _____  _____
+# |_   _||_   _|
+#   | |    | |
+#   |_|    |_|
+#
+# Tims Tools - Various helpful scripts and
+# tools to make me more productive.
+#
+
+#
+# Display a logo and some common system
+# information.
+#
+function tims-tools-fetch() {
+    if [[ "$TT_PLATFORM" = "linux" ]]; then
+	num_cpus=$(nproc)
+
+	source /etc/os-release
+	OS=$NAME
+	VER=$VERSION_ID
+    fi
+
+    if [[ "$TT_PLATFORM" = "mac" ]]; then
+	num_cpus=$(sysctl -n hw.ncpu)
+
+	OS=$(sw_vers -productName)
+	VER=$(sw_vers -productVersion)
+    fi
+
+    export TT_OS="$OS $VER"
+
+    echo "+----------------+  [Tims Tools]"
+    echo "|  _____  _____  |  [Kernel: $(uname -r)]"
+    echo "| |_   _||_   _| |  [OS: $(echo $TT_OS)]"
+    echo "|   | |    | |   |  [Host: $(hostname)]"
+    echo "|   |_|    |_|   |  [Arch: $(arch)]"
+    echo "+----------------+  [CPUs: $num_cpus]"
+}
+
+#
+# Update tims-tools
+#
+function tims-tools-update() {
+    # FIXME
+    curl -sSf https://raw.githubusercontent.com/tim-day-387/tims-tools/main/general/tims-tools > ~/.tt_profile
+}
+
+#
+# Interactive version of tims-tools
+#
+function tims-tools-main() {
+    PS3="Select a command: "
+    select opt in fetch setup install update quit; do
+	case $opt in
+	    fetch)
+		tims-tools-fetch
+		;;
+	    update)
+		tims-tools-update
+		;;
+	    quit)
+		break
+		;;
+	    *)
+		echo "Invalid option $REPLY"
+		;;
+	esac
+    done
+}
+
+# Only run the interactive mode if TT_INTER is defined
+if ! [[ -z ${TT_INTER+x} ]]; then
+    tims-tools-main
+    exit
+fi
+
+# Check platform and set TT_PLATFORM
+case "$(uname -sr)" in
+    Darwin*)
+	export TT_PLATFORM="mac"
+	;;
+    Linux*Microsoft*)
+	export TT_PLATFORM="wsl"
+	;;
+    Linux*)
+	export TT_PLATFORM="linux"
+	;;
+    CYGWIN*|MINGW*|MINGW32*|MSYS*)
+	export TT_PLATFORM="cygwin"
+	;;
+    *)
+	export TT_PLATFORM="other"
+	;;
+esac
+
+# Display login message
+tims-tools-fetch
+
+# ANSI codes
+TT_GREEN="\[$(tput setaf 2)\]"
+TT_RED="\[$(tput setaf 1)\]"
+TT_RESET="\[$(tput sgr0)\]"
+
+# Test if in ssh session
+if [[ -z ${SSH_CLIENT+x} ]]; then
+    export SSH_PROMPT="$TT_GREEN[\u]$TT_RESET"
+else
+    export SSH_PROMPT="$TT_RED[\u]$TT_RESET"
+fi
+
+# Custom title
+TT_TITLE="\[\e]2;$TT_OS\a\]"
+
+# Custom prompt
+PS1="$TT_TITLE$SSH_PROMPT[\$?][\w]\$ "
+
+# Increase history size
+export HISTSIZE=25000
+export HISTFILESIZE=25000
+
+# Custom aliases
+alias emacs="emacs -nw"
