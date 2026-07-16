@@ -27,7 +27,6 @@ import time
 import getpass
 import urllib.request, urllib.parse, urllib.error
 import threading
-import random
 from datetime import datetime
 import dateutil.parser
 import shutil
