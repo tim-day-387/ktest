@@ -41,7 +41,9 @@ def git_config(key):
     try:
         out = subprocess.run(
             ["git", "config", "--get", key],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.strip()
         return out or None
     except OSError:
@@ -94,9 +96,12 @@ def pick_from_mbox(path, select):
     m = msgs[-1]
     if len(msgs) > 1:
         subj = " ".join((m.get("Subject", "") or "").split())
-        print("note: %d messages in mbox; replying to the last one:\n"
-              "      %s\n      (use --select <msgid> to choose another)"
-              % (len(msgs), subj), file=sys.stderr)
+        print(
+            "note: %d messages in mbox; replying to the last one:\n"
+            "      %s\n      (use --select <msgid> to choose another)"
+            % (len(msgs), subj),
+            file=sys.stderr,
+        )
     return email.message_from_bytes(m.as_bytes(), policy=POLICY)
 
 
@@ -112,7 +117,11 @@ def my_addresses():
 
 def my_from():
     """The From: line for our reply (must match the auth account)."""
-    addr = git_config("sendemail.smtpuser") or git_config("user.email") or "you@example.com"
+    addr = (
+        git_config("sendemail.smtpuser")
+        or git_config("user.email")
+        or "you@example.com"
+    )
     name = git_config("user.name") or ""
     return email.utils.formataddr((name, addr))
 
@@ -124,7 +133,9 @@ def reply_recipients(msg, mine):
     seen = set(a.lower() for _, a in email.utils.getaddresses([to]))
     seen |= mine
     cc = []
-    for name, addr in email.utils.getaddresses(msg.get_all("To", []) + msg.get_all("Cc", [])):
+    for name, addr in email.utils.getaddresses(
+        msg.get_all("To", []) + msg.get_all("Cc", [])
+    ):
         low = addr.lower()
         if not addr or low in seen:
             continue
@@ -203,13 +214,19 @@ def build(msg):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Generate a git-send-email reply template from an email.")
-    ap.add_argument("source",
-                    help="lore URL, Message-ID, .eml/mbox path, or '-' for stdin")
-    ap.add_argument("-o", "--output", metavar="FILE",
-                    help="write template here (default: stdout)")
-    ap.add_argument("--select", metavar="MSGID",
-                    help="when SOURCE is an mbox, reply to this Message-ID")
+        description="Generate a git-send-email reply template from an email."
+    )
+    ap.add_argument(
+        "source", help="lore URL, Message-ID, .eml/mbox path, or '-' for stdin"
+    )
+    ap.add_argument(
+        "-o", "--output", metavar="FILE", help="write template here (default: stdout)"
+    )
+    ap.add_argument(
+        "--select",
+        metavar="MSGID",
+        help="when SOURCE is an mbox, reply to this Message-ID",
+    )
     args = ap.parse_args()
 
     try:

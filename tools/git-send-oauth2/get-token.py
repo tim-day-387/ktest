@@ -22,7 +22,9 @@ AUTHORITY = "https://login.microsoftonline.com/organizations"
 # so the refresh token still comes back.
 SCOPES = ["https://outlook.office365.com/SMTP.Send"]
 
-CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token-cache.json")
+CACHE_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "token-cache.json"
+)
 
 
 def main():

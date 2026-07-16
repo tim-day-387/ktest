@@ -61,8 +61,7 @@ def namespace_jobs(jobs, prefix):
         depends_on = job.get("depends_on")
         if depends_on:
             job["depends_on"] = [
-                f"{prefix}:{dep}" if dep in local_names else dep
-                for dep in depends_on
+                f"{prefix}:{dep}" if dep in local_names else dep for dep in depends_on
             ]
     return jobs
 
