@@ -463,6 +463,65 @@ def run_package(
     return return_code, runtime, task_name
 
 
+def run_dkms(
+    job_config,
+    build_config,
+    dirs,
+    log_path,
+    ktest_out_dir=None,
+    tarball_paths=None,
+    podman_socket=None,
+    use_tarball_input=False,
+    ccache_dir=None,
+    no_cleanup=False,
+    package_dir=None,
+):
+    """Run a DKMS package build job.
+
+    Mirrors run_package but invokes the platform's dkms_script (make
+    dkms-rpms/dkms-debs), building the DKMS source packages rather than
+    the binary kmod packages.
+    """
+    task_name = get_task_name(job_config, "dkms")
+
+    backing_storage = job_config.get("backing_storage", "wbcfs")
+
+    command = build_config["dkms_script"]
+    command = f"export BACKING_STORAGE={backing_storage} && {command}"
+
+    sync_zfs = build_config.get("sync_zfs", False)
+    sync_kernel = not build_config.get("distro_platform", False)
+
+    start_time = time.time()
+    with get_podman_client(podman_socket) as client:
+        job = ContainerJob(
+            image=build_config["image"],
+            command=["bash", "-c", command],
+            working_dir=build_config["working_dir"],
+            ktest_out_dir=ktest_out_dir,
+            tarball_paths=tarball_paths,
+            sync_kernel=sync_kernel,
+            sync_lustre=True,
+            sync_zfs=sync_zfs,
+            # A custom LLVM toolchain is only relevant where the kernel is built
+            sync_llvm=sync_kernel and job_config.get("custom_llvm", False),
+            dirs=dirs,
+            use_tarball_input=use_tarball_input,
+            ccache_dir=ccache_dir,
+            log_path=log_path,
+            get_ktest_out_archive=False,
+            mount_ktest_out=True,
+            mount_ktest_lib=build_config.get("mount_ktest_lib", False),
+            package_dir=package_dir,
+            no_cleanup=no_cleanup,
+        )
+        with job:
+            return_code = job.run(client, podman_socket=podman_socket)
+
+    runtime = int(time.time() - start_time)
+    return return_code, runtime, task_name
+
+
 def run_tool(
     job_config,
     build_config,
@@ -556,6 +615,20 @@ def run_job_config(
         )
     elif job_config.get("package", False):
         return_code, runtime, task_name = run_package(
+            job_config,
+            build_config,
+            dirs,
+            log_path,
+            ktest_out_dir,
+            tarball_paths,
+            podman_socket,
+            use_tarball_input,
+            ccache_dir,
+            no_cleanup,
+            package_dir,
+        )
+    elif job_config.get("dkms", False):
+        return_code, runtime, task_name = run_dkms(
             job_config,
             build_config,
             dirs,

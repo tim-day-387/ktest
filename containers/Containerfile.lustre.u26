@@ -39,3 +39,10 @@ RUN rm -rf /var/lib/apt/lists/*
 
 # Git config
 RUN git config --global safe.directory '*'
+
+# The Debian source-package build (dpkg-source) writes the generated
+# ../lustre_*.tar.gz, .dsc and .changes to the PARENT of the source tree
+# (/home/ktest/git). This image has no ktest user, so crun auto-creates that
+# path as root and the keep-id'd job uid cannot write there. Pre-create it
+# world-writable, mirroring the ktest-runner base image.
+RUN mkdir -p /home/ktest/git/lustre-release && chmod -R 777 /home/ktest

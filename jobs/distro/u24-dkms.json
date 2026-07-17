@@ -1,0 +1,5 @@
+{
+  "name": "u24-dkms",
+  "platform": "u24",
+  "dkms": "tests/fs/lustre/boot.ktest"
+}

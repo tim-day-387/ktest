@@ -1,15 +1,22 @@
 # Distro: build/boot tests across supported distributions.
 distro/al2
 distro/al2-pkg
+distro/al2-dkms
 distro/al2023
 distro/al2023-pkg
+distro/al2023-dkms
 distro/rocky8
 distro/rocky8-pkg
+distro/rocky8-dkms
 distro/rocky9
 distro/rocky9-pkg
+distro/rocky9-dkms
 distro/rocky10
 distro/rocky10-pkg
+distro/rocky10-dkms
 distro/u24
 distro/u24-pkg
+distro/u24-dkms
 distro/u26
 distro/u26-pkg
+distro/u26-dkms

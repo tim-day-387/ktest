@@ -125,6 +125,12 @@ export HOME=/tmp
 ./configure --disable-server
 make --quiet -j$(nproc) debs
 """,
+        "dkms_script": """
+export HOME=/tmp
+./autogen.sh
+./configure --disable-server
+make --quiet -j$(nproc) dkms-debs
+""",
         "working_dir": "/home/ktest/git/lustre-release/",
         "distro_platform": True,
     },
@@ -145,6 +151,12 @@ export HOME=/tmp
 ./configure --disable-server --with-linux=$(ls -d /usr/src/linux-headers-*-generic)
 make --quiet -j$(nproc) debs
 """,
+        "dkms_script": """
+export HOME=/tmp
+./autogen.sh
+./configure --disable-server --with-linux=$(ls -d /usr/src/linux-headers-*-generic)
+make --quiet -j$(nproc) dkms-debs
+""",
         "working_dir": "/home/ktest/git/lustre-release/",
         "distro_platform": True,
     },
@@ -159,6 +171,11 @@ make --quiet -j$(nproc)
 ./autogen.sh
 ./configure --enable-efa
 make --quiet -j$(nproc) rpms
+""",
+        "dkms_script": """
+./autogen.sh
+./configure --enable-efa
+make --quiet -j$(nproc) dkms-rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
         "distro_platform": True,
@@ -177,6 +194,11 @@ make --quiet -j$(nproc)
 CC=gcc10-gcc ./configure
 make --quiet -j$(nproc) rpms
 """,
+        "dkms_script": """
+./autogen.sh
+CC=gcc10-gcc ./configure
+make --quiet -j$(nproc) dkms-rpms
+""",
         "working_dir": "/home/ktest/git/lustre-release/",
         "distro_platform": True,
     },
@@ -194,6 +216,12 @@ O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
 ./configure --disable-server
 make --quiet -j$(nproc) rpms
 """,
+        "dkms_script": """
+O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
+./autogen.sh
+./configure --disable-server
+make --quiet -j$(nproc) dkms-rpms
+""",
         "working_dir": "/home/ktest/git/lustre-release/",
         "distro_platform": True,
     },
@@ -210,6 +238,12 @@ O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
 ./autogen.sh
 ./configure --disable-server
 make --quiet -j$(nproc) rpms
+""",
+        "dkms_script": """
+O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
+./autogen.sh
+./configure --disable-server
+make --quiet -j$(nproc) dkms-rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
         "distro_platform": True,
@@ -234,6 +268,12 @@ O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
 ./autogen.sh
 ./configure --disable-server
 make --quiet -j$(nproc) rpms
+""",
+        "dkms_script": """
+O2IB_PATH=$(ls -d /usr/src/ofa_kernel/x86_64/*)
+./autogen.sh
+./configure --disable-server
+make --quiet -j$(nproc) dkms-rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",
         "distro_platform": True,

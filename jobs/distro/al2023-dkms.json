@@ -1,0 +1,5 @@
+{
+  "name": "al2023-dkms",
+  "platform": "al2023",
+  "dkms": "tests/fs/lustre/boot.ktest"
+}

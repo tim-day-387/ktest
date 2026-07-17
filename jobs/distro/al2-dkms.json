@@ -1,0 +1,5 @@
+{
+  "name": "al2-dkms",
+  "platform": "al2",
+  "dkms": "tests/fs/lustre/boot.ktest"
+}

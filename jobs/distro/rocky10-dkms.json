@@ -1,0 +1,5 @@
+{
+  "name": "rocky10-dkms",
+  "platform": "rocky10",
+  "dkms": "tests/fs/lustre/boot.ktest"
+}
