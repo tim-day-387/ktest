@@ -892,7 +892,9 @@ static int copy_tree(const char *src, const char *dst, dev_t dev)
  * and copy the entire initramfs tree into it (copy_tree stays on the initramfs
  * filesystem, so mounted pseudo-filesystems and /newroot itself are skipped),
  * then bind /newroot/init.initramfs/lib/modules onto /newroot/lib/modules so
- * modprobe(8) finds the modules at the usual path.  These submounts ride along
+ * modprobe(8) finds the modules at the usual path, and likewise
+ * /newroot/init.initramfs/lib/firmware onto /newroot/lib/firmware so the
+ * kernel firmware loader finds the bundled blobs.  These submounts ride along
  * when switch_root_and_exec() moves /newroot onto /; the later /run remount
  * does not shadow /init.initramfs.  A no-op if the initramfs bundled no
  * modules.
@@ -936,6 +938,19 @@ static void copy_initramfs_to_newroot(void)
 			 strerror(errno));
 	else
 		kmsg_log(KMSG_INFO, "bind-mounted /lib/modules from initramfs\n");
+
+	if (lstat("/lib/firmware", &st) == 0 && S_ISDIR(st.st_mode)) {
+		mkdir(MOUNTPOINT "/lib/firmware", 0755);
+
+		if (mount(MOUNTPOINT INITRAMFS_SAVE "/lib/firmware",
+			  MOUNTPOINT "/lib/firmware", NULL, MS_BIND, NULL) < 0)
+			kmsg_log(KMSG_ERR,
+				 "bind /lib/firmware from initramfs: %s\n",
+				 strerror(errno));
+		else
+			kmsg_log(KMSG_INFO,
+				 "bind-mounted /lib/firmware from initramfs\n");
+	}
 }
 
 /*
