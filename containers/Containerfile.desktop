@@ -23,6 +23,31 @@ RUN if existing=$(getent passwd ${DESKTOP_UID} | cut -d: -f1) && [ -n "$existing
         -G sudo,adm,cdrom,dip,plugdev,lpadmin ${DESKTOP_USER} \
  && passwd -d ${DESKTOP_USER}
 
+# The NVIDIA userland (libGL/EGL/Vulkan, the X driver, nvidia-smi, the
+# nvidia-modprobe setuid helper).  Only userspace: the matching kernel modules
+# come from the open-gpu-kernel-modules build in qlkbuild (build_nvidia), so
+# --no-kernel-module skips the in-installer build and DKMS registration.
+# Keep this version in lockstep with the open-gpu-kernel-modules tag in
+# Containerfile.ktest.u26.
+#
+# --no-kernel-module also skips the GSP firmware, which the installer treats as
+# part of the kernel-module component -- so install it by hand.  nvidia.ko is
+# loaded by udev after init switch_root's into this image, and the firmware
+# loader only searches /lib/firmware on the *new* root; the copy mk_initramfs
+# bundles into the initramfs is out of reach by then (init bind-mounts
+# /lib/modules across the switch, but not /lib/firmware).  Extract once and
+# reuse the tree for both halves so this is a single download.
+ARG NVIDIA_DRIVER_VERSION=610.43.02
+RUN cd /tmp \
+ && run=NVIDIA-Linux-x86_64-${NVIDIA_DRIVER_VERSION}.run \
+ && curl -fsSL -O "https://us.download.nvidia.com/XFree86/Linux-x86_64/${NVIDIA_DRIVER_VERSION}/$run" \
+ && sh "$run" --extract-only --target nvidia-run \
+ && (cd nvidia-run && ./nvidia-installer --silent --no-kernel-module --install-libglvnd) \
+ && install -d /lib/firmware/nvidia/${NVIDIA_DRIVER_VERSION} \
+ && install -m 0644 nvidia-run/firmware/*.bin \
+        /lib/firmware/nvidia/${NVIDIA_DRIVER_VERSION}/ \
+ && rm -rf nvidia-run "$run"
+
 # Boot to the graphical target. Done as a direct symlink rather than
 # `systemctl set-default` so it works offline / cross-arch.
 RUN ln -sf /lib/systemd/system/graphical.target \
