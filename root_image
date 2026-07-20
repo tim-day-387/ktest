@@ -254,9 +254,12 @@ mount_lustre_image()
     mount -t lustre "$LUSTRE_POOL/$LUSTRE_OST0_DS" /mnt/lustre-ost0
     mount -t lustre "$LUSTRE_POOL/$LUSTRE_OST1_DS" /mnt/lustre-ost1
 
+    local fsname=$(zfs get -H -o value lustre:fsname "$LUSTRE_POOL/$LUSTRE_MGS_DS")
+    [[ -z $fsname || $fsname = - ]] && fsname=$LUSTRE_FSNAME
+
     local mgs_nid=$(lnetctl net show | grep 'nid:.*@tcp' | head -1 | awk '{print $NF}')
     mkdir -p "$LUSTRE_CLIENT_MNT"
-    mount -t lustre "$mgs_nid:/$LUSTRE_FSNAME" "$LUSTRE_CLIENT_MNT"
+    mount -t lustre "$mgs_nid:/$fsname" "$LUSTRE_CLIENT_MNT"
 
     MNT="$LUSTRE_CLIENT_MNT"
 }
@@ -373,6 +376,8 @@ cmd_create_lustre()
 
 cmd_create_lustre_desktop()
 {
+    # Lustre fsnames are limited to 8 characters
+    LUSTRE_FSNAME="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
     _create_lustre_image build_desktop_image "$DESKTOP_IMAGE_TAG"
 }
 
