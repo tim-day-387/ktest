@@ -1,0 +1,7 @@
+export FSNAME=myfsname
+sudo zpool import -d /var/lib/ktest/lustre_desktop.amd64 lustre_pool
+sudo zfs snapshot -r lustre_pool@xfer
+sudo zfs send -p lustre_pool/mgs_mdt@xfer | sudo zfs recv -u -x mountpoint rootfs/$FSNAME-mgs_mdt
+sudo zfs send -p lustre_pool/ost0@xfer | sudo zfs recv -u -x mountpoint rootfs/$FSNAME-ost0
+sudo zfs send -p lustre_pool/ost1@xfer | sudo zfs recv -u -x mountpoint rootfs/$FSNAME-ost1
+sudo zpool export lustre_pool
