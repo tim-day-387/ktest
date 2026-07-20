@@ -3,6 +3,20 @@
 ARG ROOT_BASE=localhost/ktest-root-base:latest
 FROM ${ROOT_BASE}
 
+# Un-minimize the packages inherited from the ubuntu:24.04 container base.
+# Containerfile.root_image drops dpkg's doc-stripping excludes before
+# installing anything, so only the base image's own packages are missing
+# their man pages/docs; it records their names in base-packages.list.
+# Reinstall exactly those, rather than running Ubuntu's unminimize script:
+# its blanket reinstall of everything owning /usr/share/man includes the
+# locally-installed Lustre debs, which apt cannot re-download.  Then drop
+# the "this system has been minimized" login banner.
+RUN apt-get update \
+ && xargs -a /usr/share/ktest/base-packages.list -r \
+        apt-get install --reinstall -y \
+ && rm -f /etc/update-motd.d/60-unminimize \
+ && rm -rf /var/lib/apt/lists/*
+
 # Passwordless sudo for the sudo group
 RUN echo '%sudo ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-nopasswd \
  && chmod 0440 /etc/sudoers.d/90-nopasswd

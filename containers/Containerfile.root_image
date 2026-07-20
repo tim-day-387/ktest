@@ -10,10 +10,18 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C
 
 # Pre-install setup:
+#   - drop the minimized container image's dpkg excludes, so every package
+#     installed from here on keeps its man pages, docs and translations
+#   - record the base image's package list while it is still pristine, so
+#     Containerfile.desktop can reinstall exactly those to restore the docs
+#     the minimized base shipped without
 #   - disable man-db cache rebuilds (slow on Lustre)
 #   - stub out initramfs generation (we use UKI)
 #   - force-unsafe-io for faster dpkg
-RUN echo 'man-db man-db/auto-update boolean false' | debconf-set-selections \
+RUN rm -f /etc/dpkg/dpkg.cfg.d/excludes \
+ && install -d /usr/share/ktest \
+ && dpkg-query -W -f '${binary:Package}\n' > /usr/share/ktest/base-packages.list \
+ && echo 'man-db man-db/auto-update boolean false' | debconf-set-selections \
  && printf 'INITRD=No\n' >> /etc/environment \
  && install -d /usr/local/sbin /etc/dpkg/dpkg.cfg.d \
  && printf '#!/bin/sh\nexit 0\n' > /usr/local/sbin/update-initramfs \
