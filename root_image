@@ -139,6 +139,12 @@ extract_image_to()
     cid=$(podman create "$image" /bin/true)
     podman export "$cid" | tar -C "$dest" -xf -
     podman rm "$cid" >/dev/null
+
+    # /etc/resolv.conf can't be baked into the image: podman bind-mounts it
+    # during build, so RUN-writes never persist and the export ships the base
+    # image's empty file. Point it at the systemd-resolved stub (the standard
+    # Ubuntu arrangement) so NetworkManager/networkd DNS actually resolves.
+    ln -sfn ../run/systemd/resolve/stub-resolv.conf "$dest/etc/resolv.conf"
 }
 
 # ----- cmd_create --------------------------------------------------------

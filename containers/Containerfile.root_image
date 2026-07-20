@@ -20,15 +20,14 @@ RUN echo 'man-db man-db/auto-update boolean false' | debconf-set-selections \
  && chmod +x /usr/local/sbin/update-initramfs \
  && echo force-unsafe-io > /etc/dpkg/dpkg.cfg.d/dpkg-unsafe
 
-# Packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        linux-image-generic linux-tools-generic systemd systemd-sysv dbus udev \
-        ca-certificates curl gnupg kmod \
-        less psmisc openssh-server pciutils rsync git \
-        zfsutils-linux libyaml-0-2 \
+# Bootstrap packages for the third-party repository setup below; the base
+# image ships without curl.
+RUN apt-get update && apt-get install -y \
+        ca-certificates curl gnupg \
  && rm -rf /var/lib/apt/lists/*
 
-# Third-party apt repositories
+# Third-party apt repositories, added before the main package install, which
+# pulls clang-23/llvm-23/lld-23 and gh from them
 #   - apt.llvm.org        LLVM/Clang 23 (the development branch; apt.llvm.org
 #                         only ships it in the unversioned noble suite — the
 #                         versioned llvm-toolchain-noble-NN suites stop at 22)
@@ -44,21 +43,14 @@ RUN install -d /etc/apt/keyrings \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list
 
-# The GNOME desktop metapackage
-RUN apt-get update && apt-get install -y \
-        ubuntu-desktop-minimal \
- && rm -rf /var/lib/apt/lists/*
-
-# The full dev/test/desktop package set
+# Packages
 RUN apt-get update && apt-get install -y \
         build-essential make gcc g++ clang llvm clang-23 llvm-23 lld-23 \
         autoconf automake autopoint bison flex pahole libtool-bin pkg-config \
-        golang-go python3-dev python3-docutils \
-        devscripts debhelper sbuild dh-sequence-dkms dkms \
-        bear quilt module-assistant git-review swig mold \
+        golang-go python3-dev python3-docutils devscripts debhelper sbuild \
+        dh-sequence-dkms dkms bear quilt module-assistant git-review swig mold \
         libelf-dev libbpf-dev libblkid-dev uuid-dev libscrypt-dev libsodium-dev \
         libkeyutils-dev liburcu-dev libudev-dev zlib1g-dev libattr1-dev \
-        libunwind-dev \
         libaio-dev libzstd-dev liblz4-dev libfuse3-dev libclang-dev libldap2-dev \
         libgdbm-dev libacl1-dev gettext libssl-dev libgdbm-compat-dev liburing-dev \
         libcap-dev libcap2-bin libinih-dev libsnmp-dev mpi-default-dev \
@@ -69,11 +61,13 @@ RUN apt-get update && apt-get install -y \
         hdparm mdadm lvm2 cryptsetup btrfs-progs jfsutils nilfs-tools f2fs-tools \
         xfsprogs xfslibs-dev quota acct bsdextrautils erofs-utils squashfs-tools-ng \
         nfs-kernel-server nfs-common ocfs2-tools openafs-dbserver openafs-fileserver \
-        nbd-client nbd-server multipath-tools sg3-utils srptools \
-        bc attr gawk acl capnproto jq smbclient minicom \
-        qemu-system-x86 qemu-utils \
-        podman podman-compose python3-podman fuse-overlayfs \
+        nbd-client nbd-server multipath-tools sg3-utils srptools bc attr gawk acl \
+        capnproto jq smbclient minicom libunwind-dev qemu-system-x86 qemu-utils \
+        ubuntu-desktop-minimal podman podman-compose python3-podman fuse-overlayfs \
         emacs keepassxc evolution tlp powertop firefox snapd gh \
+        linux-image-generic linux-tools-generic systemd systemd-sysv dbus udev \
+        systemd-resolved ca-certificates curl gnupg kmod less psmisc openssh-server \
+        pciutils rsync git iputils-ping zfsutils-linux libyaml-0-2 \
  && rm -rf /var/lib/apt/lists/*
 
 # Rust toolchain via rustup (as in Containerfile.ktest.u26). Ubuntu 24.04's apt
@@ -108,11 +102,12 @@ RUN for pkg in lustre-client-utils lustre-dev lustre-iokit lustre-tests; do \
         /tmp/lustre-iokit.deb /tmp/lustre-tests.deb \
  && rm -rf /var/lib/apt/lists/*
 
-# DNS fallback, a root shell from skel, and the root XDG runtime dir that
-# systemd's user machinery expects.
-RUN printf 'nameserver 8.8.8.8\nnameserver 8.8.4.4\n' > /etc/resolv.conf \
- && chmod 0644 /etc/resolv.conf \
- && install -m 0644 /etc/skel/.bashrc  /root/.bashrc \
+# A root shell from skel, and the root XDG runtime dir that systemd's user
+# machinery expects.  /etc/resolv.conf is NOT set up here: podman bind-mounts
+# it for the duration of every RUN step, so writes to it never reach the
+# image.  root_image points it at the systemd-resolved stub after extraction
+# instead (NetworkManager hardcodes dns=systemd-resolved on Ubuntu).
+RUN install -m 0644 /etc/skel/.bashrc  /root/.bashrc \
  && install -m 0644 /etc/skel/.profile /root/.profile \
  && install -d -m 0700 /run/user/0
 
