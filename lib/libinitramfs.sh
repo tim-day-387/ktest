@@ -83,13 +83,32 @@ function mk_initramfs() (
 	    echo "Copying firmware from $src..."
 	    cp -a "$src/i915" "$INITRAMFS/lib/firmware/" 2>/dev/null || true
 	    cp -a "$src/nvidia" "$INITRAMFS/lib/firmware/" 2>/dev/null || true
-	    # MediaTek Wi-Fi (mt7921e/RZ608) loads firmware by its mediatek/ path,
-	    # so preserve the subdir rather than flattening it.
-	    mkdir -p "$INITRAMFS/lib/firmware/mediatek"
-	    find "$src/mediatek" -maxdepth 1 -name 'WIFI_*MT796*.bin' \
-		| xargs -r cp -t "$INITRAMFS/lib/firmware/mediatek/" 2>/dev/null || true
 	    find "$src" \( -name 'iwlwifi-*.ucode' -o -name 'iwlwifi-*.pnvm' \) | xargs -r cp -t "$INITRAMFS/lib/firmware/" 2>/dev/null || true
 	done
+
+	# Copy every firmware blob the packaged modules declare (modinfo -F
+	# firmware), preserving the path the driver requests it by.  This covers
+	# whatever hardware the kernel supports without per-vendor globs.  The
+	# wholesale copies above still matter: i915/nvidia/iwlwifi pick some blob
+	# names at runtime (GuC/GSP images, ucode API fallback) that
+	# MODULE_FIRMWARE doesn't declare.
+	if [[ -d "$INITRAMFS/lib/modules" ]]; then
+	    echo "Copying firmware declared by packaged modules..."
+	    { find "$INITRAMFS/lib/modules" -name '*.ko*' -print0 \
+		  | xargs -0 -r modinfo -F firmware 2>/dev/null || true; \
+	      cat "$INITRAMFS"/lib/modules/*/modules.builtin.modinfo 2>/dev/null \
+		  | tr '\0' '\n' | sed -n 's/^[^=]*\.firmware=//p' || true; } \
+		| sort -u \
+		| while read -r fw; do
+		    for src in "${fw_srcs[@]}"; do
+			for f in "$src/$fw" "$src/$fw.zst" "$src/$fw.xz"; do
+			    [[ -e "$f" ]] || continue
+			    mkdir -p "$INITRAMFS/lib/firmware/$(dirname "$fw")"
+			    cp "$f" "$INITRAMFS/lib/firmware/$(dirname "$fw")/"
+			done
+		    done
+		done || true
+	fi
 	cp "$FIRMWARE_DIR/regulatory.db" "$FIRMWARE_DIR/regulatory.db.p7s" "$INITRAMFS/lib/firmware/" 2>/dev/null || \
 	    cp /lib/firmware/regulatory.db /lib/firmware/regulatory.db.p7s "$INITRAMFS/lib/firmware/" 2>/dev/null || \
 	    echo "Warning: regulatory.db not found, WiFi regulatory domain will be unavailable"
