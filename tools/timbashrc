@@ -12,6 +12,14 @@
 # tools to make me more productive.
 #
 
+# Do nothing for non-interactive shells; sshd sources
+# this even for plain remote commands, and banner output
+# would corrupt rsync/git/scp streams.
+case $- in
+    *i*) ;;
+    *) return;;
+esac
+
 #
 # Display a logo and some common system
 # information.
@@ -122,6 +130,36 @@ PS1="$TT_TITLE$SSH_PROMPT[\$?][\w]\$ "
 # Increase history size
 export HISTSIZE=25000
 export HISTFILESIZE=25000
+
+# Drop duplicate/space-prefixed commands, and append to the
+# history file so concurrent shells don't clobber each other
+HISTCONTROL=ignoreboth
+shopt -s histappend
+
+# Update LINES/COLUMNS after each command
+shopt -s checkwinsize
+
+# Color support for ls
+if [[ -x /usr/bin/dircolors ]]; then
+    eval "$(dircolors -b)"
+    alias ls="ls --color=auto"
+fi
+
+# Programmable completion; the system bash.bashrc ships
+# with this commented out, and profile.d only covers
+# login shells
+if ! shopt -oq posix; then
+    if [[ -f /usr/share/bash-completion/bash_completion ]]; then
+	source /usr/share/bash-completion/bash_completion
+    elif [[ -f /etc/bash_completion ]]; then
+	source /etc/bash_completion
+    fi
+fi
+
+# Machine-local additions
+if [[ -f ~/.bash_aliases ]]; then
+    source ~/.bash_aliases
+fi
 
 # Custom aliases
 alias emacs="emacs -nw"

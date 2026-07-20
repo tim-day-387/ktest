@@ -37,6 +37,9 @@ RUN if existing=$(getent passwd ${DESKTOP_UID} | cut -d: -f1) && [ -n "$existing
         -G sudo,adm,cdrom,dip,plugdev,lpadmin ${DESKTOP_USER} \
  && passwd -d ${DESKTOP_USER}
 
+# Tim's bashrc for the interactive user.
+COPY --chown=${DESKTOP_UID}:${DESKTOP_UID} tools/timbashrc /home/${DESKTOP_USER}/.bashrc
+
 # The NVIDIA userland (libGL/EGL/Vulkan, the X driver, nvidia-smi, the
 # nvidia-modprobe setuid helper).  Only userspace: the matching kernel modules
 # come from the open-gpu-kernel-modules build in qlkbuild (build_nvidia), so
