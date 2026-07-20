@@ -137,7 +137,11 @@ extract_image_to()
     local image=$1 dest=$2
     local cid
     cid=$(podman create "$image" /bin/true)
-    podman export "$cid" | tar -C "$dest" -xf -
+    # --xattrs-include: plain tar -x silently drops security.capability (and
+    # everything outside user.*), and snapd >= 2.68 ships snap-confine with
+    # file capabilities instead of setuid root, so snaps can't start without
+    # it.
+    podman export "$cid" | tar -C "$dest" --xattrs --xattrs-include='*' -xf -
     podman rm "$cid" >/dev/null
 
     # /etc/resolv.conf can't be baked into the image: podman bind-mounts it
