@@ -24,8 +24,19 @@ Everything you'd pass to `git send-email` (recipients, patch files,
    pip install --user msal
    ```
 
+   `git send-email` also needs the XOAUTH2 SASL mechanism for Perl.
+   Distro packages of `Authen::SASL` are too old (XOAUTH2 arrived
+   upstream in 2.1800; Debian/Ubuntu ship 2.1700), so install the
+   current release from CPAN into `/usr/local`:
+
+   ```sh
+   sudo apt install cpanminus
+   sudo cpanm Authen::SASL
+   ```
+
 2. Configure the SMTP server and your identity in git. This only needs
-   to be done once (it's already set globally on this machine):
+   to be done once per machine — verify with
+   `git config --global --get-regexp '^sendemail'`:
 
    ```sh
    git config --global sendemail.smtpserver     smtp.office365.com
@@ -286,6 +297,24 @@ characters, otherwise `git send-email` will stop to ask.
 
 ## Troubleshooting
 
+- **Mail "sends" (`Result: OK`) but never arrives, log shows
+  `Sendmail: /usr/sbin/sendmail -i ...`** — `sendemail.smtpserver` is
+  not set, so `git send-email` silently fell back to the local sendmail
+  binary and ignored the OAuth2 options (they only apply to SMTP mode).
+  The message is now stuck in the local Postfix queue, where direct
+  delivery on port 25 is usually blocked. Set the config from the setup
+  section above, then check `mailq` and delete the stranded message
+  (`sudo postsuper -d <queue-id>`) before resending, or it may
+  eventually bounce or go out twice. A correct send shows an SMTP
+  conversation with `smtp.office365.com`, not a `Sendmail:` line.
+- **`No SASL mechanism found at .../Authen/SASL.pm`** — the installed
+  `Authen::SASL` predates XOAUTH2 support. Install the current release
+  from CPAN (see setup step 1); verify with:
+
+  ```sh
+  perl -MAuthen::SASL -e \
+      'Authen::SASL->new(mechanism => "XOAUTH2")->client_new("smtp","x")'
+  ```
 - **Device-code prompt appears every time** — the cache file is missing
   or unwritable. Check that `token-cache.json` exists next to the
   scripts and is mode 0600.
