@@ -236,6 +236,7 @@ function build_lustre_intree()
     # No strict errors
     if [[ "${ktest_lustre_allow_warnings}" == "1" ]]; then
 	export CFLAGS="-Wno-error=attribute-warning -Wno-error=unused-but-set-variable -Wno-error=single-bit-bitfield-constant-conversion -Wno-error=format-security -Wno-error=cast-function-type-strict"
+	export enable_strict_errors="no"
     else
 	export CFLAGS="-Werror"
     fi
@@ -312,6 +313,7 @@ function build_lustre()
     # No strict errors
     if [[ "${ktest_lustre_allow_warnings}" == "1" ]]; then
 	export CFLAGS="-Wno-error=attribute-warning -Wno-error=unused-but-set-variable -Wno-error=single-bit-bitfield-constant-conversion -Wno-error=format-security -Wno-error=cast-function-type-strict"
+	export enable_strict_errors="no"
     else
 	export CFLAGS="-Werror"
     fi
