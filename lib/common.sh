@@ -176,17 +176,7 @@ checkdep() {
     if find_command "$dep"; then
 	return
     else
-	echo "$dep" not found!
-    fi
-
-    if find_command sudo && find_command apt-get ; then
-	echo "  installing $package:"
-	sudo apt-get -qq install --no-install-recommends "$package"
-    elif find_command sudo && find_command pacman ; then
-	echo "  installing $package:"
-	sudo pacman -S --noconfirm "$package"
-    else
-	echo "  please install"
+	echo "$dep not found! Please install it."
 	exit 1
     fi
 }
