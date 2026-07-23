@@ -10,18 +10,30 @@
 #
 
 import os
+import platform
 from pathlib import Path
 from typing import Optional, List
 
 from .models import ValidationError
-from .utils import get_podman_client, get_ccache_dir, get_package_dir, is_in_home
+from .utils import (
+    get_podman_client,
+    get_podman_socket,
+    get_ccache_dir,
+    get_package_dir,
+    is_in_home,
+)
+
+KTEST_IMAGE = "ktest-runner:latest"
+
+# Debian architecture suffix used by root_image (see lib/common.sh parse_arch)
+DEBIAN_ARCH = {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine())
 
 
 def _run_validation_container(client, command, devices=None, mounts=None):
     """Run a validation command in a container and return (success, output)."""
     try:
         container = client.containers.run(
-            image="ktest-runner:latest",
+            image=KTEST_IMAGE,
             command=["bash", "-c", command],
             devices=devices or [],
             mounts=mounts or [],
@@ -31,6 +43,75 @@ def _run_validation_container(client, command, devices=None, mounts=None):
         return True, output
     except Exception as e:
         return False, str(e)
+
+
+def _validate_podman_socket(client, podman_socket=None) -> Optional[ValidationError]:
+    """Check that the podman socket is up and responding."""
+    socket_url = get_podman_socket(podman_socket)
+
+    try:
+        if client.ping():
+            return None
+    except Exception:
+        pass
+
+    return ValidationError(
+        check_name="podman_socket",
+        message=f"podman socket is not responding: {socket_url}",
+        remediation="Start the podman socket: systemctl --user enable --now podman.socket",
+    )
+
+
+def _validate_ktest_image(client) -> Optional[ValidationError]:
+    """Check that the ktest container image exists."""
+    try:
+        if client.images.exists(KTEST_IMAGE):
+            return None
+    except Exception:
+        pass
+
+    return ValidationError(
+        check_name="ktest_image",
+        message=f"container image not found: {KTEST_IMAGE}",
+        remediation="Build it with: podman-ktest build",
+    )
+
+
+def _validate_root_image(client) -> Optional[ValidationError]:
+    """Check that a VM root image exists in /var/lib/ktest.
+
+    The check runs in a container with /var/lib/ktest bind-mounted, so it
+    tests the host path even when podman-ktest runs inside the ci-lustre
+    container (bind-mount sources are resolved on the host, same as job
+    containers -- see models.py).
+    """
+    if DEBIAN_ARCH is None:
+        return ValidationError(
+            check_name="root_image",
+            message=f"unsupported architecture: {platform.machine()}",
+            remediation="Only x86_64 and aarch64 are supported.",
+        )
+
+    root_image = f"/var/lib/ktest/root.{DEBIAN_ARCH}"
+    command = f"test -f {root_image} && echo 'ok' || echo 'missing'"
+    mounts = [
+        {
+            "type": "bind",
+            "source": "/var/lib/ktest",
+            "target": "/var/lib/ktest",
+            "read_only": True,
+        }
+    ]
+
+    success, output = _run_validation_container(client, command, mounts=mounts)
+
+    if not success or "ok" not in output:
+        return ValidationError(
+            check_name="root_image",
+            message=f"root image not found: {root_image}",
+            remediation="Build it with: ./root_image create (or podman-ktest deploy)",
+        )
+    return None
 
 
 def _validate_kvm_exists(client) -> Optional[ValidationError]:
@@ -173,6 +254,21 @@ def valid_env(podman_socket=None, shared_filesystem=None):
 
     try:
         with get_podman_client(podman_socket) as client:
+            # The socket and image checks are prerequisites for every other
+            # check, which all run inside a ktest-runner container -- if
+            # either fails, the rest are skipped rather than reported as a
+            # cascade of misleading failures.
+            prerequisites = [
+                (
+                    "Checking podman socket",
+                    lambda: _validate_podman_socket(client, podman_socket),
+                ),
+                (
+                    "Checking ktest container image",
+                    lambda: _validate_ktest_image(client),
+                ),
+            ]
+
             # Run each validation in its own container
             validations = [
                 ("Checking /dev/kvm exists", lambda: _validate_kvm_exists(client)),
@@ -180,6 +276,7 @@ def valid_env(podman_socket=None, shared_filesystem=None):
                     "Checking /dev/kvm permissions",
                     lambda: _validate_kvm_permissions(client),
                 ),
+                ("Checking root image", lambda: _validate_root_image(client)),
                 (
                     "Creating ccache directory",
                     lambda: _validate_ccache_directory(client, ccache_dir),
@@ -206,13 +303,24 @@ def valid_env(podman_socket=None, shared_filesystem=None):
 
             # Buffer the per-check results; they are only printed if a check
             # fails, to keep successful runs (e.g. `job --stdout`) uncluttered.
-            for description, validate_func in validations:
+            # The prerequisites are ordered dependencies (no socket means the
+            # image check can't run either), so stop at the first failure.
+            for description, validate_func in prerequisites:
                 error = validate_func()
                 if error:
                     check_lines.append(f"  {description}... FAILED")
                     errors.append(error)
-                else:
-                    check_lines.append(f"  {description}... OK")
+                    break
+                check_lines.append(f"  {description}... OK")
+
+            if not errors:
+                for description, validate_func in validations:
+                    error = validate_func()
+                    if error:
+                        check_lines.append(f"  {description}... FAILED")
+                        errors.append(error)
+                    else:
+                        check_lines.append(f"  {description}... OK")
 
     except Exception as e:
         errors.append(
