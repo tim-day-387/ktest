@@ -1,0 +1,348 @@
+#!/usr/bin/env python3
+
+import argparse
+import html
+import json
+import sys
+from urllib.error import HTTPError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+#
+# patch-status
+#
+# Generate a patch status page for open Gerrit changes, in the
+# spirit of the Whamcloud "Patch Status" wiki page. For each
+# change report the human review count, bot test status, patch
+# size, and author. Changes are sorted smallest-first by patch
+# size and can be filtered to a list of authors.
+#
+
+GERRIT = "https://review.whamcloud.com"
+PROJECT = "fs/lustre-release"
+BRANCH = "master"
+
+#
+# Bots expected to post +1 Verified before a patch can land.
+#
+BOTS = {"jenkins", "maloo"}
+
+MAX_PAGES = 20
+
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Generate a patch status page from Gerrit."
+    )
+
+    p.add_argument("--gerrit", default=GERRIT,
+                   help=f"Gerrit URL (default: {GERRIT})")
+    p.add_argument("--project", default=PROJECT,
+                   help=f"Gerrit project (default: {PROJECT})")
+    p.add_argument("--branch", default=BRANCH,
+                   help=f"target branch (default: {BRANCH})")
+    p.add_argument("--author", action="append", default=[],
+                   metavar="AUTHOR",
+                   help="only show changes by this author (name, "
+                        "username, or email; repeatable, or a "
+                        "comma-separated list)")
+    p.add_argument("--not-ready", action="store_true",
+                   help="only show changes not ready to land (ready "
+                        "means 2+ positive reviews, passing tests, "
+                        "and no negative reviews)")
+    p.add_argument("--html", metavar="FILE",
+                   help="write an HTML page to FILE ('-' for stdout) "
+                        "instead of a text table")
+
+    args = p.parse_args()
+
+    args.author = [
+        a.strip()
+        for entry in args.author
+        for a in entry.split(",")
+        if a.strip()
+    ]
+
+    return args
+
+
+def query_page(gerrit, query, start):
+    params = urlencode([
+        ("q", query),
+        ("o", "DETAILED_LABELS"),
+        ("o", "DETAILED_ACCOUNTS"),
+        ("S", start),
+    ])
+
+    url = f"{gerrit}/changes/?{params}"
+
+    raw = urlopen(Request(url)).read().decode()
+
+    if raw.startswith(")]}'"):
+        raw = raw.split("\n", 1)[1]
+
+    return json.loads(raw)
+
+
+def query_changes(gerrit, query):
+    """
+    Page through Gerrit query results. Gerrit caps results per
+    response and sets _more_changes on the last entry of a page,
+    so follow up with the S offset.
+    """
+    changes = []
+    start = 0
+
+    for _ in range(MAX_PAGES):
+        page = query_page(gerrit, query, start)
+
+        if not page:
+            break
+
+        changes.extend(page)
+
+        if not page[-1].get("_more_changes"):
+            break
+
+        start += len(page)
+
+    return changes
+
+
+def fetch_changes(args):
+    query = (
+        "status:open "
+        f"project:{args.project} "
+        f"branch:{args.branch}"
+    )
+
+    #
+    # Narrow the query server-side when authors are given. An
+    # unknown identity makes Gerrit reject the whole query, so
+    # fall back to the plain query and rely on the client-side
+    # filter below.
+    #
+    if args.author:
+        owners = " OR ".join(
+            f'owner:"{a}"' for a in args.author
+        )
+
+        try:
+            return query_changes(args.gerrit, f"{query} ({owners})")
+        except HTTPError:
+            pass
+
+    return query_changes(args.gerrit, query)
+
+
+def is_bot(voter):
+    return "SERVICE_USER" in voter.get("tags", [])
+
+
+def owner_matches(ch, authors):
+    """
+    Case-insensitive substring match of any requested author
+    against the owner's name, username, or email.
+    """
+    if not authors:
+        return True
+
+    owner = ch.get("owner", {})
+
+    fields = " ".join(
+        str(owner.get(k, ""))
+        for k in ("name", "username", "email")
+    ).lower()
+
+    return any(a.lower() in fields for a in authors)
+
+
+def review_count(ch):
+    """
+    Count humans voting Code-Review >= +1. Returns the count and
+    whether anyone (human or bot) voted negative on any label.
+    """
+    humans = set()
+    blocked = False
+
+    for name, label in ch.get("labels", {}).items():
+        for v in label.get("all", []):
+            value = v.get("value", 0) or 0
+
+            if value < 0:
+                blocked = True
+
+            if name == "Code-Review" and value >= 1 and not is_bot(v):
+                humans.add(v.get("username", v.get("name")))
+
+    return len(humans), blocked
+
+
+def test_status(ch):
+    """
+    Bot test status from the Verified label: FAIL on any negative
+    bot vote, PASS once every expected bot voted +1, otherwise
+    the pass count so far (e.g. "1/2").
+    """
+    passed = set()
+    failed = False
+
+    label = ch.get("labels", {}).get("Verified", {})
+
+    for v in label.get("all", []):
+        if not is_bot(v):
+            continue
+
+        value = v.get("value", 0) or 0
+
+        if value < 0:
+            failed = True
+        elif value >= 1:
+            passed.add(v.get("username", v.get("name")))
+
+    if failed:
+        return "FAIL"
+
+    if BOTS <= passed:
+        return "PASS"
+
+    return f"{len(passed & BOTS)}/{len(BOTS)}"
+
+
+def build_rows(changes, args):
+    rows = []
+
+    for ch in changes:
+        if not owner_matches(ch, args.author):
+            continue
+
+        reviews, blocked = review_count(ch)
+
+        test = test_status(ch)
+
+        #
+        # Ready to land: 2+ positive human reviews, passing tests,
+        # and no negative vote anywhere.
+        #
+        ready = reviews >= 2 and test == "PASS" and not blocked
+
+        if args.not_ready and ready:
+            continue
+
+        size = ch.get("insertions", 0) + ch.get("deletions", 0)
+
+        rows.append({
+            "number": ch["_number"],
+            "subject": ch.get("subject", ""),
+            "author": ch.get("owner", {}).get("name", "?"),
+            "reviews": f"{reviews}" + (" -1!" if blocked else ""),
+            "test": test,
+            "size": size,
+            "sizestr": f"+{ch.get('insertions', 0)}"
+                       f"/-{ch.get('deletions', 0)}",
+        })
+
+    rows.sort(key=lambda r: (r["size"], r["number"]))
+
+    return rows
+
+
+def print_text(rows):
+    header = ("Change", "Size", "Diff", "Rev", "Test", "Author",
+              "Subject")
+
+    table = [header] + [
+        (str(r["number"]), str(r["size"]), r["sizestr"],
+         r["reviews"], r["test"], r["author"], r["subject"])
+        for r in rows
+    ]
+
+    widths = [
+        max(len(row[i]) for row in table)
+        for i in range(len(header) - 1)
+    ]
+
+    for row in table:
+        cols = [c.ljust(w) for c, w in zip(row, widths)]
+        print("  ".join(cols + [row[-1]]).rstrip())
+
+    print()
+    print(f"{len(rows)} changes")
+
+
+def write_html(rows, args, out):
+    title = f"Patch Status - {args.project} ({args.branch})"
+
+    e = html.escape
+
+    out.write(
+        "<!DOCTYPE html>\n"
+        "<html><head>\n"
+        f"<title>{e(title)}</title>\n"
+        "<style>\n"
+        "body { font-family: sans-serif; margin: 2em; }\n"
+        "table { border-collapse: collapse; }\n"
+        "th, td { border: 1px solid #999; padding: 4px 8px;"
+        " text-align: left; }\n"
+        "th { background: #eee; }\n"
+        "td.num { text-align: right; }\n"
+        ".pass { color: #070; }\n"
+        ".fail { color: #a00; }\n"
+        "</style>\n"
+        "</head><body>\n"
+        f"<h1>{e(title)}</h1>\n"
+    )
+
+    if args.author:
+        out.write(
+            f"<p>Authors: {e(', '.join(args.author))}</p>\n"
+        )
+
+    out.write(
+        "<table>\n"
+        "<tr><th>Change</th><th>Size</th><th>Diff</th>"
+        "<th>Reviews</th><th>Test</th><th>Author</th>"
+        "<th>Subject</th></tr>\n"
+    )
+
+    for r in rows:
+        url = f"{args.gerrit}/{r['number']}"
+
+        cls = {"PASS": "pass", "FAIL": "fail"}.get(r["test"], "")
+
+        out.write(
+            "<tr>"
+            f"<td><a href=\"{e(url)}\">{r['number']}</a></td>"
+            f"<td class=\"num\">{r['size']}</td>"
+            f"<td class=\"num\">{e(r['sizestr'])}</td>"
+            f"<td class=\"num\">{e(r['reviews'])}</td>"
+            f"<td class=\"{cls}\">{e(r['test'])}</td>"
+            f"<td>{e(r['author'])}</td>"
+            f"<td>{e(r['subject'])}</td>"
+            "</tr>\n"
+        )
+
+    out.write(
+        "</table>\n"
+        f"<p>{len(rows)} changes</p>\n"
+        "</body></html>\n"
+    )
+
+
+args = parse_args()
+
+args.gerrit = args.gerrit.rstrip("/")
+
+changes = fetch_changes(args)
+
+rows = build_rows(changes, args)
+
+if args.html is None:
+    print_text(rows)
+elif args.html == "-":
+    write_html(rows, args, sys.stdout)
+else:
+    with open(args.html, "w") as f:
+        write_html(rows, args, f)
+
+    print(f"wrote {args.html} ({len(rows)} changes)")
