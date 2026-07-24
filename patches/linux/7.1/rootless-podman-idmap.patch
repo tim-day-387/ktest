@@ -1,0 +1,30 @@
+From 9efa9298bb9dc61913f97142be86b0f67d0c860d Mon Sep 17 00:00:00 2001
+From: Timothy Day <tday141@gmail.com>
+Date: Fri, 8 May 2026 10:59:45 -0400
+Subject: [PATCH 01/10] Let rootless podman idmap
+
+---
+ fs/namespace.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/fs/namespace.c b/fs/namespace.c
+index 341ddd353b3a..b3d033d92cf7 100644
+--- a/fs/namespace.c
++++ b/fs/namespace.c
+@@ -4818,9 +4818,12 @@ static int can_idmap_mount(const struct mount_kattr *kattr, struct mount *mnt)
+ 	if (m->mnt_sb->s_iflags & SB_I_NOIDMAP)
+ 		return -EINVAL;
+ 
+-	/* We're not controlling the superblock. */
++	/* FIXME: Let rootless podman idmap mounts for now...
++	 *
++	 * We're not controlling the superblock.
+ 	if (!ns_capable(fs_userns, CAP_SYS_ADMIN))
+ 		return -EPERM;
++	 */
+ 
+ 	/* Mount has already been visible in the filesystem hierarchy. */
+ 	if (!is_anon_ns(mnt->mnt_ns))
+-- 
+2.43.0
+
