@@ -402,8 +402,27 @@ function apply_lustre_patches() {
     apply_patches "$ktest_dir/patches/lustre" "$ktest_lustre_build"
 }
 
+function linux_source_version() {
+    local makefile="$ktest_kernel_source/Makefile"
+
+    [[ -f "$makefile" ]] || return 0
+
+    local version=$(awk '/^VERSION[ \t]*=/ { print $3; exit }' "$makefile")
+    local patchlevel=$(awk '/^PATCHLEVEL[ \t]*=/ { print $3; exit }' "$makefile")
+
+    [[ -n "$version" && -n "$patchlevel" ]] && echo "$version.$patchlevel"
+}
+
 function apply_linux_patches() {
+    # Patches in patches/linux/ apply to all kernel versions;
+    # patches/linux/<VERSION.PATCHLEVEL>/ applies only to that version.
     apply_patches "$ktest_dir/patches/linux" "$ktest_kernel_source"
+
+    local version=$(linux_source_version)
+
+    if [[ -n "$version" ]]; then
+	apply_patches "$ktest_dir/patches/linux/$version" "$ktest_kernel_source"
+    fi
 }
 
 function purge_build_junk() {
