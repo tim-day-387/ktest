@@ -505,7 +505,7 @@ function run_copy_builtin()
     # If a build step hasn't already staged the Lustre source here (the
     # cached-config.h path skips the full configure), stage it now so
     # copy-builtin and the Lustre tree are present. copy-builtin itself
-    # reuses the cached config.h from the kernel tree when one exists.
+    # reuses the cached lustre_config.h from the Lustre tree when one exists.
     if [[ ! -x ./copy-builtin ]]; then
 	rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
 	apply_lustre_patches
@@ -1155,10 +1155,10 @@ function cmd_generate_lustre_patch()
     fi
 
 
-    # Use cached lustre_config.h from the kernel tree if available,
+    # Use cached lustre_config.h from the lustre tree if available,
     # otherwise run full Lustre configure to generate one.
-    if [[ -f "$ktest_kernel_source/lustre_config.h" ]]; then
-	echo "Using cached lustre_config.h from kernel tree"
+    if [[ -f "$ktest_lustre_source/lustre_config.h" ]]; then
+	echo "Using cached lustre_config.h from lustre tree"
     else
 	maybe_build_llvm
 	run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
