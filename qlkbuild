@@ -131,6 +131,11 @@ ktest_nvidia_build="$ktest_out/open-gpu-kernel-modules"
 # treats any LLVM value containing '-' as a version suffix, so a dashed
 # prefix path would be appended to the tool names as well.
 ktest_llvm_build="/tmp/ktest_llvm"
+# Record of patches applied by apply_patches, printed by print_patch_summary
+# after the kernel build (run_quiet_with_status hides the per-patch messages).
+# Cleared here so a previous run's record doesn't leak into this one.
+ktest_patch_summary="$ktest_out/patch-summary"
+rm -f "$ktest_patch_summary"
 mkdir -p "$ktest_kernel_build"
 mkdir -p "$ktest_lustre_build"
 if [[ -d "$ktest_zfs_source" ]]; then
@@ -392,10 +397,25 @@ function apply_patches() {
 	local name=$(basename "$patch")
 	if git -C "$target_repo" apply --whitespace=nowarn "$patch"; then
 	    echo "Applied patch: $name"
+	    echo "$name" >> "$ktest_patch_summary"
 	else
 	    echo "WARNING: Failed to apply patch $name (continuing)"
+	    echo "$name (FAILED)" >> "$ktest_patch_summary"
 	fi
     done
+}
+
+function print_patch_summary() {
+    [[ -s "$ktest_patch_summary" ]] || return 0
+
+    echo "Applied patches:"
+    sed 's/^/  /' "$ktest_patch_summary"
+    rm -f "$ktest_patch_summary"
+}
+
+function run_kernel_build() {
+    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    print_patch_summary
 }
 
 function apply_lustre_patches() {
@@ -814,7 +834,7 @@ function cmd_generate_zfs_patch()
     fi
 
     maybe_build_llvm
-    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_kernel_build
     run_quiet_with_status "ZFS BUILD [$(basename "$ktest_test")]" "DONE" build_zfs
 
     run_zfs_copy_builtin
@@ -833,7 +853,7 @@ function cmd_ccplugin()
     parse_test_deps "$ktest_test"
 
     maybe_build_llvm
-    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_kernel_build
     run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
 
     if [[ ! -f "$ktest_lustre_build/compile_commands.json" ]]; then
@@ -878,7 +898,7 @@ function cmd_analyzer()
     parse_test_deps "$ktest_test"
 
     maybe_build_llvm
-    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_kernel_build
     run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre
 
     if [[ ! -f "$ktest_lustre_build/compile_commands.json" ]]; then
@@ -950,7 +970,7 @@ function cmd_build()
     fi
 
     maybe_build_llvm
-    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_kernel_build
 
     if [[ "$FSTYPE" == "zfs" ]]; then
 	 run_quiet_with_status "ZFS BUILD [$(basename "$ktest_test")]" "DONE" build_zfs_full
@@ -1098,7 +1118,7 @@ function cmd_build_native()
 
     prepare_linux_source
     maybe_build_llvm
-    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_kernel_build
 
     # Lustre/ZFS are in-kernel here; the only out-of-tree modules are NVIDIA's,
     # built and installed into the module tree before the initramfs is packed.
@@ -1124,7 +1144,7 @@ function cmd_package_native()
 
     prepare_linux_source
     maybe_build_llvm
-    run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+    run_kernel_build
     maybe_build_nvidia
     run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
     run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
@@ -1161,7 +1181,7 @@ function cmd_generate_lustre_patch()
 	echo "Using cached lustre_config.h from lustre tree"
     else
 	maybe_build_llvm
-	run_quiet_with_status "KERNEL BUILD [$(basename "$ktest_test")]" "DONE" build_kernel
+	run_kernel_build
 	run_quiet_with_status "LUSTRE BUILD [$(basename "$ktest_test")]" "DONE" build_lustre_intree
     fi
 
