@@ -107,9 +107,29 @@ static void mark_seen(const char *rel)
 }
 
 /*
+ * modnames_eq - compare module path/file names for equality
+ *
+ * '-' and '_' are interchangeable in module names and on-disk files use
+ * either spelling (nvme-core.ko provides nvme_core, osd_zfs.ko provides
+ * osd_zfs), so treat them as equal the way modprobe(8) does.
+ */
+static int modnames_eq(const char *a, const char *b)
+{
+	for (; *a && *b; a++, b++) {
+		if (*a == *b)
+			continue;
+		if ((*a == '-' || *a == '_') && (*b == '-' || *b == '_'))
+			continue;
+		return 0;
+	}
+	return *a == *b;
+}
+
+/*
  * find_relpath_for_modname - locate the relative path for a module by name
  *
- * Searches modules.dep for a line whose LHS ends with /<modname>.ko.
+ * Searches modules.dep for a line whose LHS ends with /<modname>.ko,
+ * matching '-' and '_' interchangeably.
  * Writes the relative path (without leading slash) into @relpathbuf.
  * Returns 0 on success, -1 if not found.
  */
@@ -125,8 +145,6 @@ static int find_relpath_for_modname(const char *modname, const char *release,
 	snprintf(deppath, sizeof(deppath),
 		 "/lib/modules/%s/modules.dep", release);
 	snprintf(needle, sizeof(needle), "/%s.ko", modname);
-	for (char *p = needle; *p; p++)
-		if (*p == '_') *p = '-';
 
 	f = fopen(deppath, "r");
 	if (!f) {
@@ -146,8 +164,8 @@ static int find_relpath_for_modname(const char *modname, const char *release,
 		nlen = strlen(needle);
 
 		/* Match ".../<modname>.ko" or bare "<modname>.ko" */
-		if ((rlen >= nlen && strcmp(line + rlen - nlen, needle) == 0) ||
-		    strcmp(line, needle + 1) == 0) {
+		if ((rlen >= nlen && modnames_eq(line + rlen - nlen, needle)) ||
+		    modnames_eq(line, needle + 1)) {
 			snprintf(relpathbuf, relpathbuf_size, "%s", line);
 			found = 1;
 			break;
@@ -285,7 +303,7 @@ static int walk_cb(const char *path, const struct stat *sb,
 	(void)sb;
 	if (typeflag != FTW_F)
 		return 0;
-	if (strcmp(path + ftwbuf->base, g_walk_needle) == 0) {
+	if (modnames_eq(path + ftwbuf->base, g_walk_needle)) {
 		snprintf(g_walk_result, sizeof(g_walk_result), "%s", path);
 		g_walk_found = 1;
 		return 1;
@@ -296,7 +314,7 @@ static int walk_cb(const char *path, const struct stat *sb,
 /*
  * find_module_file_walk - find a .ko file by walking /lib/modules/<release>/
  *
- * Normalizes hyphens to underscores in the module name before searching.
+ * Matches '-' and '_' in the module name interchangeably.
  * Used as a fallback when the module is absent from modules.dep.
  * Returns 0 and writes the absolute path into @pathbuf on success, -1 if not found.
  */
@@ -307,8 +325,6 @@ static int find_module_file_walk(const char *modname, const char *release,
 	char needle[RELPATH_MAX];
 
 	snprintf(needle, sizeof(needle), "%s.ko", modname);
-	for (char *p = needle; *p; p++)
-		if (*p == '_') *p = '-';
 
 	snprintf(searchdir, sizeof(searchdir), "/lib/modules/%s", release);
 
