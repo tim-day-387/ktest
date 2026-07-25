@@ -84,6 +84,7 @@ CONFIGS = {
         "package_script": "./qlkbuild package_native",
         "working_dir": "/home/ktest/ktest/",
         "run_script": "./qlkbuild run_native",
+        "sync_zfs": True,
     },
     "mainline": {
         "image": "ktest-runner:latest",

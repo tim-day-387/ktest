@@ -227,13 +227,15 @@ function cmd_run_native()
     generate_coverage
 }
 
-function build_lustre_intree()
+# Stage the Lustre source into $ktest_lustre_build and configure it against
+# the ktest kernel build.  Must be called from inside $ktest_lustre_build.
+# $1 selects the OSD: "zfs" points configure at the out-of-tree ZFS build in
+# $ktest_zfs_build, anything else configures without ZFS.
+function configure_lustre()
 {
-    local old="$PWD"
+    local osd="${1:-no}"
     local LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
     local SUBARCH="x86"
-
-    cd "$ktest_lustre_build"
 
     rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
     apply_lustre_patches
@@ -259,8 +261,8 @@ function build_lustre_intree()
     export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated"
     export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated/uapi"
 
-    # Configure OSD based on FSTYPE (backing storage)
-    if [[ "$FSTYPE" == "zfs" ]]; then
+    # Configure the requested OSD
+    if [[ "$osd" == "zfs" ]]; then
 	export with_ldiskfs="no"
 	export with_zfs="$ktest_zfs_build"
 	export with_zfs_obj="$ktest_zfs_build"
@@ -294,7 +296,24 @@ function build_lustre_intree()
 
     ./autogen.sh
     ./configure || { cat config.log; exit 1; }
+}
 
+function build_lustre_intree()
+{
+    local old="$PWD"
+    local osd="no"
+
+    # The in-tree Lustre patch carries osd-zfs only when ZFS itself is in
+    # the kernel tree (in-kernel ZFS patch applied).  Otherwise a ZFS build
+    # omits osd-zfs from the patch; ZFS and osd-zfs are then built
+    # out-of-tree against the patched kernel (see cmd_build_native).
+    if [[ "$FSTYPE" == "zfs" && -f "$ktest_out/zfs.patch" ]]; then
+	osd="zfs"
+    fi
+
+    cd "$ktest_lustre_build"
+
+    configure_lustre "$osd"
     validate_lustre_intree_build
 
     cd "$old"
@@ -307,70 +326,15 @@ function validate_lustre_intree_build() {
 function build_lustre()
 {
     local old="$PWD"
-    local LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
-    local SUBARCH="x86"
+    local osd="no"
+
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	osd="zfs"
+    fi
 
     cd "$ktest_lustre_build"
 
-    rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
-    apply_lustre_patches
-
-    # No strict errors
-    if [[ "${ktest_lustre_allow_warnings}" == "1" ]]; then
-	export CFLAGS="-Wno-error=attribute-warning -Wno-error=unused-but-set-variable -Wno-error=single-bit-bitfield-constant-conversion -Wno-error=format-security -Wno-error=cast-function-type-strict"
-	export enable_strict_errors="no"
-    else
-	export CFLAGS="-Werror"
-    fi
-
-    # Find headers
-    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
-    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
-    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
-    export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
-    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated"
-    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated/uapi"
-    export KCFLAGS="-I$LINUX_OBJ/include"
-    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
-    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
-    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated"
-    export KCFLAGS="$KCFLAGS -I$LINUX_OBJ/include/generated/uapi"
-
-    # Configure OSD based on FSTYPE (backing storage)
-    if [[ "$FSTYPE" == "zfs" ]]; then
-	export with_ldiskfs="no"
-	export with_zfs="$ktest_zfs_build"
-	export with_zfs_obj="$ktest_zfs_build"
-	export with_spl="$ktest_zfs_build"
-	export with_spl_obj="$ktest_zfs_build"
-    else
-	export with_ldiskfs="no"
-	export with_zfs="no"
-    fi
-
-    # Disable optional features
-    export with_o2ib="no"
-    export enable_gss="no"
-    export enable_crypto="no"
-
-    # Always build the server
-    export enable_server="yes"
-
-    # ktest uses statically linked tools
-    export enable_shared="no"
-
-    # Assume that Linux is in the same directory as Lustre
-    export with_linux="$ktest_kernel_source"
-
-    # Build the kernel via ktest into tmp
-    export ARCH="$(uname -m)"
-    export with_linux_obj="/tmp/ktest-out/kernel_build.$ARCH/"
-
-    # Misc
-    export LLVM="$(map_clang_version)"
-
-    ./autogen.sh
-    ./configure || cat config.log
+    configure_lustre "$osd"
     bear -- make -j$ktest_njobs
 
     # Newer kernels have these lines that the plugin hates
@@ -379,6 +343,35 @@ function build_lustre()
     validate_lustre_build
 
     cd "$old"
+}
+
+function build_osd_zfs()
+{
+    local old="$PWD"
+
+    cd "$ktest_lustre_build"
+
+    configure_lustre zfs
+    make -j$ktest_njobs lustre/osd-zfs
+
+    validate_osd_zfs_build
+
+    cd "$old"
+}
+
+function validate_osd_zfs_build() {
+    check_file "$ktest_lustre_build/lustre/osd-zfs/osd_zfs.ko"
+}
+
+function maybe_build_zfs()
+{
+    [[ "$FSTYPE" == "zfs" ]] || return 0
+
+    run_quiet_with_status "ZFS BUILD [$(basename "$ktest_test")]" "DONE" build_zfs_full
+    run_quiet_with_status "OSD-ZFS BUILD [$(basename "$ktest_test")]" "DONE" build_osd_zfs
+    purge_build_junk "$ktest_zfs_build"
+    purge_build_junk "$ktest_lustre_build"
+    run_quiet_with_status "INSTALL FS MODULES [$(basename "$ktest_test")]" "DONE" install_fs_modules
 }
 
 function apply_patches() {
@@ -531,10 +524,13 @@ function run_copy_builtin()
 	apply_lustre_patches
     fi
 
-    # copy-builtin drops the osd-zfs tree unless CBI_WITH_ZFS is set. On a ZFS
-    # build the ZFS patch has already been applied above, so opt in and let
-    # copy-builtin wire up the osd-zfs Kconfig and in-tree header paths.
-    if [[ "$FSTYPE" == "zfs" ]]; then
+    # copy-builtin drops the osd-zfs tree unless CBI_WITH_ZFS is set. Only
+    # opt in when the in-kernel ZFS patch was applied above (e.g. the
+    # createpatches flow), so copy-builtin can wire up the osd-zfs Kconfig
+    # and in-tree header paths. The normal native ZFS flow has no ZFS patch:
+    # the Lustre patch omits osd-zfs, and ZFS plus osd-zfs are built
+    # out-of-tree against the patched kernel (see cmd_build_native).
+    if [[ "$FSTYPE" == "zfs" && -f "$ktest_out/zfs.patch" ]]; then
 	export CBI_WITH_ZFS=1
     fi
 
@@ -1120,8 +1116,10 @@ function cmd_build_native()
     maybe_build_llvm
     run_kernel_build
 
-    # Lustre/ZFS are in-kernel here; the only out-of-tree modules are NVIDIA's,
-    # built and installed into the module tree before the initramfs is packed.
+    # Lustre is in-kernel here, but the Lustre patch omits osd-zfs: ZFS and
+    # osd-zfs are built out-of-tree, as are the NVIDIA modules, all installed
+    # into the module tree before the initramfs is packed.
+    maybe_build_zfs
     maybe_build_nvidia
     run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
     run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
@@ -1145,6 +1143,8 @@ function cmd_package_native()
     prepare_linux_source
     maybe_build_llvm
     run_kernel_build
+
+    maybe_build_zfs
     maybe_build_nvidia
     run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
     run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
