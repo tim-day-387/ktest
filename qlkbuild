@@ -934,9 +934,11 @@ function install_fs_modules()
     # identically-named conftest.ko there, which would collide in $moddir.
     find "$ktest_lustre_build" -name kconftest.results -prune -o \
 	\( -name '*.ko' ! -name 'conftest.ko' \) -exec cp -t "$moddir" {} +
-    if [[ "$FSTYPE" == "zfs" && -d "$ktest_zfs_build" ]]; then
-	find "$ktest_zfs_build" -name kconftest.results -prune -o \
-	    \( -name '*.ko' ! -name 'conftest.ko' \) -exec cp -t "$moddir" {} +
+    # ZFS's real modules land under module/; the build tree root also
+    # carries build/, ZFS's configure feature probes (one .ko per probed
+    # kernel feature), which must not be bundled.
+    if [[ "$FSTYPE" == "zfs" && -d "$ktest_zfs_build/module" ]]; then
+	find "$ktest_zfs_build/module" -name '*.ko' -exec cp -t "$moddir" {} +
     fi
 
     # NVIDIA modules build under kernel-open/ (conftest.ko there are feature
