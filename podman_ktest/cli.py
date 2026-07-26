@@ -28,13 +28,13 @@ from .validation import valid_env
 
 
 def main():
-    """Main entry point for podman-ktest CLI."""
+    """Main entry point for pk CLI."""
     # Determine the ktest directory (where the package is installed)
     # This is typically the parent of the podman_ktest package
     ktest_dir = Path(__file__).resolve().parent.parent
 
     parser = argparse.ArgumentParser(
-        description="podman-ktest: Run generic virtual machine tests"
+        description="pk: Run generic virtual machine tests"
     )
     parser.add_argument(
         "--podman-socket",
@@ -186,7 +186,7 @@ def main():
         if not git_hash:
             git_hash = get_git_hash(dirs["ktest_lustre_source"])
 
-        # Set up execution log to capture podman-ktest's own output
+        # Set up execution log to capture pk's own output
         execution_log_path = results_dir / f"{git_hash}_execution.log"
         execution_log_file = open(execution_log_path, "w")
         sys.stdout = TeeWriter(original_stdout, execution_log_file)

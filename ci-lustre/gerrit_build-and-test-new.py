@@ -64,7 +64,7 @@ def load_branch_config(config_path=BRANCH_CONFIG_PATH):
       - "groups":  list of job group names to run when the branch updates
 
     Every time a branch's head advances, each of its groups is run as a
-    separate podman-ktest invocation (and shows up as a separate row).
+    separate pk invocation (and shows up as a separate row).
 
     Returns a list of branch dicts, or an empty list if the config is
     missing or malformed.
@@ -286,14 +286,14 @@ class Reviewer(object):
         return out, returncode, elapsed_time
 
     def run_tests(self, job_name, change_id, git_hash, subject):
-        # Build podman-ktest command with socket parameter and output flags
-        # podman-ktest writes directly to OUTPUT_DIR with metadata_store.json
+        # Build pk command with socket parameter and output flags
+        # pk writes directly to OUTPUT_DIR with metadata_store.json
         # Note: change_id already contains git_hash (format: {raw_change_id}_{git_hash})
         socket_arg = "--podman-socket unix:///run/podman/podman.sock"
         # Escape subject for shell (replace quotes)
         escaped_subject = subject.replace("'", "'\\''") if subject else ""
         output_args = f"--output {OUTPUT_DIR} --git-hash {git_hash} --change-id {change_id} --subject '{escaped_subject}'"
-        command = f"cd {KTEST_DIR} && ./podman-ktest {socket_arg} --shared-filesystem /tmp --tarball-input job {job_name} {output_args}"
+        command = f"cd {KTEST_DIR} && ./pk {socket_arg} --shared-filesystem /tmp --tarball-input job {job_name} {output_args}"
 
         Reviewer.run_script(command, timeout_seconds=1200)
 
@@ -485,7 +485,7 @@ class Reviewer(object):
 
     def podman_reset(self):
         socket_arg = "--podman-socket unix:///run/podman/podman.sock"
-        command = f"cd {KTEST_DIR} && ./podman-ktest {socket_arg} stop"
+        command = f"cd {KTEST_DIR} && ./pk {socket_arg} stop"
         subprocess.run(command, shell=True)
 
     def git_commit_and_push(self):

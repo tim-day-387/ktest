@@ -16,7 +16,7 @@ def cmd_setup(args, dirs=None):
     """Interactive setup to create ~/.ktestrc configuration file."""
     ktestrc_path = Path.home() / ".ktestrc"
 
-    print("podman-ktest setup")
+    print("pk setup")
     print("=" * 60)
     print()
 

@@ -17,7 +17,7 @@ set -o errtrace
 
 ktest_dir=$(dirname "$(readlink -f "$0")")
 
-cmd=("$ktest_dir/podman-ktest" job --stdout llvm-checks)
+cmd=("$ktest_dir/pk" job --stdout llvm-checks)
 
 if [[ $# -gt 0 ]]; then
     cmd+=(--plugin-args "$*")

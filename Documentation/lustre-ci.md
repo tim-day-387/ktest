@@ -27,9 +27,9 @@ Serve the CI site directly from the container using nginx:
 ```bash
 ssh -N -L /tmp/socket.sock:/run/user/387/podman/podman.sock me@lustre-bot
 
-podman-ktest --podman-socket unix:///tmp/socket.sock \
+pk --podman-socket unix:///tmp/socket.sock \
   build
-podman-ktest --podman-socket unix:///tmp/socket.sock \
+pk --podman-socket unix:///tmp/socket.sock \
   deploy \
   --hosting nginx \
   --gerrit-auth /path/to/gerrit-auth.json
@@ -44,9 +44,9 @@ Push the CI site to a GitHub repository:
 ```
 ssh -N -L /tmp/socket.sock:/run/user/387/podman/podman.sock me@lustre-bot
 
-podman-ktest --podman-socket unix:///tmp/socket.sock \
+pk --podman-socket unix:///tmp/socket.sock \
   build
-podman-ktest --podman-socket unix:///tmp/socket.sock \
+pk --podman-socket unix:///tmp/socket.sock \
   deploy \
   --hosting github-pages \
   --gerrit-auth /my/auth/file \
@@ -75,7 +75,7 @@ Your GitHub Pages site will be updated automatically.
 │  │  ├─ gerrit_build-and-test-new.py   │                                 │
 │  │  │  (monitors Gerrit for patches)  │                                 │
 │  │  │                                 │                                 │
-│  │  └─ Calls podman-ktest via API ────┼─────> Spawns Job Containers     │
+│  │  └─ Calls pk via API ────┼─────> Spawns Job Containers     │
 │  │     --podman-socket=/run/...       │              │                  │
 │  └────────────────────────────────────┘              ▼                  │
 │          │                                      ┌─────────────┐         │
@@ -88,7 +88,7 @@ Your GitHub Pages site will be updated automatically.
 
 ## Management
 
-The CI container needs access to the host's podman socket to spawn job containers. This is mounted at `/run/podman/podman.sock` in the container and passed to `podman-ktest` via the `--podman-socket` parameter.
+The CI container needs access to the host's podman socket to spawn job containers. This is mounted at `/run/podman/podman.sock` in the container and passed to `pk` via the `--podman-socket` parameter.
 
 ### View Logs
 

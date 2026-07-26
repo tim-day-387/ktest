@@ -660,7 +660,7 @@ function maybe_build_nvidia()
 }
 
 # Build a custom LLVM/Clang toolchain from an llvm-project checkout sitting as
-# a sibling of the kernel tree (podman-ktest overlay-mounts ktest_llvm_source
+# a sibling of the kernel tree (pk overlay-mounts ktest_llvm_source
 # there).  Only the tools kbuild's LLVM=1 mode actually invokes are built, not
 # the default all target.  Compiles route through ccache (LLVM_CCACHE_BUILD)
 # against the persistent /tmp/ccache mount, so rebuilding an unchanged
@@ -862,7 +862,7 @@ function cmd_ccplugin()
 	exit 1
     fi
 
-    # Extra plugin options forwarded from podman-ktest job --plugin-args
+    # Extra plugin options forwarded from pk job --plugin-args
     local plugin_args=()
     if [[ -n "${KTEST_CCPLUGIN_ARGS:-}" ]]; then
 	read -ra plugin_args <<< "$KTEST_CCPLUGIN_ARGS"

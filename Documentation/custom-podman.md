@@ -2,7 +2,7 @@
 
 Build podman v6 against a local `container-libs` checkout (storage/common/image
 monorepo) — e.g. to test containers/storage changes like native overlay on
-Lustre — and install it over the distro podman so `podman-ktest` uses it.
+Lustre — and install it over the distro podman so `pk` uses it.
 
 Checkouts assumed at `~/ws/podman` and `~/ws/container-libs`.
 
@@ -30,7 +30,7 @@ sudo apt-get install libgpgme-dev libseccomp-dev libsystemd-dev
 `systemd` tag — no journald logging/events, and `make install.systemd`
 becomes a no-op. Check with `./hack/systemd_tag.sh` (must print `systemd`).
 
-It also breaks `podman-ktest` in a confusing way: without the systemd tag
+It also breaks `pk` in a confusing way: without the systemd tag
 the default log driver falls back from `journald` to `k8s-file`, and
 podman-py's `containers.run()` only collects output for `json-file`/`journald`
 drivers — it silently returns `None`. Validation checks that grep for a
@@ -58,7 +58,7 @@ sudo make install.bin install.systemd install.completions
 hash -r && podman version    # /usr/local/bin/podman shadows /usr/bin
 ```
 
-`podman-ktest` talks to the rootless API socket
+`pk` talks to the rootless API socket
 (`/run/user/$UID/podman/podman.sock`), served by the systemd *user*
 `podman.socket`/`podman.service`. The distro unit hardcodes
 `ExecStart=/usr/bin/podman`; the units installed to
@@ -105,7 +105,7 @@ podman info --format '{{.Store.GraphDriverName}} {{.Store.GraphStatus}}'
 
 On Lustre the graph driver should be `overlay` with
 `Native Overlay Diff: true` (no fuse-overlayfs fallback). Then
-`podman-ktest build` end to end.
+`pk build` end to end.
 
 ## Back out
 

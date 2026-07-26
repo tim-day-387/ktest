@@ -99,7 +99,7 @@ def get_package_dir(shared_filesystem_path=None):
     filesystem argument.
 
     Mirrors get_ccache_dir. This path is used as a bind-mount source for job
-    containers, which podman resolves on the host. When podman-ktest runs inside
+    containers, which podman resolves on the host. When pk runs inside
     the ci-lustre container, a directory created in the container's private /tmp
     would not exist on the host, so the path must live under the shared
     filesystem and be created on the host (see _validate_package_directory).
@@ -230,7 +230,7 @@ def get_ktest_dirs(ktest_dir):
     """Get ktest directory paths.
 
     Args:
-        ktest_dir: Path to the ktest directory (where podman-ktest lives)
+        ktest_dir: Path to the ktest directory (where pk lives)
 
     Returns:
         Dictionary with ktest_dir, ktest_kernel_source, ktest_lustre_source, ktest_zfs_source
@@ -254,7 +254,7 @@ def get_ktest_dirs(ktest_dir):
         if not ktestrc_path.exists():
             print(f"Error: kernel source directory not found")
             print(f"")
-            print(f"Please run 'podman-ktest setup' to configure paths,")
+            print(f"Please run 'pk setup' to configure paths,")
             print(f"or set the ktest_kernel_source environment variable")
         else:
             print(

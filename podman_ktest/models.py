@@ -74,7 +74,7 @@ class ContainerJob:
         ccache_dir = self.ccache_dir if self.ccache_dir else "/tmp/ccache"
         # Bind-mount source for built packages, resolved on the host by podman.
         # On a plain host run, create it here (best effort). Under a shared
-        # filesystem podman-ktest runs inside the ci-lustre container, where this
+        # filesystem pk runs inside the ci-lustre container, where this
         # mkdir would only touch the container's private /tmp -- the real host
         # dir is created during validation -- so failures are ignored.
         package_dir = self.package_dir if self.package_dir else "/tmp/ktest-packages"

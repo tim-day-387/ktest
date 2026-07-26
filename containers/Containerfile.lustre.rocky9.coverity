@@ -11,7 +11,7 @@ RUN dnf install -y zlib-devel libudev-devel libattr-devel \
 # Build and install ZFS for Lustre server builds. Lustre's configure
 # autodetects ZFS only in versioned paths (/usr/src/zfs-${VERSION}).
 # ZFS_VERSION is passed from the top-level META file (ZFS-Maximum) by
-# podman-ktest so the pinned tag lives in a single place.
+# pk so the pinned tag lives in a single place.
 ARG ZFS_VERSION
 RUN git clone --depth 1 --branch zfs-${ZFS_VERSION} \
 	https://github.com/openzfs/zfs.git /usr/src/zfs-${ZFS_VERSION}

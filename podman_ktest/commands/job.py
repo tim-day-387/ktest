@@ -201,7 +201,7 @@ def finalize_job_run(
         metadata_store.set(git_hash, "enforcedexecution", "True")
         metadata_store.set(git_hash, "runtimeexecution", str(total_runtime))
         metadata_store.set(
-            git_hash, "descriptionexecution", "Execution log for podman-ktest"
+            git_hash, "descriptionexecution", "Execution log for pk"
         )
 
     metadata_store.save()

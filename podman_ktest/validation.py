@@ -73,7 +73,7 @@ def _validate_ktest_image(client) -> Optional[ValidationError]:
     return ValidationError(
         check_name="ktest_image",
         message=f"container image not found: {KTEST_IMAGE}",
-        remediation="Build it with: podman-ktest build",
+        remediation="Build it with: pk build",
     )
 
 
@@ -81,7 +81,7 @@ def _validate_root_image(client) -> Optional[ValidationError]:
     """Check that a VM root image exists in /var/lib/ktest.
 
     The check runs in a container with /var/lib/ktest bind-mounted, so it
-    tests the host path even when podman-ktest runs inside the ci-lustre
+    tests the host path even when pk runs inside the ci-lustre
     container (bind-mount sources are resolved on the host, same as job
     containers -- see models.py).
     """
@@ -109,7 +109,7 @@ def _validate_root_image(client) -> Optional[ValidationError]:
         return ValidationError(
             check_name="root_image",
             message=f"root image not found: {root_image}",
-            remediation="Build it with: ./root_image create (or podman-ktest deploy)",
+            remediation="Build it with: ./root_image create (or pk deploy)",
         )
     return None
 
@@ -148,7 +148,7 @@ def _validate_host_directory(
     """Create and validate a directory on the host.
 
     The directory is used as a bind-mount source for job containers, which
-    podman resolves on the host. When podman-ktest runs inside the ci-lustre
+    podman resolves on the host. When pk runs inside the ci-lustre
     container, a local mkdir would land in the container's private filesystem,
     not the host -- so for non-home paths we create the directory via a
     container that bind-mounts an existing host ancestor (mount_source) and
@@ -288,7 +288,7 @@ def valid_env(podman_socket=None, shared_filesystem=None):
             ]
 
             # The package output dir is only created up-front for a shared
-            # filesystem, where podman-ktest runs inside the ci-lustre container
+            # filesystem, where pk runs inside the ci-lustre container
             # and the bind-mount source must be created on the host. A plain
             # host run creates it lazily at job time instead.
             if shared_filesystem:
