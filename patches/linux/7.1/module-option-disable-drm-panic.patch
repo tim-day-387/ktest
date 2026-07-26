@@ -1,0 +1,37 @@
+From b54b30e11d1cbf304ac2a7f9c11fdd30ce8ef83a Mon Sep 17 00:00:00 2001
+From: Timothy Day <tday141@gmail.com>
+Date: Sat, 25 Jul 2026 16:14:46 -0400
+Subject: [PATCH] module option to disable drm panic
+
+---
+ drivers/gpu/drm/drm_panic.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/gpu/drm/drm_panic.c b/drivers/gpu/drm/drm_panic.c
+index d6d3b8d85dea..1f29f0421301 100644
+--- a/drivers/gpu/drm/drm_panic.c
++++ b/drivers/gpu/drm/drm_panic.c
+@@ -852,6 +852,10 @@ static const struct kernel_param_ops drm_panic_ops = {
+ 	.get = drm_panic_type_get,
+ };
+ 
++static bool panic_disabled;
++module_param(panic_disabled, bool, 0644);
++MODULE_PARM_DESC(panic_disabled, "Disable the drm panic screen [default=false]");
++
+ module_param_cb(panic_screen, &drm_panic_ops, NULL, 0644);
+ MODULE_PARM_DESC(panic_screen,
+ #if IS_ENABLED(CONFIG_DRM_PANIC_SCREEN_QR_CODE)
+@@ -924,6 +928,9 @@ static void draw_panic_plane(struct drm_plane *plane, const char *description)
+ 	int ret;
+ 	unsigned long flags;
+ 
++	if (panic_disabled)
++		return;
++
+ 	if (!drm_panic_trylock(plane->dev, flags))
+ 		return;
+ 
+-- 
+2.43.0
+
