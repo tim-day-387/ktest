@@ -13,5 +13,7 @@ void kmsg_open(const char *prog);
 void kmsg_open_stdout(const char *prog);
 void kmsg_log(int level, const char *fmt, ...);
 int load_one_module(const char *modname, const char *release);
+void setparams_apply(void);
+void setparams_warn_unmatched(void);
 
 #endif /* KTEST_INIT_COMMON_H */

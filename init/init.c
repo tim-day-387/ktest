@@ -977,6 +977,28 @@ static void install_modparams_to_newroot(void)
 }
 
 /*
+ * install_setparams_to_newroot - propagate Lustre tunables to the new root
+ *
+ * mount.lustreroot applied /etc/setparams.conf (see ktest's
+ * conf/setparams.conf) during the root mount; installing it at the same
+ * path in the new root makes standalone mount.lustreroot runs after
+ * switch_root (e.g. bringing up a second filesystem) apply the same
+ * tunables.
+ */
+static void install_setparams_to_newroot(void)
+{
+	if (access("/etc/setparams.conf", F_OK) != 0)
+		return;
+
+	mkdir(MOUNTPOINT "/etc", 0755);
+
+	if (copy_file("/etc/setparams.conf",
+		      MOUNTPOINT "/etc/setparams.conf", 0644) < 0)
+		kmsg_log(KMSG_ERR, "install setparams.conf in new root: %s\n",
+			 strerror(errno));
+}
+
+/*
  * switch_root_and_exec - move /newroot on top of /, chroot in, exec init
  *
  * Returns only on failure (caller is expected to exit, panicking PID 1).
@@ -1090,6 +1112,7 @@ static int standard_main(char *cmdline)
 
 	copy_initramfs_to_newroot();
 	install_modparams_to_newroot();
+	install_setparams_to_newroot();
 
 	switch_root_and_exec();
 	return 1;
@@ -1155,6 +1178,7 @@ static int lustre_main(char *cmdline)
 
 	copy_initramfs_to_newroot();
 	install_modparams_to_newroot();
+	install_setparams_to_newroot();
 
 	/*
 	 * The initial ramfs cannot be pivot_root()'d.  switch_root_and_exec()

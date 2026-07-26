@@ -29,6 +29,11 @@
  * the caller is responsible for having loaded the zfs/lustre modules,
  * disabled LNet peer discovery, and imported the pool beforehand.
  *
+ * Lustre tunables from /etc/setparams.conf (lctl set_param syntax; see
+ * ktest's conf/setparams.conf) are applied after every mount step, so each
+ * parameter takes effect as soon as its obd device exists - e.g.
+ * mdt.*.identity_upcall right after the MDT mounts, before the client does.
+ *
  * Usage: mount.lustreroot [--no-mgs] <fsname> <pool> <path>
  *
  * When invoked by /init in the initramfs (signalled by the
@@ -88,6 +93,7 @@ static int mount_lustre_target(const char *dataset, const char *mntpt,
 	}
 
 	kmsg_log(KMSG_INFO, "target %s mounted successfully\n", svname);
+	setparams_apply();
 	return 0;
 }
 
@@ -174,6 +180,9 @@ static int mount_lustre(const char *fsname, const char *pool, const char *path,
 		kmsg_log(KMSG_ERR, "client mount failed: %s\n", strerror(errno));
 		return -1;
 	}
+
+	setparams_apply();
+	setparams_warn_unmatched();
 
 	kmsg_log(KMSG_INFO, "lustre %s mounted on %s\n", fsname, path);
 	return 0;

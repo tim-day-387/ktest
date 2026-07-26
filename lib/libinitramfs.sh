@@ -77,6 +77,14 @@ function mk_initramfs() (
 	cp "$ktest_dir/conf/modparams.conf" "$INITRAMFS/etc/modparams.conf"
     fi
 
+    # Lustre tunables applied by mount.lustreroot after each mount step; see
+    # conf/setparams.conf for the syntax.
+    if [[ -e "$ktest_dir/conf/setparams.conf" ]]; then
+	echo "Installing setparams.conf..."
+	mkdir -p "$INITRAMFS/etc"
+	cp "$ktest_dir/conf/setparams.conf" "$INITRAMFS/etc/setparams.conf"
+    fi
+
     # Populate firmware. Copy /lib/firmware first as a base so distro-packaged
     # firmware fills any gaps (e.g. GPU firmware not yet in linux-firmware upstream),
     # then overlay the linux-firmware checkout on top so it takes precedence for
