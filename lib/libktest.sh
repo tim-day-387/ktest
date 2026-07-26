@@ -173,7 +173,7 @@ ktest_boot()
     ktest_interactive=true
     ktest_kgdb=true
 
-    ktest_run "$ktest_dir/boot.ktest" "$@"
+    ktest_run "$ktest_dir/tests/fs/lustre/boot.ktest" "$@"
 }
 
 ktest_ssh()
