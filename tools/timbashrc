@@ -156,6 +156,11 @@ if ! shopt -oq posix; then
     fi
 fi
 
+# Tab completion for pk
+if [[ -f ~/ws/ktest/tools/pk-completion.bash ]]; then
+    source ~/ws/ktest/tools/pk-completion.bash
+fi
+
 # Machine-local additions
 if [[ -f ~/.bash_aliases ]]; then
     source ~/.bash_aliases
