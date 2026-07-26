@@ -954,6 +954,29 @@ static void copy_initramfs_to_newroot(void)
 }
 
 /*
+ * install_modparams_to_newroot - propagate module parameters to the new root
+ *
+ * /etc/modparams.conf (see ktest's conf/modparams.conf) uses modprobe.d(5)
+ * "options" syntax, so installing it as a modprobe.d file makes modules
+ * loaded after switch_root via modprobe(8) pick up the same parameters
+ * /init applied in the initramfs.
+ */
+static void install_modparams_to_newroot(void)
+{
+	if (access("/etc/modparams.conf", F_OK) != 0)
+		return;
+
+	mkdir(MOUNTPOINT "/etc", 0755);
+	mkdir(MOUNTPOINT "/etc/modprobe.d", 0755);
+
+	if (copy_file("/etc/modparams.conf",
+		      MOUNTPOINT "/etc/modprobe.d/ktest-modparams.conf",
+		      0644) < 0)
+		kmsg_log(KMSG_ERR, "install modparams.conf in new root: %s\n",
+			 strerror(errno));
+}
+
+/*
  * switch_root_and_exec - move /newroot on top of /, chroot in, exec init
  *
  * Returns only on failure (caller is expected to exit, panicking PID 1).
@@ -1066,6 +1089,7 @@ static int standard_main(char *cmdline)
 	}
 
 	copy_initramfs_to_newroot();
+	install_modparams_to_newroot();
 
 	switch_root_and_exec();
 	return 1;
@@ -1130,6 +1154,7 @@ static int lustre_main(char *cmdline)
 	kmsg_log(KMSG_INFO, "mounted successfully, switching root\n");
 
 	copy_initramfs_to_newroot();
+	install_modparams_to_newroot();
 
 	/*
 	 * The initial ramfs cannot be pivot_root()'d.  switch_root_and_exec()

@@ -69,6 +69,14 @@ function mk_initramfs() (
     mkdir -p "$INITRAMFS/sbin"
     cp "$ktest_dir/init/mount.lustreroot" "$INITRAMFS/sbin/mount.lustreroot"
 
+    # Module parameters applied by /init at finit_module() time; see
+    # conf/modparams.conf for the syntax.
+    if [[ -e "$ktest_dir/conf/modparams.conf" ]]; then
+	echo "Installing modparams.conf..."
+	mkdir -p "$INITRAMFS/etc"
+	cp "$ktest_dir/conf/modparams.conf" "$INITRAMFS/etc/modparams.conf"
+    fi
+
     # Populate firmware. Copy /lib/firmware first as a base so distro-packaged
     # firmware fills any gaps (e.g. GPU firmware not yet in linux-firmware upstream),
     # then overlay the linux-firmware checkout on top so it takes precedence for

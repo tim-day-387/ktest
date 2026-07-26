@@ -126,6 +126,135 @@ static int modnames_eq(const char *a, const char *b)
 }
 
 /*
+ * Module parameters
+ *
+ * MODPARAMS_PATH (installed from ktest's conf/modparams.conf by mk_initramfs)
+ * uses modprobe.d(5) "options" syntax:
+ *
+ *   options <module> <param>=<value> [<param>=<value> ...]
+ *
+ * Parameters are looked up by module file name at finit_module() time, so
+ * they also apply to modules loaded as dependencies (e.g. spl via zfs).
+ */
+
+#define MODPARAMS_PATH	"/etc/modparams.conf"
+#define MAX_MODPARAMS	32
+#define MODNAME_MAX	64
+#define PARAMS_MAX	512
+
+static struct modparam {
+	char modname[MODNAME_MAX];
+	char params[PARAMS_MAX];
+} g_modparams[MAX_MODPARAMS];
+static int g_nmodparams;
+static int g_modparams_parsed;
+
+static void modparams_add(const char *modname, const char *params)
+{
+	struct modparam *mp = NULL;
+	int i;
+
+	/* Repeated "options <module>" lines concatenate, like modprobe(8) */
+	for (i = 0; i < g_nmodparams; i++)
+		if (modnames_eq(g_modparams[i].modname, modname))
+			mp = &g_modparams[i];
+
+	if (!mp) {
+		if (g_nmodparams >= MAX_MODPARAMS) {
+			kmsg_log(KMSG_ERR, "%s: too many entries, ignoring %s\n",
+				 MODPARAMS_PATH, modname);
+			return;
+		}
+		mp = &g_modparams[g_nmodparams++];
+		snprintf(mp->modname, sizeof(mp->modname), "%s", modname);
+	}
+
+	if (mp->params[0])
+		strncat(mp->params, " ",
+			sizeof(mp->params) - strlen(mp->params) - 1);
+	strncat(mp->params, params,
+		sizeof(mp->params) - strlen(mp->params) - 1);
+}
+
+static void modparams_parse(void)
+{
+	char line[1024];
+	FILE *f;
+
+	if (g_modparams_parsed)
+		return;
+	g_modparams_parsed = 1;
+
+	f = fopen(MODPARAMS_PATH, "r");
+	if (!f)
+		return;	/* no config bundled */
+
+	while (fgets(line, sizeof(line), f)) {
+		char *keyword, *modname, *params, *save, *nl;
+
+		nl = strchr(line, '\n');
+		if (nl)
+			*nl = '\0';
+
+		keyword = strtok_r(line, " \t", &save);
+		if (!keyword || keyword[0] == '#')
+			continue;
+		if (strcmp(keyword, "options") != 0) {
+			kmsg_log(KMSG_ERR, "%s: unsupported directive %s\n",
+				 MODPARAMS_PATH, keyword);
+			continue;
+		}
+
+		modname = strtok_r(NULL, " \t", &save);
+		if (!modname)
+			continue;
+
+		/* Rest of the line is the parameter string */
+		params = save;
+		while (*params == ' ' || *params == '\t')
+			params++;
+		if (!*params)
+			continue;
+
+		modparams_add(modname, params);
+	}
+
+	fclose(f);
+}
+
+/*
+ * params_for_module_file - look up configured parameters for a .ko path
+ *
+ * Derives the module name from the file name (everything before the first
+ * '.') and returns its configured parameter string, or "" if none.
+ */
+static const char *params_for_module_file(const char *path)
+{
+	char modname[MODNAME_MAX];
+	const char *base;
+	size_t n;
+	int i;
+
+	modparams_parse();
+
+	if (!g_nmodparams)
+		return "";
+
+	base = strrchr(path, '/');
+	base = base ? base + 1 : path;
+	n = strcspn(base, ".");
+	if (n == 0 || n >= sizeof(modname))
+		return "";
+	memcpy(modname, base, n);
+	modname[n] = '\0';
+
+	for (i = 0; i < g_nmodparams; i++)
+		if (modnames_eq(g_modparams[i].modname, modname))
+			return g_modparams[i].params;
+	return "";
+}
+
+/*
  * find_relpath_for_modname - locate the relative path for a module by name
  *
  * Searches modules.dep for a line whose LHS ends with /<modname>.ko,
@@ -273,6 +402,7 @@ static int load_relpath_recursive(const char *relpath, const char *release)
  */
 static int load_module_file(const char *path)
 {
+	const char *params = params_for_module_file(path);
 	int fd, ret;
 
 	fd = open(path, O_RDONLY | O_CLOEXEC);
@@ -281,7 +411,11 @@ static int load_module_file(const char *path)
 		return -1;
 	}
 
-	ret = syscall(SYS_finit_module, fd, "", 0);
+	if (*params)
+		kmsg_log(KMSG_INFO, "loading %s with params \"%s\"\n",
+			 path, params);
+
+	ret = syscall(SYS_finit_module, fd, params, 0);
 	close(fd);
 
 	if (ret < 0 && errno != EEXIST) {
