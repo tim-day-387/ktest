@@ -27,6 +27,7 @@ from ..jobs import (
     run_job_config,
     any_job_needs_kernel,
 )
+from ..local_site import generate_local_site
 from ..utils import (
     get_ccache_dir,
     get_package_dir,
@@ -137,6 +138,7 @@ def finalize_job_run(
     subject,
     execution_log_path,
     enforced_failure,
+    ktest_dir,
 ):
     """Print final summary and save metadata store.
 
@@ -208,6 +210,10 @@ def finalize_job_run(
 
     # Clean up orphaned log files
     metadata_store.cleanup_orphaned_files()
+
+    # Regenerate the local status site now that metadata and logs are final
+    print()
+    generate_local_site(ktest_dir, Path(metadata_store.store_path).parent)
 
     return all_jobs_ran
 
@@ -526,6 +532,7 @@ def cmd_job(
             subject,
             execution_log_path,
             enforced_failure,
+            ktest_dir,
         )
 
         # Now do cleanup of temp directories and tarballs

@@ -3,6 +3,7 @@
 cscope*
 tags
 ktest-out
+local-site
 *.tags
 cross.conf
 

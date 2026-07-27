@@ -25,12 +25,24 @@ const app = {
     }
   },
 
+  // Load a resource as text. Prefers the embedded snapshot from
+  // local_data.js, which only exists in file:// builds made by
+  // make-local-site, where the browser blocks fetch().
+  async loadResource(path) {
+    if (window.LOCAL_DATA && path in window.LOCAL_DATA) {
+      return window.LOCAL_DATA[path];
+    }
+    const response = await fetch(path);
+    if (!response.ok) {
+      throw new Error("Failed to load " + path);
+    }
+    return await response.text();
+  },
+
   // Load and display git version info from version.json
   async loadVersion() {
     try {
-      const response = await fetch("version.json");
-      if (!response.ok) return;
-      const version = await response.json();
+      const version = JSON.parse(await this.loadResource("version.json"));
       const el = document.getElementById("version-info");
       if (el && version.tag && version.commit) {
         el.textContent = `${version.tag} (${version.commit})`;
@@ -158,11 +170,9 @@ const app = {
   // Load metadata from JSON file
   async loadMetadata() {
     try {
-      const response = await fetch("metadata_store.json");
-      if (!response.ok) {
-        throw new Error("Failed to load metadata_store.json");
-      }
-      this.metadata = await response.json();
+      this.metadata = JSON.parse(
+        await this.loadResource("metadata_store.json"),
+      );
     } catch (error) {
       throw new Error("Could not load metadata: " + error.message);
     }
@@ -191,13 +201,7 @@ const app = {
         gitHash: gitHash,
         data: this.metadata[gitHash],
       }))
-      .filter(
-        (item) =>
-          item.data.patch_revision &&
-          item.data.change_id &&
-          item.data.subject &&
-          item.data.time_stamp,
-      );
+      .filter((item) => item.data.time_stamp);
 
     // Sort by timestamp (newest first)
     testRuns.sort(
@@ -292,12 +296,17 @@ const app = {
       // Per-patch keys are bare 40-char hashes and are left untouched.
       const commitHash = gitHash.split("_")[0];
 
+      // Branch-CI entries have no Gerrit subject or change ID
+      const changeIdCell = data.change_id
+        ? `<a href="https://review.whamcloud.com/c/fs/lustre-release/+/${this.escapeHtml(data.change_id)}" target="_blank">${this.escapeHtml(data.change_id)}</a>`
+        : "N/A";
+
       html += `
                 <tr>
                     <td><a href="#review/${this.escapeHtml(gitHash)}">Link</a></td>
-                    <td>${this.escapeHtml(data.subject)}</td>
+                    <td>${this.escapeHtml(data.subject || commitHash)}</td>
                     <td><a href="https://review.whamcloud.com/plugins/gitiles/fs/lustre-release/+/${this.escapeHtml(commitHash)}" target="_blank">${this.escapeHtml(commitHash)}</a></td>
-                    <td><a href="https://review.whamcloud.com/c/fs/lustre-release/+/${this.escapeHtml(data.change_id)}" target="_blank">${this.escapeHtml(data.change_id)}</a></td>
+                    <td>${changeIdCell}</td>
                     <td>${readable}</td>
                     <td>${this.escapeHtml(data.total_runtime || "N/A")}</td>
                     <td style="color:${enforcedSummary.color};">${enforcedSummary.text}</td>
@@ -445,11 +454,7 @@ const app = {
     content.innerHTML = '<div class="loading">Loading status...</div>';
 
     try {
-      const response = await fetch("status.txt");
-      if (!response.ok) {
-        throw new Error("Failed to load status");
-      }
-      const statusText = await response.text();
+      const statusText = await this.loadResource("status.txt");
       content.innerHTML = `<pre>${this.escapeHtml(statusText)}</pre>`;
     } catch (error) {
       this.showError("Failed to load status: " + error.message);
@@ -467,11 +472,7 @@ const app = {
         `;
 
     try {
-      const response = await fetch(logPath);
-      if (!response.ok) {
-        throw new Error("Failed to load log file");
-      }
-      const logText = await response.text();
+      const logText = await this.loadResource(logPath);
       const logContent = logPanel.querySelector(".log-content");
       if (logContent) {
         logContent.textContent = logText;
