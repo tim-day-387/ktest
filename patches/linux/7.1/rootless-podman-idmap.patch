@@ -1,30 +1,73 @@
-From 9efa9298bb9dc61913f97142be86b0f67d0c860d Mon Sep 17 00:00:00 2001
+From f4a009119ba07cdf35b7229bba380caef9361525 Mon Sep 17 00:00:00 2001
 From: Timothy Day <tday141@gmail.com>
 Date: Fri, 8 May 2026 10:59:45 -0400
-Subject: [PATCH 01/10] Let rootless podman idmap
+Subject: [PATCH] fs: add fs.idmap_mount_unprivileged sysctl
 
+The CAP_SYS_ADMIN check in can_idmap_mount() prevents rootless
+container runtimes (e.g. podman) from setting up idmapped mounts when
+they don't control the superblock's user namespace.
+
+Rather than removing the check outright, gate it behind a new
+fs.idmap_mount_unprivileged sysctl. When enabled (the default), the
+CAP_SYS_ADMIN requirement is relaxed; setting it to 0 restores the
+original behaviour.
+
+Signed-off-by: Timothy Day <tday141@gmail.com>
 ---
- fs/namespace.c | 5 ++++-
- 1 file changed, 4 insertions(+), 1 deletion(-)
+ fs/namespace.c | 26 ++++++++++++++++++++++++--
+ 1 file changed, 24 insertions(+), 2 deletions(-)
 
 diff --git a/fs/namespace.c b/fs/namespace.c
-index 341ddd353b3a..b3d033d92cf7 100644
+index 341ddd353b3a..c1dee0c6718d 100644
 --- a/fs/namespace.c
 +++ b/fs/namespace.c
-@@ -4818,9 +4818,12 @@ static int can_idmap_mount(const struct mount_kattr *kattr, struct mount *mnt)
+@@ -41,6 +41,13 @@
+ /* Maximum number of mounts in a mount namespace */
+ static unsigned int sysctl_mount_max __read_mostly = 100000;
+ 
++/*
++ * Allow idmapped mounts to be created without CAP_SYS_ADMIN over the
++ * superblock's user namespace. Enabled by default so that rootless
++ * container runtimes (e.g. podman) can set up idmapped mounts.
++ */
++static unsigned int sysctl_idmap_mount_unprivileged __read_mostly = 1;
++
+ static unsigned int m_hash_mask __ro_after_init;
+ static unsigned int m_hash_shift __ro_after_init;
+ static unsigned int mp_hash_mask __ro_after_init;
+@@ -4818,8 +4825,14 @@ static int can_idmap_mount(const struct mount_kattr *kattr, struct mount *mnt)
  	if (m->mnt_sb->s_iflags & SB_I_NOIDMAP)
  		return -EINVAL;
  
 -	/* We're not controlling the superblock. */
-+	/* FIXME: Let rootless podman idmap mounts for now...
-+	 *
-+	 * We're not controlling the superblock.
- 	if (!ns_capable(fs_userns, CAP_SYS_ADMIN))
- 		return -EPERM;
+-	if (!ns_capable(fs_userns, CAP_SYS_ADMIN))
++	/*
++	 * We're not controlling the superblock. Normally this requires
++	 * CAP_SYS_ADMIN over the superblock's user namespace, but this can
++	 * be relaxed via the fs.idmap_mount_unprivileged sysctl to let
++	 * rootless container runtimes set up idmapped mounts.
 +	 */
++	if (!READ_ONCE(sysctl_idmap_mount_unprivileged) &&
++	    !ns_capable(fs_userns, CAP_SYS_ADMIN))
+ 		return -EPERM;
  
  	/* Mount has already been visible in the filesystem hierarchy. */
- 	if (!is_anon_ns(mnt->mnt_ns))
+@@ -6522,6 +6535,15 @@ static const struct ctl_table fs_namespace_sysctls[] = {
+ 		.proc_handler	= proc_dointvec_minmax,
+ 		.extra1		= SYSCTL_ONE,
+ 	},
++	{
++		.procname	= "idmap_mount_unprivileged",
++		.data		= &sysctl_idmap_mount_unprivileged,
++		.maxlen		= sizeof(unsigned int),
++		.mode		= 0644,
++		.proc_handler	= proc_dointvec_minmax,
++		.extra1		= SYSCTL_ZERO,
++		.extra2		= SYSCTL_ONE,
++	},
+ };
+ 
+ static int __init init_fs_namespace_sysctls(void)
 -- 
 2.43.0
 
