@@ -176,5 +176,14 @@ if [[ -f ~/.bash_aliases ]]; then
     source ~/.bash_aliases
 fi
 
+# Register "jj clean" once, which removes untracked and
+# ignored files (build artifacts) but preserves .jj/
+if command -v jj > /dev/null 2>&1; then
+    if ! jj config get aliases.clean > /dev/null 2>&1; then
+	jj config set --user aliases.clean \
+	   '["util", "exec", "--", "bash", "-c", "git clean -xdf -e .jj/ \"$@\"", "jj-clean"]'
+    fi
+fi
+
 # Custom aliases
 alias emacs="emacs -nw"
