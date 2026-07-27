@@ -47,9 +47,7 @@ function require-lustre-base-kernel-config()
     require-kernel-config ZSWAP_DEFAULT_ON
 
     # Profiling
-    # TODO: Fix me!
     require-kernel-config MEM_ALLOC_PROFILING
-    require-kernel-config ERRNO_UNWIND
 }
 
 function require-lustre-modules-kernel-config()
@@ -141,7 +139,7 @@ function require-lustre-debug-kernel-config()
 	require-kernel-config DEBUG_RWSEMS
     fi
     require-kernel-config DEBUG_BUGVERBOSE
-    require-kernel-config DEBUG_PI_LIST
+    require-kernel-config DEBUG_PLIST
 }
 
 #
