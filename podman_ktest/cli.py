@@ -12,6 +12,7 @@
 import argparse
 import os
 import sys
+import textwrap
 from pathlib import Path
 
 from .commands import (
@@ -27,14 +28,111 @@ from .utils import get_ktest_dirs, get_git_hash, is_on_lustre, TeeWriter
 from .validation import valid_env
 
 
+class _SubParsersAction(argparse._SubParsersAction):
+    """Reuse a subcommand's one-line help as its own description."""
+
+    def add_parser(self, name, **kwargs):
+        kwargs.setdefault("description", kwargs.get("help"))
+        return super().add_parser(name, **kwargs)
+
+
+class PodmanHelpParser(argparse.ArgumentParser):
+    """ArgumentParser with podman-style help output."""
+
+    HELP_WIDTH = 100
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.register("action", "parsers", _SubParsersAction)
+
+    def _subparser_action(self):
+        for action in self._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                return action
+        return None
+
+    def _usage_line(self):
+        usage = f"  {self.prog} [options]"
+        if self._subparser_action():
+            return usage + " COMMAND [ARG...]"
+        for action in self._actions:
+            if action.option_strings:
+                continue
+            metavar = (action.metavar or action.dest).upper()
+            if action.nargs in (argparse.REMAINDER, "*"):
+                usage += f" [{metavar}...]"
+            elif action.nargs == "+":
+                usage += f" {metavar} [{metavar}...]"
+            else:
+                usage += f" {metavar}"
+        return usage
+
+    def _format_entries(self, entries):
+        """Render (name, help) pairs as aligned, wrapped lines."""
+        col = max(len(name) for name, _ in entries) + 3
+        lines = []
+        for name, help_text in entries:
+            wrapped = textwrap.wrap(help_text or "", self.HELP_WIDTH - 2 - col) or [""]
+            lines.append(f"  {name:<{col}}{wrapped[0]}".rstrip())
+            lines.extend(f"  {'':<{col}}{extra}" for extra in wrapped[1:])
+        return lines
+
+    def format_usage(self):
+        return f"Usage:\n{self._usage_line()}\n"
+
+    def error(self, message):
+        self.print_help(sys.stderr)
+        self.exit(2, f"\nError: {message}\n")
+
+    def format_help(self):
+        lines = []
+        if self.description:
+            lines += [self.description, ""]
+        lines += ["Usage:", self._usage_line(), ""]
+
+        subparsers = self._subparser_action()
+        if subparsers:
+            lines.append("Available Commands:")
+            lines += self._format_entries(
+                [(c.metavar or c.dest, c.help) for c in subparsers._choices_actions]
+            )
+            lines.append("")
+
+        positionals = [
+            a
+            for a in self._actions
+            if not a.option_strings and not isinstance(a, argparse._SubParsersAction)
+        ]
+        if positionals:
+            lines.append("Arguments:")
+            lines += self._format_entries(
+                [((a.metavar or a.dest).upper(), a.help) for a in positionals]
+            )
+            lines.append("")
+
+        options = [a for a in self._actions if a.option_strings]
+        if options:
+            lines.append("Options:")
+            entries = []
+            for action in options:
+                name = ", ".join(action.option_strings)
+                if action.nargs != 0:
+                    name += " string"
+                entries.append((name, action.help))
+            lines += self._format_entries(entries)
+            lines.append("")
+
+        return "\n".join(lines)
+
+
 def main():
     """Main entry point for pk CLI."""
     # Determine the ktest directory (where the package is installed)
     # This is typically the parent of the podman_ktest package
     ktest_dir = Path(__file__).resolve().parent.parent
 
-    parser = argparse.ArgumentParser(
-        description="pk: Run generic virtual machine tests"
+    parser = PodmanHelpParser(
+        prog="pk", description="Run generic virtual machine tests"
     )
     parser.add_argument(
         "--podman-socket",
