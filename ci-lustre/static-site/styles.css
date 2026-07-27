@@ -161,6 +161,33 @@ pre {
     margin-left: 0.3em;
 }
 
+#profiles {
+    margin: 1em 0;
+}
+
+#profiles label {
+    margin-left: 0.3em;
+}
+
+.filter-row th {
+    background-color: #fafafa;
+    padding: 0.3em;
+}
+
+.filter-row select {
+    width: 100%;
+    font-weight: normal;
+    font-size: 0.9em;
+}
+
+/* Drag the corner grip to shrink or grow the author list */
+#authorfilter {
+    resize: both;
+    overflow: auto;
+    min-width: 6em;
+    min-height: 3em;
+}
+
 .filtered {
     display: none;
 }

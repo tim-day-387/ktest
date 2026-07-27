@@ -46,6 +46,7 @@ IGNORE_OLDER_THAN_DAYS = 60
 BRANCH_CONFIG_PATH = os.getenv(
     "BRANCH_CONFIG", os.path.join(KTEST_DIR, "ci-lustre/branch-ci.json")
 )
+CHANGES_REFRESH_INTERVAL = 60 * 30
 
 
 def _now():
@@ -589,6 +590,37 @@ def print_Status_to_HTML():
     print(f"Wrote {status_path}")
 
 
+last_changes_refresh = 0
+
+
+def refresh_gerrit_changes():
+    """
+    Scrape the open Gerrit changes into gerrit_changes.json for the
+    static site's Patches page. The site joins this list against
+    metadata_store.json to mark changes as tested or untested by
+    ktest. Throttled since the full open-change list moves slowly.
+    """
+    global last_changes_refresh
+
+    if _now() - last_changes_refresh < CHANGES_REFRESH_INTERVAL:
+        return
+
+    changes_path = os.path.join(OUTPUT_DIR, "gerrit_changes.json")
+    command = (
+        f"cd {KTEST_DIR} && ./pk patch-status"
+        f" --gerrit 'https://{GERRIT_HOST}'"
+        f" --project '{GERRIT_PROJECT}'"
+        f" --branch '{GERRIT_BRANCH[0]}'"
+        f" --output '{OUTPUT_DIR}'"
+    )
+
+    _, returncode, _ = Reviewer.run_script(command, timeout_seconds=300)
+
+    if returncode == 0 and os.path.exists(changes_path):
+        os.chmod(changes_path, 0o644)  # Make readable by nginx
+        last_changes_refresh = _now()
+
+
 def copy_static_site():
     """
     Copy the static site files to OUTPUT_DIR.
@@ -611,6 +643,9 @@ def copy_static_site():
 
     # Generate status.txt
     print_Status_to_HTML()
+
+    # Refresh the open-change list for the Patches page
+    refresh_gerrit_changes()
 
 
 if __name__ == "__main__":

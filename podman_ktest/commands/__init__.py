@@ -13,6 +13,7 @@ from .build import cmd_build
 from .deploy import cmd_deploy
 from .info import cmd_info
 from .job import cmd_job
+from .patch_status import cmd_patch_status
 from .run import cmd_run
 from .setup import cmd_setup
 from .stop import cmd_stop
@@ -22,6 +23,7 @@ __all__ = [
     "cmd_deploy",
     "cmd_info",
     "cmd_job",
+    "cmd_patch_status",
     "cmd_run",
     "cmd_setup",
     "cmd_stop",

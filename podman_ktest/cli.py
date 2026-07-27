@@ -20,10 +20,12 @@ from .commands import (
     cmd_deploy,
     cmd_info,
     cmd_job,
+    cmd_patch_status,
     cmd_run,
     cmd_setup,
     cmd_stop,
 )
+from .commands.patch_status import BRANCH, GERRIT, PROJECT
 from .utils import get_ktest_dirs, get_git_hash, is_on_lustre, TeeWriter
 from .validation import valid_env
 
@@ -238,6 +240,46 @@ def main():
         "builds use a custom toolchain instead of the packaged clang",
     )
 
+    # Patch-status command - scrape open Gerrit changes
+    patch_status_parser = subparsers.add_parser(
+        "patch-status",
+        help="Show open Gerrit changes in the spirit of the Whamcloud Patch Status page",
+    )
+    patch_status_parser.add_argument(
+        "--gerrit",
+        default=GERRIT,
+        help=f"Gerrit URL (default: {GERRIT})",
+    )
+    patch_status_parser.add_argument(
+        "--project",
+        default=PROJECT,
+        help=f"Gerrit project (default: {PROJECT})",
+    )
+    patch_status_parser.add_argument(
+        "--branch",
+        default=BRANCH,
+        help=f"Target branch (default: {BRANCH})",
+    )
+    patch_status_parser.add_argument(
+        "--author",
+        action="append",
+        default=[],
+        help="Only show changes by this author (name, username, or email; "
+        "repeatable, or a comma-separated list); filtered views skip "
+        "writing gerrit_changes.json",
+    )
+    patch_status_parser.add_argument(
+        "--output",
+        default="/tmp/ktest-results",
+        help="Results directory to write gerrit_changes.json for the "
+        "static site (default: /tmp/ktest-results)",
+    )
+    patch_status_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print JSON to stdout instead of a text table",
+    )
+
     # Deploy command - deploy the CI container
     deploy_parser = subparsers.add_parser(
         "deploy", help="Deploy the Lustre CI container"
@@ -291,12 +333,17 @@ def main():
         sys.stderr = TeeWriter(original_stderr, execution_log_file)
 
     try:
-        print(f"CLI: {' '.join(sys.argv)}")
-        print()
+        # Keep stdout clean for patch-status, which may stream JSON
+        if args.cmd != "patch-status":
+            print(f"CLI: {' '.join(sys.argv)}")
+            print()
 
         # Setup command doesn't need dirs
         if args.cmd == "setup":
             result = cmd_setup(args)
+            sys.exit(result)
+        elif args.cmd == "patch-status":
+            result = cmd_patch_status(args, str(ktest_dir))
             sys.exit(result)
         elif args.cmd == "build":
             result = cmd_build(args, str(ktest_dir), args.podman_socket)
