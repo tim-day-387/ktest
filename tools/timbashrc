@@ -161,6 +161,11 @@ if [[ -d ~/ws/ktest ]]; then
     export PATH="$PATH:$HOME/ws/ktest"
 fi
 
+# Add cargo-installed binaries to path
+if [[ -d ~/.cargo/bin ]]; then
+    export PATH="$PATH:$HOME/.cargo/bin"
+fi
+
 # Tab completion for pk
 if [[ -f ~/ws/ktest/tools/pk-completion.bash ]]; then
     source ~/ws/ktest/tools/pk-completion.bash
