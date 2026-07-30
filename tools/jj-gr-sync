@@ -1,0 +1,69 @@
+#!/bin/bash
+# Cache Gerrit CR state for the current repo's jj log template:
+#   cr.open-ids     Change-Ids (from mutable local commits) with an open change
+#   cr.synced-shas  local commits whose patch matches the current patchset
+#
+# The template colors CR links green (open) or yellow (unpushed), and marks
+# open changes whose local commit differs from the latest patchset with "≠".
+# Content comparison uses git patch-id, which is stable across the rebase
+# done by jj-gr-submit, so it works even though uploaded SHAs never match.
+#
+# Usage: jj gr-sync
+
+set -euo pipefail
+
+GERRIT_URL="${GERRIT_URL:-https://review.whamcloud.com}"
+GERRIT_REMOTE="${GERRIT_REMOTE:-gerrit}"
+
+# "sha change-id" pairs for mutable commits that carry a Change-Id trailer
+pairs=$(jj log -r 'mutable()' --no-graph \
+    -T 'commit_id ++ " " ++ trailers.filter(|t| t.key() == "Change-Id").map(|t| t.value()).join(" ") ++ "\n"' |
+    awk 'NF == 2 && $2 ~ /^I/')
+
+ids=$(awk '{print $2}' <<< "$pairs" | sort -u | xargs)
+
+# "change-id patchset-sha patchset-ref" for the open subset
+open_info=""
+if [[ -n $ids ]]; then
+    open_info=$(xargs -n 50 <<< "$ids" | while read -r batch; do
+        q="status:open (change:${batch// / OR change:})"
+        curl -sf -G "$GERRIT_URL/changes/" --data-urlencode "q=$q" \
+             --data-urlencode o=CURRENT_REVISION --data-urlencode n=500 |
+            tail -n +2 |
+            python3 -c 'import json, sys
+for c in json.load(sys.stdin):
+    print(c["change_id"], c["current_revision"],
+          c["revisions"][c["current_revision"]]["ref"])'
+    done | sort -u)
+fi
+
+# Fetch the current patchsets so their content is available locally.
+# Explicit refs update only FETCH_HEAD: no refs are created, jj is unaffected.
+if [[ -n $open_info ]]; then
+    awk '{print $3}' <<< "$open_info" | xargs git fetch -q "$GERRIT_REMOTE"
+fi
+
+# Signature of what a commit changes: touched files plus added/removed
+# lines. Context lines are excluded so that rebases (which shift hunk
+# offsets and drift surrounding code) don't count as differences.
+patch_sig() {
+    git show --format= --patch "$1" |
+        awk '/^diff --git/     { print; next }
+             /^(--- |\+\+\+ )/ { next }
+             /^[+-]/           { print }' |
+        sha1sum | cut -d' ' -f1
+}
+
+synced=""
+while read -r sha cid; do
+    [[ -z $sha ]] && continue
+    gsha=$(awk -v c="$cid" '$1 == c { print $2 }' <<< "$open_info")
+    [[ -n $gsha && $(patch_sig "$sha") == $(patch_sig "$gsha") ]] && synced+="$sha "
+done <<< "$pairs"
+
+open_ids=$(awk '{print $1}' <<< "$open_info" | sort -u | xargs)
+
+jj config set --repo cr.open-ids "$open_ids"
+jj config set --repo cr.synced-shas "${synced% }"
+echo "gr-sync: $(wc -w <<< "$open_ids") of $(wc -w <<< "$ids") local Change-Ids open," \
+     "$(wc -w <<< "$synced") local commits match their patchset"

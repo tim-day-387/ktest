@@ -56,3 +56,5 @@ if [[ $answer != [yY] ]]; then
 fi
 
 jj gerrit upload -r "$dup" -b "$branch" --remote "$REMOTE" "$@"
+
+jj gr-sync || true

@@ -1,0 +1,47 @@
+#!/bin/bash
+# Show the interdiff between a local revision and a patchset of its Gerrit
+# change, using git range-diff (patch-to-patch comparison, so differing
+# bases from jj-gr-submit's rebase don't drown the output in tree drift).
+#
+# Usage: jj gr-diff [<rev>] [<patchset>]
+#   <rev>       jj revset resolving to a single commit (default: @)
+#   <patchset>  patchset number to compare against (default: current)
+
+set -euo pipefail
+
+GERRIT_URL="${GERRIT_URL:-https://review.whamcloud.com}"
+GERRIT_REMOTE="${GERRIT_REMOTE:-gerrit}"
+
+rev="${1:-@}"
+ps="${2:-}"
+
+lsha=$(jj log -r "$rev" --no-graph -T 'commit_id ++ "\n"')
+[[ $(wc -l <<< "$lsha") -eq 1 ]] || {
+    echo "error: '$rev' resolves to multiple commits" >&2; exit 1; }
+
+cid=$(jj log -r "$rev" --no-graph \
+        -T 'trailers.filter(|t| t.key() == "Change-Id").map(|t| t.value()).join(" ")')
+cid=${cid%% *}
+[[ -n $cid ]] || { echo "error: '$rev' has no Change-Id trailer" >&2; exit 1; }
+
+info=""
+for q in "status:open change:$cid" "change:$cid"; do
+    info=$(curl -sf -G "$GERRIT_URL/changes/" --data-urlencode "q=$q" \
+                --data-urlencode o=CURRENT_REVISION | tail -n +2 |
+           python3 -c 'import json, sys
+cs = json.load(sys.stdin)
+if cs:
+    c = cs[0]
+    print(c["_number"], c["status"], c["revisions"][c["current_revision"]]["ref"])')
+    [[ -n $info ]] && break
+done
+[[ -n $info ]] || { echo "error: no Gerrit change found for $cid" >&2; exit 1; }
+
+read -r number status ref <<< "$info"
+[[ -n $ps ]] && ref="refs/changes/${number: -2}/$number/$ps"
+
+echo "# $GERRIT_URL/c/$number ($status), $ref -> local $rev" >&2
+git fetch -q "$GERRIT_REMOTE" "$ref"
+gsha=$(git rev-parse FETCH_HEAD)
+
+exec git range-diff "$gsha~..$gsha" "$lsha~..$lsha"
