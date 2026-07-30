@@ -250,7 +250,7 @@ function configure_lustre()
     local LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
     local SUBARCH="x86"
 
-    rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
+    rsync --archive -r --exclude=.git "$ktest_lustre_source" "$ktest_lustre_build"
     apply_lustre_patches
 
     # No strict errors
@@ -533,7 +533,7 @@ function run_copy_builtin()
     # copy-builtin and the Lustre tree are present. copy-builtin itself
     # reuses the cached lustre_config.h from the Lustre tree when one exists.
     if [[ ! -x ./copy-builtin ]]; then
-	rsync --archive -r "$ktest_lustre_source" "$ktest_lustre_build"
+	rsync --archive -r --exclude=.git "$ktest_lustre_source" "$ktest_lustre_build"
 	apply_lustre_patches
     fi
 
@@ -585,7 +585,7 @@ function build_zfs_full()
     local LINUX_OBJ="/tmp/ktest-out/kernel_build.x86_64/"
 
     cd "$ktest_zfs_build"
-    rsync --archive -r "$ktest_zfs_source" "$ktest_zfs_build"
+    rsync --archive -r --exclude=.git "$ktest_zfs_source" "$ktest_zfs_build"
     sed -i 's/CDDL/GPL/' "$ktest_zfs_build/META"
 
     # Configure ZFS - build modules first to generate Module.symvers
@@ -643,7 +643,7 @@ function build_nvidia()
     # that don't otherwise touch it.
     mkdir -p "$ktest_nvidia_build"
     cd "$ktest_nvidia_build"
-    rsync --archive -r "$ktest_nvidia_source" "$ktest_nvidia_build"
+    rsync --archive -r --exclude=.git "$ktest_nvidia_source" "$ktest_nvidia_build"
 
     export ARCH="$(uname -m)"
     export LLVM="$(map_clang_version)"
