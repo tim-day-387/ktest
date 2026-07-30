@@ -364,8 +364,35 @@ function build_osd_zfs()
 
     cd "$ktest_lustre_build"
 
-    configure_lustre zfs
-    make -j$ktest_njobs lustre/osd-zfs
+    # The cached lustre_config.h (see cmd_generate_lustre_patch) was produced
+    # by a --with-zfs configure, so it already carries the ZFS probe results
+    # the osd-zfs sources need.  When it exists, skip autogen/configure and
+    # build the module directly via kbuild in LUSTRE_OOT_BUILD mode, passing
+    # the variables config/Makefile.exports would have provided.  The cached
+    # header is used verbatim as config.h: it is the same file the in-tree
+    # modules were compiled against.
+    if [[ -f "$ktest_lustre_source/lustre_config.h" ]]; then
+	echo "Using cached lustre_config.h for osd-zfs build"
+	rsync --archive -r --exclude=.git "$ktest_lustre_source" "$ktest_lustre_build"
+	apply_lustre_patches
+	cp "$ktest_lustre_source/lustre_config.h" "$ktest_lustre_build/config.h"
+	check_file "$ktest_zfs_build/module/Module.symvers"
+	make -C "$ktest_kernel_build"				\
+	    M="$ktest_lustre_build/lustre/osd-zfs"		\
+	    -j"$ktest_njobs"					\
+	    CC="ccache $ktest_compiler"				\
+	    LLVM="$(map_clang_version)"				\
+	    LUSTRE_OOT_BUILD=y					\
+	    CONFIG_LUSTRE_FS_ZFS=m				\
+	    ZFS="$ktest_zfs_build"				\
+	    ZFS_OBJ="$ktest_zfs_build"				\
+	    SPL="$ktest_zfs_build"				\
+	    SPL_OBJ="$ktest_zfs_build"				\
+	    KBUILD_EXTRA_SYMBOLS="$ktest_zfs_build/module/Module.symvers"
+    else
+	configure_lustre zfs
+	make -j$ktest_njobs lustre/osd-zfs
+    fi
 
     validate_osd_zfs_build
 
