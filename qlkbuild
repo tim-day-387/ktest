@@ -162,7 +162,20 @@ function check_file() {
 
 function validate_lustre_build() {
     check_file "$ktest_lustre_build/lnet/lnet/lnet.ko"
-    check_file "$ktest_lustre_build/lustre/llite/lustre.ko"
+
+    # Newer Lustre trees combine the per-directory modules into
+    # lustre_common/lustre/lustre_tgt built at the top of lustre/ (the
+    # commit introducing that layout also added lustre_modules.h, so key
+    # off it).  Older trees build one module per subdirectory; lustre.ko
+    # comes from llite/.  We always configure with enable_server=yes, so
+    # the combined layout must produce lustre_tgt.ko too.
+    if [[ -f "$ktest_lustre_build/lustre/include/lustre_modules.h" ]]; then
+	check_file "$ktest_lustre_build/lustre/lustre_common.ko"
+	check_file "$ktest_lustre_build/lustre/lustre.ko"
+	check_file "$ktest_lustre_build/lustre/lustre_tgt.ko"
+    else
+	check_file "$ktest_lustre_build/lustre/llite/lustre.ko"
+    fi
 
     # Check OSD module based on FSTYPE (backing storage)
     if [[ "$FSTYPE" == "zfs" ]]; then
