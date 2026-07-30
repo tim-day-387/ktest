@@ -1,0 +1,70 @@
+#:schema https://docs.jj-vcs.dev/latest/config-schema.json
+
+[ui]
+default-command = "log"
+editor = "emacs -nw"
+diff-formatter = ":git"
+
+[colors]
+"diff token" = { underline = false }
+cr_pushed = "green"
+cr_unpushed = "yellow"
+cr_stale = "red"
+cr_missing = "blue"
+cr_dup = { fg = "red", bold = true }
+
+[aliases]
+clean = ["util", "exec", "--", "bash", "-c", "git clean -xdf -e .jj/ \"$@\"", "jj-clean"]
+gr-submit = ["util", "exec", "--", "/home/timothy/ws/ktest/tools/jj-gr-submit"]
+gr-sync = ["util", "exec", "--", "/home/timothy/ws/ktest/tools/jj-gr-sync"]
+gr-diff = ["util", "exec", "--", "/home/timothy/ws/ktest/tools/jj-gr-diff"]
+gr-insert = ["util", "exec", "--", "/home/timothy/ws/ktest/tools/jj-gr-insert"]
+
+[cr]
+# Refreshed per-repo by `jj gr-sync`: Change-Ids of open Gerrit changes,
+# and local commit SHAs whose patch matches the change's current patchset.
+open-ids = ""
+synced-shas = ""
+
+[user]
+name = "Timothy Day"
+email = "timday@thelustrecollective.com"
+
+[template-aliases]
+'cr_change_id(commit)' = 'commit.trailers().filter(|t| t.key() == "Change-Id").first().value()'
+'cr_is_open(commit)' = 'config("cr.open-ids").as_string().contains(cr_change_id(commit))'
+'cr_is_synced(commit)' = 'config("cr.synced-shas").as_string().contains(stringify(commit.commit_id()))'
+'cr_badge(commit)' = '''
+  if(!commit.contained_in("mutable()"),
+    label("bookmarks", "change"),
+    if(cr_is_open(commit),
+      if(cr_is_synced(commit),
+        label("cr_pushed", "change"),
+        label("cr_stale", "outdated")),
+      label("cr_unpushed", "private")))
+'''
+'format_gerrit_link(commit)' = '''
+  if(commit.trailers().filter(|t| t.key() == "Change-Id").len() > 1,
+    pad_end(8, label("cr_dup", "duplicate")) ++ " ",
+  if(commit.trailers().contains_key("Reviewed-on"),
+    pad_end(8, hyperlink(
+      commit.trailers().filter(|t| t.key() == "Reviewed-on").first().value(),
+      label("bookmarks", "change"))) ++ " ",
+    if(commit.trailers().contains_key("Change-Id"),
+      pad_end(8, hyperlink(
+        "https://review.whamcloud.com/q/" ++ cr_change_id(commit),
+        cr_badge(commit))) ++ " ",
+      pad_end(8, label("cr_missing", "missing")) ++ " ")))
+'''
+
+[templates]
+log = 'format_gerrit_link(self) ++ builtin_log_oneline'
+commit_trailers = 'format_signed_off_by_trailer(self) ++ format_gerrit_change_id_trailer(self)'
+
+[revset-aliases]
+"immutable_heads()" = "(remote_bookmarks() ~ remote_bookmarks(remote='personal')) | tags()"
+
+[revsets]
+log = """
+@ | (mutable() ~ ::remote_bookmarks(remote="personal")) | trunk()..bookmarks() | 
+  roots(trunk()..bookmarks())- | trunk()"""
