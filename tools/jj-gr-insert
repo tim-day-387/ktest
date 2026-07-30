@@ -1,0 +1,188 @@
+#!/bin/bash
+# Insert a Gerrit change into the local patch stack as a new commit.
+#
+# Usage: jj gr-insert <change> [<patchset>] <-d|-A|-B rev> [duplicate flags...]
+#        jj gr-insert --replace <rev> [<patchset>]
+#   <change>    Gerrit change number, revision like 67103/2, or URL, e.g.
+#               https://review.whamcloud.com/c/fs/lustre-release/+/67103[/2]
+#   <patchset>  patchset number (default: current; a trailing patchset in
+#               the URL works too)
+#   Placement flags are passed to "jj duplicate" and are required, as with
+#   "jj rebase": -d/--destination, -A/--insert-after, -B/--insert-before.
+#   Descendants of the insertion point are rebased onto the new commit.
+#
+#   With --replace, the change is looked up from <rev>'s Change-Id trailer
+#   and its latest (or given) patchset is inserted where <rev> sits; <rev>
+#   is then abandoned, so its descendants end up on the fetched version.
+#   If <rev> already matches the patchset, nothing is changed.
+#
+# The patchset is fetched into a temporary git branch so that jj imports
+# it, duplicated into place, then the branch and the imported head are
+# removed. The Change-Id trailer is preserved, so gr-sync, gr-diff and
+# gr-submit keep working against the same Gerrit change.
+
+set -euo pipefail
+
+GERRIT_URL="${GERRIT_URL:-https://review.whamcloud.com}"
+GERRIT_REMOTE="${GERRIT_REMOTE:-gerrit}"
+
+usage() {
+    echo "usage: jj gr-insert <change> [<patchset>] <-d|-A|-B rev>" \
+	 "[duplicate flags...]" >&2
+    echo "       jj gr-insert --replace <rev> [<patchset>]" >&2
+    exit 2
+}
+
+# "number status ref" for the first change matching a Gerrit query
+query_change() {
+    curl -sf -G "$GERRIT_URL/changes/" --data-urlencode "q=$1" \
+	 --data-urlencode o=CURRENT_REVISION | tail -n +2 |
+	python3 -c 'import json, sys
+cs = json.load(sys.stdin)
+if cs:
+    c = cs[0]
+    print(c["_number"], c["status"], c["revisions"][c["current_revision"]]["ref"])'
+}
+
+# Signature of what a commit changes (same as jj-gr-sync): touched files
+# plus added/removed lines, context excluded so rebases don't count.
+patch_sig() {
+    git show --format= --patch "$1" |
+	awk '/^diff --git/     { print; next }
+	     /^(--- |\+\+\+ )/ { next }
+	     /^[+-]/           { print }' |
+	sha1sum | cut -d' ' -f1
+}
+
+[[ $# -ge 1 ]] || usage
+
+replace_sha=""
+if [[ $1 == --replace ]]; then
+    [[ $# -ge 2 ]] || usage
+    rev=$2; shift 2
+    ps=""
+    if [[ $# -ge 1 ]]; then
+	[[ $1 =~ ^[0-9]+$ ]] || usage
+	ps=$1; shift
+    fi
+    [[ $# -eq 0 ]] || usage
+
+    # Pin the target down to a commit id now: inserting the duplicate
+    # changes the graph, so revsets like @- would resolve differently
+    # by the time the target is abandoned.
+    replace_sha=$(jj log -r "$rev" --no-graph -T 'commit_id ++ "\n"')
+    [[ $(wc -l <<< "$replace_sha") -eq 1 ]] || {
+	echo "error: '$rev' resolves to multiple commits" >&2; exit 1; }
+    # The insertion rebases the target (new commit id), so the later
+    # abandon must go through its change id, which is stable.
+    replace_cid=$(jj log -r "$replace_sha" --no-graph -T 'change_id')
+    [[ -z $(jj log -r "immutable() & $replace_sha" --no-graph -T '"x"') ]] || {
+	echo "error: '$rev' is immutable" >&2; exit 1; }
+
+    cid=$(jj log -r "$replace_sha" --no-graph \
+	    -T 'trailers.filter(|t| t.key() == "Change-Id").map(|t| t.value()).join(" ")')
+    cid=${cid%% *}
+    [[ -n $cid ]] || { echo "error: '$rev' has no Change-Id trailer" >&2; exit 1; }
+
+    info=""
+    for q in "status:open change:$cid" "change:$cid"; do
+	info=$(query_change "$q")
+	[[ -n $info ]] && break
+    done
+    [[ -n $info ]] || { echo "error: no Gerrit change found for $cid" >&2; exit 1; }
+else
+    change=$1; shift
+
+    # A bare change number, a change/patchset revision like 65861/2, or a
+    # Gerrit URL with an optional trailing patchset.
+    ps=""
+    if [[ $change =~ ^([0-9]+)(/([0-9]+))?$ ]]; then
+	number=${BASH_REMATCH[1]}
+	ps=${BASH_REMATCH[3]}
+    elif [[ $change =~ /([0-9]+)(/([0-9]+))?/?$ ]]; then
+	number=${BASH_REMATCH[1]}
+	ps=${BASH_REMATCH[3]}
+    else
+	echo "error: cannot parse change '$change'" >&2
+	exit 2
+    fi
+
+    if [[ $# -ge 1 && $1 =~ ^[0-9]+$ ]]; then
+	ps=$1; shift
+    fi
+
+    # Placement must be explicit, like "jj rebase".
+    placed=""
+    for arg in "$@"; do
+	case $arg in
+	    -d|--destination|-A|--insert-after|--after|-B|--insert-before|--before)
+		placed=1 ;;
+	esac
+    done
+    [[ -n $placed ]] || usage
+
+    info=$(query_change "change:$number")
+    [[ -n $info ]] || { echo "error: no Gerrit change found for $number" >&2; exit 1; }
+fi
+
+read -r number status ref <<< "$info"
+[[ -n $ps ]] && ref="refs/changes/${number: -2}/$number/$ps"
+
+echo "# $GERRIT_URL/c/$number ($status), $ref" >&2
+
+# Fetch into a temporary branch: jj cannot resolve a commit that is only
+# reachable from FETCH_HEAD, but it auto-imports local branches.
+tmp="jj-gr-insert-$number"
+git fetch -q "$GERRIT_REMOTE" "+$ref:refs/heads/$tmp"
+gsha=$(git rev-parse "refs/heads/$tmp")
+
+# Both the branch and the head it made visible are temporary; remove them
+# no matter how the script exits. Only the duplicate should remain.
+cleanup() {
+    jj bookmark delete "$tmp" >/dev/null 2>&1 ||
+	git branch -D "$tmp" >/dev/null 2>&1 || true
+    jj abandon "$gsha" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+if [[ -n $replace_sha ]]; then
+    if [[ $(patch_sig "$replace_sha") == $(patch_sig "$gsha") &&
+	  $(git log -1 --format=%B "$replace_sha") == \
+	  $(git log -1 --format=%B "$gsha") ]]; then
+	echo "'$rev' already matches $ref; nothing to do"
+	exit 0
+    fi
+    # Insert BEFORE the commit being replaced: the duplicate's diff is
+    # then computed against the clean base, and the old/new overlap
+    # collapses into the doomed commit rather than into the duplicate
+    # (inserting after would reduce the duplicate to the interdiff).
+    set -- --insert-before "$replace_sha"
+fi
+
+if ! out=$(jj duplicate "$tmp" "$@" 2>&1); then
+    printf '%s\n' "$out" >&2
+    exit 1
+fi
+printf '%s\n' "$out"
+
+dup=$(printf '%s\n' "$out" | awk '$1 == "Duplicated" { print $4; exit }')
+if [[ -z $dup ]]; then
+    echo "error: could not determine duplicated revision" >&2
+    exit 1
+fi
+
+# Drop the replaced commit, now a child of the duplicate; its own
+# children move down onto the duplicate.
+[[ -n $replace_sha ]] && jj abandon "$replace_cid"
+
+conflicted=$(jj log --no-graph -r "descendants($dup)" \
+    -T 'if(conflict, change_id.short() ++ " " ++ description.first_line() ++ "\n")')
+if [[ -n $conflicted ]]; then
+    echo "warning: insertion introduced conflicts:" >&2
+    printf '%s\n' "$conflicted" >&2
+fi
+
+jj log -r "$dup- | $dup | $dup+"
+
+jj gr-sync || true
