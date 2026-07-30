@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
 import json
+import os
 import re
 import subprocess
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -17,28 +20,74 @@ from urllib.request import Request, urlopen
 args = sys.argv[1:]
 
 READY_ONLY = False
+VERBOSE = False
+PULL = False
+CACHED = False
 
 if "--ready-only" in args:
     READY_ONLY = True
     args.remove("--ready-only")
 
-if len(args) != 3:
+if "--verbose" in args:
+    VERBOSE = True
+    args.remove("--verbose")
+
+if "--pull" in args:
+    PULL = True
+    args.remove("--pull")
+
+if "--cached" in args:
+    CACHED = True
+    args.remove("--cached")
+
+if "--histogram" in args:
+    HISTOGRAM = True
+    args.remove("--histogram")
+else:
+    HISTOGRAM = False
+
+TOUCHES = None
+
+if "--touches" in args:
+    i = args.index("--touches")
+
+    if i + 1 >= len(args):
+        print("--touches needs a path argument")
+        sys.exit(1)
+
+    TOUCHES = args[i + 1]
+    del args[i:i + 2]
+
+if PULL and CACHED:
+    print("--pull and --cached are mutually exclusive")
+    sys.exit(1)
+
+if HISTOGRAM and TOUCHES:
+    print("--histogram and --touches are mutually exclusive")
+    sys.exit(1)
+
+if len(args) != (2 if HISTOGRAM or TOUCHES else 3):
     print(
-        "usage: script [--ready-only] "
-        "<gerrit-url> <target-branch> <local-commit>"
+        "usage: script [--ready-only] [--verbose] [--pull | --cached] "
+        "<gerrit-url> <target-branch> <local-commit>\n"
+        "       script [... same options ...] "
+        "--histogram <gerrit-url> <target-branch>\n"
+        "       script [... same options ...] "
+        "--touches <path-substring> <gerrit-url> <target-branch>"
     )
     sys.exit(1)
 
 GERRIT = args[0].rstrip("/")
 TARGET = args[1]
-LOCAL = args[2]
+LOCAL = args[2] if not (HISTOGRAM or TOUCHES) else None
 
 
-def git(*args, check=True):
+def git(*args, check=True, input=None):
     p = subprocess.run(
         ["git", *args],
         text=True,
         errors="replace",
+        input=input,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -50,38 +99,23 @@ def git(*args, check=True):
 
 
 #
-# Files touched locally
-#
-local_files = set(
-    git(
-        "diff",
-        "--name-only",
-        f"{TARGET}...{LOCAL}",
-    ).stdout.splitlines()
-)
-
-print("Local patch files:")
-for f in sorted(local_files):
-    print(" ", f)
-
-print()
-
-#
 # Query Gerrit
 #
-query = (
-    "status:open "
-    f"branch:{TARGET.split('/')[-1]}"
-)
+BRANCH_Q = f"branch:{TARGET.split('/')[-1]}"
+
+QUERY_OPTS = [
+    "CURRENT_REVISION",
+    "CURRENT_FILES",
+    "DETAILED_LABELS",
+    "DETAILED_ACCOUNTS",
+]
 
 
-def query_page(start):
+def gerrit_query(q, opts, start=0):
     params = urlencode([
-        ("q", query),
-        ("o", "CURRENT_REVISION"),
-        ("o", "CURRENT_FILES"),
-        ("o", "DETAILED_LABELS"),
-        ("o", "DETAILED_ACCOUNTS"),
+        ("q", q),
+        *[("o", o) for o in opts],
+        ("n", 500),
         ("S", start),
     ])
 
@@ -93,6 +127,32 @@ def query_page(start):
         raw = raw.split("\n", 1)[1]
 
     return json.loads(raw)
+
+
+def paged_query(q):
+    """
+    Gerrit caps results per response and sets _more_changes on the
+    last entry of a page, so page through with the S offset.
+    """
+    MAX_PAGES = 2
+
+    out = []
+    start = 0
+
+    for _ in range(MAX_PAGES):
+        page = gerrit_query(q, QUERY_OPTS, start)
+
+        if not page:
+            break
+
+        out.extend(page)
+
+        if not page[-1].get("_more_changes"):
+            break
+
+        start += len(page)
+
+    return out
 
 
 def conflict_lines(out):
@@ -219,29 +279,321 @@ def review_status(ch):
     return ready, summary
 
 
+def ensure_patchsets(wanted):
+    """
+    Make sure the patchset commits in `wanted` [(change, rev), ...] are
+    in the object store: batch-check with one cat-file process, fetch
+    the missing ones in one connection per remote, and pin everything
+    so gc doesn't prune it. Patchsets are immutable (a new upload gets
+    a new sha), so a cached commit is always valid.
+
+    With --cached nothing is fetched; instead the change numbers whose
+    patchsets are absent are returned so the caller can skip them.
+    """
+    if not wanted:
+        return set()
+
+    have = git(
+        "cat-file",
+        "--batch-check",
+        input="".join(f"{rev}^{{commit}}\n" for _, rev in wanted),
+    )
+
+    missing = {}    # fetch url -> list of refs
+    skipped = set()
+
+    for (ch, rev), line in zip(wanted, have.stdout.splitlines()):
+        if not line.endswith(" missing"):
+            continue
+
+        if CACHED:
+            skipped.add(ch["_number"])
+            continue
+
+        fetch = ch["revisions"][rev]["fetch"]["anonymous http"]
+        missing.setdefault(fetch["url"], []).append(fetch["ref"])
+
+    if skipped:
+        print(
+            f"note: skipping {len(skipped)} changes whose patchset "
+            "was never fetched (--cached)"
+        )
+
+        if VERBOSE:
+            for num in sorted(skipped):
+                print(f"  {num}")
+
+        print()
+
+    if missing:
+        total = sum(len(refs) for refs in missing.values())
+        print(f"fetching {total} missing patchsets...")
+
+    #
+    # Batch-fetch in one connection per remote -- far cheaper than one
+    # fetch per change.
+    #
+    for url, refs in missing.items():
+        git("fetch", url, *refs)
+
+    #
+    # Pin with one ref per change: a new patchset overwrites the pin,
+    # letting the superseded commit age out via normal gc. A single
+    # --stdin call pins everything in one process.
+    #
+    pins = [(ch, rev) for ch, rev in wanted if ch["_number"] not in skipped]
+
+    if pins:
+        git(
+            "update-ref",
+            "--stdin",
+            input="".join(
+                f"update refs/gerrit-cache/{ch['_number']} {rev}\n"
+                for ch, rev in pins
+            ),
+        )
+
+    return skipped
+
+
 #
-# Gerrit caps results per response and sets _more_changes on
-# the last entry of a page, so page through with the S offset.
+# Change metadata (file lists, review labels) is cached on disk so
+# runs can be incremental or fully offline:
 #
-MAX_PAGES = 2
+#   --pull    full refresh: re-query every open change on the branch
+#   --cached  offline: use the cache as-is, no network at all --
+#             patchset objects come from earlier runs, so changes
+#             never seen online are skipped with a note
+#   default   incremental: ask Gerrit only for changes updated since
+#             the last sync -- votes and new patchsets both bump a
+#             change's updated timestamp, so open changes stay current
+#             and merged/abandoned ones drop out
+#
+GIT_DIR = git("rev-parse", "--git-dir").stdout.strip()
+CACHE_PATH = os.path.join(GIT_DIR, "merger-cache.json")
+CACHE_KEY = f"{GERRIT} {TARGET}"
 
-changes = []
-start = 0
+try:
+    with open(CACHE_PATH) as f:
+        cache_all = json.load(f)
+except (OSError, json.JSONDecodeError):
+    cache_all = {}
 
-for _ in range(MAX_PAGES):
-    page = query_page(start)
+entry = cache_all.get(CACHE_KEY)
 
-    if not page:
-        break
+if CACHED:
+    if entry is None:
+        print(f"no cache for '{CACHE_KEY}' -- run without --cached first")
+        sys.exit(1)
 
-    changes.extend(page)
+    by_num = entry["changes"]
+else:
+    now = time.time()
 
-    if not page[-1].get("_more_changes"):
-        break
+    #
+    # A cache older than a week is refreshed in full: the incremental
+    # query would return most of the queue anyway.
+    #
+    full = entry is None or PULL or now - entry["synced"] > 7 * 86400
 
-    start += len(page)
+    if full:
+        by_num = {}
+        updated = paged_query(f"status:open {BRANCH_Q}")
+    else:
+        by_num = entry["changes"]
 
-predicted = []
+        #
+        # A 10 minute margin absorbs clock drift and slow queries; a
+        # change seen twice just overwrites itself.
+        #
+        elapsed = int(now - entry["synced"]) + 600
+        updated = paged_query(f"-age:{elapsed}s {BRANCH_Q}")
+
+    for ch in updated:
+        num = str(ch["_number"])
+
+        if ch["status"] == "NEW":
+            by_num[num] = ch
+        else:
+            by_num.pop(num, None)
+
+    cache_all[CACHE_KEY] = {"synced": now, "changes": by_num}
+
+    tmp = CACHE_PATH + ".tmp"
+
+    with open(tmp, "w") as f:
+        json.dump(cache_all, f)
+
+    os.replace(tmp, CACHE_PATH)
+
+changes = by_num.values()
+
+#
+# --touches: list every open change whose file list contains the given
+# path (substring match, so a bare filename catches a file that moved).
+# Pure metadata -- no git work at all.
+#
+if TOUCHES:
+    shown = 0
+
+    for ch in sorted(changes, key=lambda c: c["_number"]):
+        rev = ch["current_revision"]
+
+        hit = sorted(
+            f for f in ch["revisions"][rev]["files"] if TOUCHES in f
+        )
+
+        if not hit:
+            continue
+
+        ready, summary = review_status(ch)
+
+        if READY_ONLY and not ready:
+            continue
+
+        shown += 1
+
+        print(f"{ch['_number']}: {ch['subject']}")
+        print(f"   reviews: {summary}")
+
+        for f in hit:
+            print(f"   {f}")
+
+        print()
+
+    if not shown:
+        print("None")
+
+    sys.exit(0)
+
+#
+# --histogram: pairwise conflict sweep over the whole review queue
+# instead of a single local patch. For every pair of open changes
+# whose Gerrit file lists overlap, run the same in-memory merge and
+# count, per file, how many pairs collide there. Staleness gets the
+# same treatment as for a local patch: a file where a change conflicts
+# with the branch tip on its own is drift, not contention between the
+# two changes, so it is subtracted.
+#
+# Changes are routinely stacked, and merge-tree compares whole
+# branches, so a pair can also conflict on files only a chain ancestor
+# touched -- and that one collision would repeat for every descendant
+# of the ancestor. Attribute conflicts only to files both changes
+# touch themselves; the ancestor is an open change too, so its
+# collisions are counted exactly once, on its own pairs.
+#
+if HISTOGRAM:
+    items = []
+
+    for ch in changes:
+        if READY_ONLY and not review_status(ch)[0]:
+            continue
+
+        rev = ch["current_revision"]
+        items.append((ch, rev, set(ch["revisions"][rev]["files"].keys())))
+
+    skipped = ensure_patchsets([(ch, rev) for ch, rev, _ in items])
+
+    if skipped:
+        items = [it for it in items if it[0]["_number"] not in skipped]
+
+    TIP = git("rev-parse", f"{TARGET}^{{commit}}").stdout.strip()
+
+    def conflict_files(a, b):
+        mt = git(
+            "merge-tree",
+            "--write-tree",
+            "--name-only",
+            "-z",
+            a,
+            b,
+            check=False,
+        )
+
+        if mt.returncode != 1:
+            return frozenset()
+
+        tokens = mt.stdout.split("\0")
+
+        return frozenset(tokens[1:tokens.index("", 1)])
+
+    pairs = [
+        (i, j)
+        for i in range(len(items))
+        for j in range(i + 1, len(items))
+        if items[i][2] & items[j][2]
+    ]
+
+    def pair_conflicts(pair):
+        i, j = pair
+        files = conflict_files(items[i][1], items[j][1])
+        own = items[i][2] & items[j][2]
+
+        return pair, sorted((files & own) - stale[i] - stale[j])
+
+    with ThreadPoolExecutor(max_workers=min(32, max(1, len(items)))) as ex:
+        stale = list(ex.map(lambda it: conflict_files(TIP, it[1]), items))
+        results = list(ex.map(pair_conflicts, pairs))
+
+    hist = {}   # file -> list of conflicting change pairs
+
+    for (i, j), files in results:
+        for f in files:
+            hist.setdefault(f, []).append(
+                (items[i][0]["_number"], items[j][0]["_number"])
+            )
+
+    print(
+        f"{len(items)} open changes, "
+        f"{len(pairs)} overlapping pairs checked"
+    )
+    print()
+
+    if not hist:
+        print("No conflicts between open changes")
+        sys.exit(0)
+
+    print("Most conflicted files:")
+    print()
+
+    for f, ps in sorted(hist.items(), key=lambda kv: -len(kv[1])):
+        print(f"{len(ps):5d}  {f}")
+
+        if VERBOSE:
+            for a, b in ps:
+                print(f"       {a} <-> {b}")
+
+    sys.exit(0)
+
+#
+# Files touched locally
+#
+local_files = set(
+    git(
+        "diff",
+        "--name-only",
+        f"{TARGET}...{LOCAL}",
+    ).stdout.splitlines()
+)
+
+#
+# The commit the local patch sits on: the reference point for deciding
+# whether a conflict is caused by the patch or predates it.
+#
+BASE = git("merge-base", TARGET, LOCAL).stdout.strip()
+
+if VERBOSE:
+    print("Local patch files:")
+    for f in sorted(local_files):
+        print(" ", f)
+
+    print()
+
+#
+# First pass: keep only changes whose file list overlaps the local
+# patch.
+#
+overlapping = []
 
 for ch in changes:
     rev = ch["current_revision"]
@@ -254,55 +606,127 @@ for ch in changes:
     if not overlap:
         continue
 
-    fetch = revinfo["fetch"]["anonymous http"]
+    overlapping.append((ch, rev, overlap))
+
+#
+# With --ready-only, filter on review state before any merge work:
+# readiness needs no git machinery, and most changes fail it.
+#
+if READY_ONLY:
+    overlapping = [it for it in overlapping if review_status(it[0])[0]]
+
+skipped = ensure_patchsets([(ch, rev) for ch, rev, _ in overlapping])
+
+if skipped:
+    overlapping = [
+        it for it in overlapping if it[0]["_number"] not in skipped
+    ]
+
+
+def predict(item):
+    """
+    Run the in-memory merge prediction for one change and return the
+    conflict record, or None if it merges cleanly.
+    """
+    ch, rev, overlap = item
 
     #
-    # Fetch patchset object
-    #
-    git(
-        "fetch",
-        fetch["url"],
-        fetch["ref"],
-    )
-
-    remote_commit = "FETCH_HEAD"
-
-    #
-    # Compute merge-base
-    #
-    base = git(
-        "merge-base",
-        LOCAL,
-        remote_commit,
-    ).stdout.strip()
-
-    #
-    # Pure in-memory merge prediction
+    # Modern merge-tree finds the merge base itself and runs the real
+    # merge machinery (rename detection included): one subprocess, and
+    # exit code 1 means conflict.
     #
     mt = git(
         "merge-tree",
-        base,
+        "--write-tree",
+        "--name-only",
+        "-z",
         LOCAL,
-        remote_commit,
+        rev,
         check=False,
     )
 
-    out = mt.stdout
+    if mt.returncode == 0:
+        return None
+
+    if mt.returncode != 1:
+        raise RuntimeError(mt.stderr.strip())
 
     #
-    # Conflict detection
+    # NUL-split output: toplevel tree oid, the conflicted file names,
+    # then an empty token separating the informational messages.
     #
-    has_conflict = (
-        "<<<<<<<" in out
-        or mt.returncode != 0
+    tokens = mt.stdout.split("\0")
+    files = tokens[1:tokens.index("", 1)]
+
+    #
+    # Only report conflicts the local patch causes. Open changes are
+    # routinely stale against the branch tip, and merging one with the
+    # bare merge-base exposes those conflicts: they exist with or
+    # without the local patch, and rebasing the change is the owner's
+    # problem. Attribute to the patch only files that conflict with it
+    # applied but merge cleanly against the bare base.
+    #
+    bl = git(
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        "-z",
+        BASE,
+        rev,
+        check=False,
     )
 
-    if has_conflict:
-        predicted.append({
-            "change": ch,
-            "overlap": overlap,
-            "lines": conflict_lines(out),
-        })
+    stale = set()
+
+    if bl.returncode == 1:
+        toks = bl.stdout.split("\0")
+        stale = set(toks[1:toks.index("", 1)])
+
+    caused = [f for f in files if f not in stale]
+
+    if not caused:
+        return None
+
+    #
+    # Per-line conflict detail only exists in legacy merge-tree output,
+    # which also needs an explicit base -- pay for both subprocesses
+    # only when the verbose report will show the lines.
+    #
+    lines = {}
+
+    if VERBOSE:
+        base = git(
+            "merge-base",
+            LOCAL,
+            rev,
+        ).stdout.strip()
+
+        legacy = git(
+            "merge-tree",
+            base,
+            LOCAL,
+            rev,
+            check=False,
+        )
+
+        lines = conflict_lines(legacy.stdout)
+
+    return {
+        "change": ch,
+        "files": caused,
+        "stale": sorted(set(files) & stale),
+        "lines": lines,
+    }
+
+
+#
+# Predict in parallel: merge-tree is a subprocess, so threads overlap
+# the spawns fine, and nothing touches the worktree/index. The workers
+# only wait on subprocesses, so go well past the core count.
+#
+with ThreadPoolExecutor(
+        max_workers=min(32, max(1, len(overlapping)))) as ex:
+    predicted = [r for r in ex.map(predict, overlapping) if r]
 
 #
 # Results
@@ -314,40 +738,26 @@ if not predicted:
     print("None")
     sys.exit(0)
 
-shown = 0
-
 for item in predicted:
     ch = item["change"]
 
-    ready, summary = review_status(ch)
-
-    if READY_ONLY and not ready:
-        continue
-
-    shown += 1
+    _, summary = review_status(ch)
 
     print(
         f"{ch['_number']}: {ch['subject']}"
     )
     print(f"   reviews: {summary}")
 
-    lines = item["lines"]
-
-    #
-    # Report every file that actually conflicts in the 3-way merge -- this
-    # is a superset of the Gerrit file overlap, since the merge-base can be
-    # far behind. Fall back to the file overlap for non-text conflicts
-    # (binary, rename, mode) where merge-tree emits no "<<<<<<<" markers.
-    #
-    conflicted = sorted(lines) if lines else item["overlap"]
-
-    for f in conflicted:
+    for f in sorted(item["files"]):
         print(f"   {f}")
+
+        if not VERBOSE:
+            continue
 
         #
         # Lines from the local patch that land inside a conflict.
         #
-        rows = lines.get(f, [])
+        rows = item["lines"].get(f, [])
 
         if rows:
             for lineno, text in rows:
@@ -355,7 +765,8 @@ for item in predicted:
         else:
             print("      (no local lines; change conflicts on the other side)")
 
-    print()
+    if VERBOSE:
+        for f in item["stale"]:
+            print(f"   {f} (stale: conflicts even without the local patch)")
 
-if not shown:
-    print("None")
+    print()
