@@ -184,11 +184,11 @@ if command -v jj > /dev/null 2>&1; then
 	   '["util", "exec", "--", "bash", "-c", "git clean -xdf -e .jj/ \"$@\"", "jj-clean"]'
     fi
 
-    # Register "jj submit", which uploads a revision to Gerrit
-    # rebased onto the target branch (see tools/jj-submit)
-    if ! jj config get aliases.submit > /dev/null 2>&1; then
-	jj config set --user aliases.submit \
-	   "[\"util\", \"exec\", \"--\", \"$HOME/ws/ktest/tools/jj-submit\"]"
+    # Register "jj gr-submit", which uploads a revision to Gerrit
+    # rebased onto the target branch (see tools/jj-gr-submit)
+    if ! jj config get aliases.gr-submit > /dev/null 2>&1; then
+	jj config set --user aliases.gr-submit \
+	   "[\"util\", \"exec\", \"--\", \"$HOME/ws/ktest/tools/jj-gr-submit\"]"
     fi
 fi
 

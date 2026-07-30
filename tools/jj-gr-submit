@@ -1,7 +1,7 @@
 #!/bin/bash
 # Submit a jj revision to Gerrit, rebased onto the target branch first.
 #
-# Usage: jj submit <rev> [branch] [jj gerrit upload flags...]
+# Usage: jj gr-submit <rev> [branch] [jj gerrit upload flags...]
 #   Duplicates <rev> onto <branch>@<remote> (default: master@gerrit),
 #   asks for confirmation, uploads the duplicate to refs/for/<branch>,
 #   then abandons the duplicate. The original revision and the working
@@ -13,7 +13,7 @@ set -euo pipefail
 REMOTE="${GERRIT_REMOTE:-gerrit}"
 
 if [[ $# -lt 1 ]]; then
-    echo "usage: jj submit <rev> [branch] [upload flags...]" >&2
+    echo "usage: jj gr-submit <rev> [branch] [upload flags...]" >&2
     exit 2
 fi
 
@@ -37,23 +37,22 @@ if [[ -z $dup ]]; then
     exit 1
 fi
 
+# The duplicate is temporary; make sure it is abandoned no matter how
+# the script exits.
+trap 'jj abandon "$dup"' EXIT
+trap 'exit 130' INT TERM
+
 if [[ $(jj log --no-graph -r "$dup" -T 'if(conflict, "conflict")') == conflict ]]; then
-    echo "error: duplicate $dup conflicts with $branch@$REMOTE;" \
-	 "resolve and upload manually, or run: jj abandon $dup" >&2
+    echo "error: $rev conflicts with $branch@$REMOTE;" \
+	 "rebase it onto $branch and retry" >&2
     exit 1
 fi
 
-jj log -r "$dup"
+jj log -r "$dup | $dup-"
 read -r -p "Push to refs/for/$branch on $REMOTE? [y/N] " answer || answer=n
 if [[ $answer != [yY] ]]; then
-    jj abandon "$dup"
     echo "aborted; nothing pushed" >&2
     exit 1
 fi
 
-if jj gerrit upload -r "$dup" -b "$branch" --remote "$REMOTE" "$@"; then
-    jj abandon "$dup"
-else
-    echo "upload failed; duplicate kept as $dup (clean up with: jj abandon $dup)" >&2
-    exit 1
-fi
+jj gerrit upload -r "$dup" -b "$branch" --remote "$REMOTE" "$@"
