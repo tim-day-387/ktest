@@ -49,11 +49,16 @@ RUN apt-get update && apt-get install -y \
 # Get LLVM and clean up in the same layer.  llvm-23-dev / libclang-23-dev
 # provide the headers and libs the cplugin (xunused) links against.  The kernel
 # context-analysis (Clang thread-safety analysis) feature requires Clang 23, so
-# pass the version explicitly to llvm.sh (23 is not yet the default "latest
-# stable") and pin the matching -dev packages so cplugin's CMake find_package
-# picks up version 23.
-RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)" llvm.sh 23 && \
-    apt-get install -y clang-tidy-23 llvm-23-dev libclang-23-dev llvm-23 && \
+# pin the matching -dev packages so cplugin's CMake find_package picks up
+# version 23.  Add the versioned llvm-toolchain repo directly instead of using
+# llvm.sh: the script maps whatever it thinks is the trunk version to the
+# unversioned nightly repo, which breaks every time upstream branches a release
+# (e.g. clang-23 moved out of the nightly repo when trunk bumped to 24).
+RUN wget -qO /etc/apt/trusted.gpg.d/apt.llvm.org.asc https://apt.llvm.org/llvm-snapshot.gpg.key && \
+    echo "deb https://apt.llvm.org/resolute/ llvm-toolchain-resolute-23 main" \
+        > /etc/apt/sources.list.d/llvm-23.list && \
+    apt-get update && \
+    apt-get install -y clang-23 lld-23 clang-tidy-23 llvm-23-dev libclang-23-dev llvm-23 && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup ccache symlink for Lustre/ZFS builds
