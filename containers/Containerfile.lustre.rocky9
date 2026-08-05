@@ -40,7 +40,7 @@ RUN printf '[mlnx_ofed]\nname=MLNX_OFED Repository - el9\nbaseurl=https://linux.
 RUN dnf install -y mlnx-ofa_kernel-devel mlnx-ofa_kernel-source
 
 # Install latest e2fsprogs from Lustre mirror
-RUN printf '[e2fsprogs]\nname=e2fsprogs Mirror - el9\nbaseurl=https://lustre.software/mirror/e2fsprogs/latest/el9/\nenabled=1\ngpgcheck=0\n' \
+RUN printf '[e2fsprogs]\nname=e2fsprogs Mirror - el9\nbaseurl=https://downloads.whamcloud.com/public/e2fsprogs/latest/el9/\nenabled=1\ngpgcheck=0\n' \
 	> /etc/yum.repos.d/e2fsprogs.repo
 RUN dnf update -y && dnf install -y e2fsprogs
 
