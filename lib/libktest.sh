@@ -22,7 +22,6 @@ ktest_out="./ktest-out"	# dir for test output (logs, code coverage, etc.)
 ktest_priority=0	# hint for how long test should run
 ktest_interactive=false	# if set to true, timeout is ignored completely
                         #       sets with: -I
-ktest_exit_on_success=0	# if true, exit on success, not failure or timeout
 ktest_failfast=false
 ktest_loop=false
 ktest_verbose=false	# if false, append quiet to kernel commad line
@@ -53,7 +52,7 @@ checkdep brotli
 
 # args:
 
-ktest_args="a:o:p:ISFLvxn:N:"
+ktest_args="a:o:p:IFLvxn:N:"
 parse_ktest_arg()
 {
     local arg=$1
@@ -70,9 +69,6 @@ parse_ktest_arg()
 	    ;;
 	I)
 	    ktest_interactive=true
-	    ;;
-	S)
-	    ktest_exit_on_success=1
 	    ;;
 	F)
 	    ktest_failfast=true
@@ -111,42 +107,6 @@ parse_args_post()
     if [[ $ktest_nice != 0 ]]; then
 	renice  --priority $ktest_nice $$ >/dev/null
     fi
-}
-
-ktest_usage_opts()
-{
-    echo "      -a <arch>       architecture"
-    echo "      -o <dir>        output directory; defaults to ./ktest-out"
-    echo "      -n (user|tap|vde) Networking type to use"
-    echo "      -x              bash debug statements"
-    echo "      -h              display this help and exit"
-}
-
-ktest_usage_run_opts()
-{
-    echo "      -p <num>        hint for test duration (higher is longer, default is 0)"
-    echo "      -I              interactive mode - don't shut down VM automatically"
-    echo "      -S              exit on test success"
-    echo "      -F              failfast - stop after first test failure"
-    echo "      -L              run all tests in infinite loop until failure"
-    echo "      -v              verbose mode"
-    echo "      -N <val>        Nice value for kernel build and VM"
-}
-
-ktest_usage_cmds()
-{
-    echo "  boot                Boot a VM without running anything"
-    echo "  run <test>          Run a kernel test"
-    echo "  ssh                 Login as root"
-    echo "  gdb                 Connect to qemu's gdb interface"
-    echo "  kgdb                Connect to kgdb"
-    echo "  mon                 Connect to qemu monitor"
-    echo "  sysrq <key>         Send magic sysrq key via monitor"
-}
-
-ktest_usage_post()
-{
-    echo "For kgdb to be enabled, either -I or -S must be specified"
 }
 
 # subcommands:
@@ -514,13 +474,6 @@ start_vm()
 	disknr=$((disknr + 1))
     }
 
-    qemu_pmem()
-    {
-	qemu_cmd+=(-object memory-backend-file,id=mem$disknr,share,"$1",align=128M)
-	qemu_cmd+=(-device nvdimm,memdev=mem$disknr,id=nv$disknr,label-size=2M)
-	disknr=$((disknr + 1))
-    }
-
     qemu_disk file="$ktest_root_image",snapshot=on
 
     for file in "${ktest_images[@]}"; do
@@ -537,22 +490,6 @@ start_vm()
 	truncate -s "$size" "$file"
 
 	qemu_disk file="$file",cache=unsafe
-    done
-
-    for size in "${ktest_scratch_slowdevs[@]}"; do
-	local file="$ktest_out/vm/dev-$disknr"
-
-	truncate -s "$size" "$file"
-
-	# slow device, 300 kiops and 100MB/s
-	qemu_disk file="$file",iops=300,bps=$((100*1024**2))
-    done
-
-    for size in "${ktest_pmem_devs[@]}"; do
-	local file="$ktest_out/vm/dev-$disknr"
-
-	fallocate -l "$size" "$file"
-	qemu_pmem mem-path="$file",size=$size
     done
 
     [ "$(ulimit)" == "unlimited" ] || ulimit -n 65535

@@ -34,18 +34,12 @@ ktest_llvm_source="$ktest_kernel_source/../llvm-project/"
 ktest_boot_test="$ktest_dir/tests/fs/lustre/boot.ktest"
 ktest_ccplugin="$ktest_dir/cplugin/build/xunused"
 ktest_compiler="${CC:-clang-23}"
-ktest_skip_kernel_config=false
 ktest_lustre_allow_warnings=0
-ktest_lustre_build_enable=1
-ktest_kernel_build_enable=1
 # Set to 1 by a test's config-nvidia-modules (emitted from its deps phase and
 # eval'd via parse_test_deps); gates build_nvidia/install of the NVIDIA modules.
 ktest_nvidia=0
 ktest_out="/tmp/ktest-out/"
-ktest_lustre_clean_git=0
-ktest_lustre_purge=0
 ktest_njobs=$(nproc)
-ktest_precise=false
 ktest_loop=false
 DEPMOD=depmod
 MAKEARGS=()

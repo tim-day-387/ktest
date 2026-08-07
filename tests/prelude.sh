@@ -78,41 +78,6 @@ require-git()
     fi
 }
 
-do-build-deb()
-{
-    local path=$(readlink -e "$1")
-    local name=$(basename $path)
-
-    get_tmpdir
-
-    make -C "$path"
-
-    cp -drl $path $ktest_tmp
-    pushd "$ktest_tmp/$name" > /dev/null
-
-    # make -nc actually work:
-    rm -f debian/*.debhelper.log
-
-    debuild --no-lintian -b -i -I -us -uc -nc
-    popd > /dev/null
-}
-
-# $1 is a source repository, which will be built (with make) and then turned
-# into a dpkg
-require-build-deb()
-{
-    local req=$1
-
-    if ! [[ -d $req ]]; then
-	echo "build-deb dependency $req not found"
-	exit 1
-    fi
-
-    checkdep debuild devscripts
-
-    run_quiet "building $(basename $req)" do-build-deb $req
-}
-
 require-make()
 {
     local req=$(dirname $(readlink -e ${BASH_SOURCE[1]}))/$1
@@ -283,11 +248,6 @@ config-scratch-devs()
     ktest_scratch_dev_sizes+=("$1")
 }
 
-config-pmem-devs()
-{
-    ktest_pmem_devs+=("$1")
-}
-
 config-image()
 {
     ktest_images+=("$1")
@@ -328,11 +288,6 @@ config-timeout-multiplier()
     ktest_timeout_multiplier=$(($ktest_timeout_multiplier * $1))
 }
 
-config-arch()
-{
-    ktest_arch=$1
-}
-
 config-compiler()
 {
     ktest_compiler=$1
@@ -347,11 +302,6 @@ config-lustre-root()
 {
     ktest_lustre_root=1
     ktest_root_image="/var/lib/ktest/lustre_root.amd64"
-}
-
-config-root-image()
-{
-    ktest_root_image=$1
 }
 
 config-networking()

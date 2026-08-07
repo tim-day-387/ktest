@@ -264,8 +264,6 @@ mount_lustre_image()
     local mgs_nid=$(lnetctl net show | grep 'nid:.*@tcp' | head -1 | awk '{print $NF}')
     mkdir -p "$LUSTRE_CLIENT_MNT"
     mount -t lustre "$mgs_nid:/$fsname" "$LUSTRE_CLIENT_MNT"
-
-    MNT="$LUSTRE_CLIENT_MNT"
 }
 
 cmd_mount_lustre()

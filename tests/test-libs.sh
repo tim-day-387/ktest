@@ -81,16 +81,6 @@ antagonist_sync()
     done
 }
 
-antagonist_drop_caches()
-{
-    echo 4 > /proc/sys/vm/drop_caches
-
-    while true; do
-	echo 3 > /proc/sys/vm/drop_caches
-	sleep 5
-    done
-}
-
 stress_timeout()
 {
     echo $((($ktest_priority + 3) * 600))

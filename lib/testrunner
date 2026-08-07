@@ -28,8 +28,6 @@ ln -sf /host/$home $home
 rm -rf /root/.cargo
 ln -s $HOME/.cargo /root/.cargo
 
-ktest_no_cleanup_tmpdir=1
-
 log_verbose "Testrunner starting"
 
 mkdir -p /root/.ssh
@@ -110,12 +108,6 @@ if [[ ${ktest_networking:-user} == tap ]]; then
 else
     printf "nameserver 8.8.8.8\nnameserver 8.8.4.4\n" > /etc/resolv.conf
 fi
-
-get_stratch_devs()
-{
-    echo
-    sfdisk -X gpt /dev/sdb 
-}
 
 copy_to_host()
 {

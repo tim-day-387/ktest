@@ -19,12 +19,6 @@ tEST_DATA_SIZE="32M"
 # Size of crypt device should be at least tEST_DATA_SIZE+LUKS headers
 cRYTP_DEV_SIZE="34M"
 
-s5p_sss_cryptsetup_cleanup() {
-	print_msg "Exit trap, cleaning up..."
-	s5p_sss_cryptsetup_unprepare $dev
-	trap - EXIT
-}
-
 # s5p_sss_cryptsetup_prepare <dev_name> <mode (as cryptsetup argument list)> [luksformat]
 s5p_sss_cryptsetup_prepare() {
 	local name="s5p-sss cryptsetup"

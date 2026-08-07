@@ -138,15 +138,6 @@ add_device() {
     DEVICE_COUNT=$(($DEVICE_COUNT + 1))
 }
 
-wait_on_dev()
-{
-    for device in $@; do
-	while [ ! -b "$device" ] && [ ! -c "$device" ]; do
-	    sleep 0.5
-	done
-    done
-}
-
 #
 # Registers all bcache devices.
 #
@@ -213,14 +204,6 @@ setup_bcache() {
     if [ ! -L "/root/c" ]; then
         ln -s /sys/fs/bcache/*-* /root/c || true
     fi
-}
-
-stop_volumes()
-{
-    for dev in /sys/block/bcache*/bcache/unregister; do
-	echo 1 > $dev
-    done
-    sleep 1
 }
 
 stop_bcache()

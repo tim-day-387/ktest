@@ -134,30 +134,6 @@ antagonist_trigger_gc()
     done
 }
 
-antagonist_switch_str_hash()
-{
-    cd /sys/fs/bcachefs
-
-    while true; do
-	for i in crc32c crc64 siphash; do
-	    echo $i | tee */options/str_hash >& /dev/null || true
-	    sleep 2
-	done
-    done
-}
-
-antagonist_switch_crc()
-{
-    cd /sys/fs/bcachefs
-
-    while true; do
-	for i in crc32c crc64; do
-	    echo $i | tee */options/data_checksum */options/metadata_checksum >& /dev/null || true
-	    sleep 2
-	done
-    done
-}
-
 antagonist_cat_sysfs_debugfs()
 {
     set +o errexit
@@ -212,7 +188,6 @@ bcachefs_antagonist()
     antagonist_sync &
     antagonist_trigger_gc &
     antagonist_cat_sysfs_debugfs &
-    #antagonist_switch_str_hash &
 }
 
 get_slowpath_counters()

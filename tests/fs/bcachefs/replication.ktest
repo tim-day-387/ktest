@@ -953,40 +953,24 @@ test_striping()
     set_watchdog 60
     setup_tracing `bcachefs_slowpath_tracepoints`
 
-    if false; then
-	run_quiet "" bcachefs format -f		\
-	    --replicas=2			\
-	    ${ktest_scratch_dev[0]}		\
-	    ${ktest_scratch_dev[1]}
+    run_quiet "" bcachefs format -f		\
+	--data_checksum=none			\
+	--replicas=2				\
+	--label cache				\
+	--durability=1				\
+	--bucket_size=8M			\
+	${ktest_scratch_dev[0]}			\
+	--label hdd				\
+	--durability=2				\
+	${ktest_scratch_dev[1]}			\
+	${ktest_scratch_dev[2]}			\
+	--foreground_target=cache		\
+	--background_target=hdd			\
+	--promote_target=cache
 
-	mount -t bcachefs ${ktest_scratch_dev[0]}:${ktest_scratch_dev[1]} /mnt
+    mount -t bcachefs ${ktest_scratch_dev[0]}:${ktest_scratch_dev[1]}:${ktest_scratch_dev[2]} /mnt
 
-	dd if=/dev/zero of=/mnt/test0 bs=1M count=1024 oflag=direct
-	bcachefs fs usage -h /mnt
-
-	bcachefs device add -f /mnt ${ktest_scratch_dev[2]}
-
-	dd if=/dev/zero of=/mnt/test1 bs=1M count=1024 oflag=direct
-    else
-	run_quiet "" bcachefs format -f		\
-	    --data_checksum=none		\
-	    --replicas=2			\
-	    --label cache			\
-	    --durability=1			\
-	    --bucket_size=8M			\
-	    ${ktest_scratch_dev[0]}		\
-	    --label hdd				\
-	    --durability=2			\
-	    ${ktest_scratch_dev[1]}		\
-	    ${ktest_scratch_dev[2]}		\
-	    --foreground_target=cache		\
-	    --background_target=hdd		\
-	    --promote_target=cache
-
-	mount -t bcachefs ${ktest_scratch_dev[0]}:${ktest_scratch_dev[1]}:${ktest_scratch_dev[2]} /mnt
-
-	dd if=/dev/zero of=/mnt/test0 bs=1M count=1024 oflag=direct
-    fi
+    dd if=/dev/zero of=/mnt/test0 bs=1M count=1024 oflag=direct
 
     bcachefs fs usage -h /mnt
 

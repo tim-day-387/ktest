@@ -37,16 +37,9 @@ test_main()
 	#s2ram --no_kms --force
     )&
 
-    if false; then
-	bcache_format
-	setup_bcachefs
+    setup_bcache
 
-	run_dbench
-    else
-	setup_bcache
+    run_antagonist
 
-	run_antagonist
-
-	run_bcache_stress
-    fi
+    run_bcache_stress
 }

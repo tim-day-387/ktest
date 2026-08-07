@@ -58,15 +58,6 @@ function print_lustre_env() {
     echo "ONLY=$ONLY"
 }
 
-# Run a command as if it were part of test-framework.sh
-function run_tf() {
-	    cat << EOF | bash
-. "$LUSTRE/tests/test-framework.sh" > /dev/null
-init_test_env > /dev/null
-$@
-EOF
-}
-
 # Run llog_test.ko unit tests
 function run_llog() {
     export MGS="$($LCTL dl | awk '/mgs/ { print $4 }')"

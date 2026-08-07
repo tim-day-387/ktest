@@ -1049,12 +1049,8 @@ d_test_suspend()
     run_quiet "" bcachefs format -f ${ktest_scratch_dev[0]}
     mount -t bcachefs ${ktest_scratch_dev[0]} /mnt
 
-    if false; then
-	run_dbench
-    else
-	bcachefs_antagonist
-	run_stress
-    fi
+    bcachefs_antagonist
+    run_stress
 
     bcachefs fsck -ny ${ktest_scratch_dev[0]}
     bcachefs_test_end_checks ${ktest_scratch_dev[0]}
