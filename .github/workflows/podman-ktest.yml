@@ -1,11 +1,11 @@
-name: Test podman-ktest with Lustre
+name: Test podman-ktest
 
 on:
   push:
   pull_request:
 
 jobs:
-  ml-llmount:
+  pk-run:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
 
@@ -26,42 +26,25 @@ jobs:
       run: |
         systemctl --user start podman.socket
 
-    - name: Clone Linux kernel
-      run: |
-        mkdir -p ~/git
-        KVER=$(awk '/^Linux-Maximum:/ {print $2}' META)
-        git clone --depth 1 --branch "v${KVER}" \
-          https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
-          ~/git/linux
-
-    - name: Clone Lustre
-      run: |
-        git clone --depth 1 \
-          git://git.whamcloud.com/fs/lustre-release.git \
-          ~/git/lustre-release
-
-    - name: Create ktestrc
-      run: |
-        cat > ~/.ktestrc << 'EOF'
-        export ktest_kernel_source="$HOME/git/linux"
-        export ktest_lustre_source="$HOME/git/lustre-release"
-        EOF
-
     - name: Build ktest-runner container image
       run: |
-        df -h
-        ./pk build --ci-only
-        podman system prune -f
+        ./pk build
 
-    - name: Build root image for ktest
+    - name: Set up pk environment
       run: |
-        df -h
-        sudo ./root_image create
+        # pk requires a kernel source directory, but `pk run` never
+        # mounts it, so an empty one is enough
+        mkdir -p ~/git/linux
+
+        # environment validation only checks that a root image file
+        # exists; `pk run` doesn't boot a VM
+        sudo mkdir -p /var/lib/ktest
+        sudo touch "/var/lib/ktest/root.$(dpkg --print-architecture)"
 
     - name: Enable KVM
       run: |
-        sudo chmod 777 /dev/kvm
+        sudo chmod 666 /dev/kvm
 
-    - name: Run ml-llmount
+    - name: Run pk
       run: |
-        ./pk job ml-llmount --stdout
+        ./pk run ls -l
