@@ -36,7 +36,7 @@ jobs:
 
     - name: Build all container images
       run: |
-        ./podman-ktest build
+        ./pk build
 
     - name: Log in to GitHub Container Registry
       run: |
