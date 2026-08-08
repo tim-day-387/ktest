@@ -1164,6 +1164,29 @@ function cmd_build_native()
     find "$ktest_out" -name '*.o' -type f -delete
 }
 
+# Derive a unique, human-readable UKI name from the image contents:
+# UkImage-MM-DD-YY-HHMM-adjective-adjective-noun (e.g. UkImage-08-08-26-
+# 1432-red-running-hare), with the words picked from fixed 256-entry dictionaries
+# (lib/uki-adjectives.txt, lib/uki-nouns.txt) indexed by the first three
+# bytes of the image's md5sum, xkcd-936 style.  Same image, same name.
+function uki_image_name()
+{
+    local image=$1
+    local adjectives=() nouns=()
+
+    mapfile -t adjectives < "$ktest_dir/lib/uki-adjectives.txt"
+    mapfile -t nouns < "$ktest_dir/lib/uki-nouns.txt"
+    [[ ${#adjectives[@]} = 256 && ${#nouns[@]} = 256 ]] || {
+	echo "uki-adjectives.txt/uki-nouns.txt must have exactly 256 words" >&2
+	exit 1
+    }
+
+    local md5
+    md5=$(md5sum "$image" | cut -d' ' -f1)
+
+    echo "UkImage-$(date +%m-%d-%y-%H%M)-${adjectives[$((16#${md5:0:2}))]}-${adjectives[$((16#${md5:2:2}))]}-${nouns[$((16#${md5:4:2}))]}"
+}
+
 function cmd_package_native()
 {
     if [[ $# = 0 ]]; then
@@ -1187,8 +1210,11 @@ function cmd_package_native()
 
     # Copy kernel image to output directory
     local output_dir="/tmp/ktest-output"
+    local uki_name
+    uki_name=$(uki_image_name "$ktest_kernel_binary/uki.efi")
     cp "$ktest_kernel_binary/config" "$output_dir/"
-    cp "$ktest_kernel_binary/uki.efi" "$output_dir/"
+    cp "$ktest_kernel_binary/uki.efi" "$output_dir/$uki_name"
+    echo "Packaged UKI: $uki_name"
 
     # Purge junk from ktest_out to save space
     find "$ktest_out" -name '*.o' -type f -delete
