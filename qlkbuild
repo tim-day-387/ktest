@@ -954,7 +954,7 @@ function cmd_analyzer()
 
 # Install the freshly-built lustre/zfs kernel modules into the kernel's
 # /lib/modules/<release> tree so they get bundled into the initramfs (via
-# mk_initramfs --modules) and resolve under modprobe(8) in the VM.  Runs after
+# mk_initramfs) and resolve under modprobe(8) in the VM.  Runs after
 # the kernel's own modules_install, so depmod here regenerates modules.dep with
 # the kernel + lustre + zfs modules together.
 function install_fs_modules()
@@ -1022,7 +1022,7 @@ function cmd_build()
     [[ "$ktest_nvidia" == "1" ]] && purge_build_junk "$ktest_nvidia_build"
 
     run_quiet_with_status "INSTALL FS MODULES [$(basename "$ktest_test")]" "DONE" install_fs_modules
-    run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
+    run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" mk_initramfs
     run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
 
     # The UKI now self-contains kernel + initramfs + modules.  Strip
@@ -1157,7 +1157,7 @@ function cmd_build_native()
     # into the module tree before the initramfs is packed.
     maybe_build_zfs
     maybe_build_nvidia
-    run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
+    run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" mk_initramfs
     run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
 
     # Purge junk from ktest_out to save space
@@ -1205,7 +1205,7 @@ function cmd_package_native()
 
     maybe_build_zfs
     maybe_build_nvidia
-    run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" build_initramfs
+    run_quiet_with_status "INITRAMFS [$(basename "$ktest_test")]" "DONE" mk_initramfs
     run_quiet_with_status "UKI [$(basename "$ktest_test")]" "DONE" build_uki
 
     # Copy kernel image to output directory

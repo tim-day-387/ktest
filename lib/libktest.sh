@@ -707,19 +707,6 @@ build_kernel()
     $DEPMOD -b "$ktest_kernel_binary/" -v $kernel_version
 }
 
-build_initramfs()
-{
-    local initramfs_args=()
-    [[ $ktest_uki_firmware == 1 ]] || initramfs_args+=(--no-firmware)
-    initramfs_args+=(--modules "$ktest_kernel_binary/lib/modules")
-    # ${arr[@]:-} would expand an unset array to a single empty-string
-    # element and silently steal the output-path slot from mk-initramfs.
-    initramfs_args+=(${ktest_initramfs_extra_args[@]+"${ktest_initramfs_extra_args[@]}"})
-
-    mk_initramfs "${initramfs_args[@]}" \
-	"$ktest_kernel_binary/initramfs"
-}
-
 build_uki()
 {
     local uki_arch

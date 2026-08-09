@@ -2,7 +2,10 @@
 #define _GNU_SOURCE
 
 /*
- * init - ktest initramfs /init, runs in two modes selected by /proc/cmdline:
+ * init - the ktest boot binary, installed in the initramfs as
+ * /sbin/ktest-init.  /init (a bash script, see init/initramfs-init.sh)
+ * always drops into a shell; running `boot` there makes /init exec this
+ * binary as PID 1.  Runs in two modes selected by /proc/cmdline:
  *
  *   Standard root: parse root= (and optional rootfstype=), mount that block
  *   device on /newroot, switch_root into it.

@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# The ktest initramfs userspace: a stripped-down Ubuntu image.  mk_initramfs
+# (lib/libinitramfs.sh) builds this image, extracts it, overlays the built
+# kernel's modules (and optionally firmware), and packs the tree into a
+# zstd-compressed cpio.  /init is a bash script that mounts the kernel
+# filesystems and always drops into an interactive bash shell; running
+# `boot` there hands off to /sbin/ktest-init (the compiled boot binary,
+# installed by mk_initramfs), which mounts the root named on the kernel
+# cmdline and starts real init.
+
+ARG BASE=docker.io/library/ubuntu:26.04
+FROM ${BASE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LC_ALL=C \
+    LANG=C
+
+# kmod: modprobe/insmod for the bundled kernel modules.  zstd: decompress
+# firmware blobs and other artifacts by hand (modprobe links libzstd itself).
+# kexec-tools: `boot <kernel-image>` kexecs from the initramfs shell.
+# zfsutils-linux: zpool/zfs for poking at pools from the shell (the zfs and
+# osd_zfs modules ship with the bundled kernel; Lustre roots sit on ZFS OSDs).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends kmod zstd kexec-tools \
+        zfsutils-linux \
+ && rm -rf /var/lib/apt/lists/*
+
+# Keep the image tiny: docs, man pages, locales and caches are useless in an
+# initramfs.
+RUN rm -rf /usr/share/doc /usr/share/man /usr/share/info /usr/share/locale \
+        /var/cache/apt /var/lib/apt/lists /var/log/*
+
+# Root shell dotfiles from skel so the interactive shell is usable.
+RUN install -m 0644 /etc/skel/.bashrc  /root/.bashrc \
+ && install -m 0644 /etc/skel/.profile /root/.profile
+
+# Module parameters for the bundled kernel modules, installed twice:
+# modprobe.d for modprobe(8) run from the shell, /etc/modparams.conf for
+# ktest-init's finit_module(2) loader.  setparams.conf holds the Lustre
+# tunables mount.lustreroot applies after each mount step.
+COPY conf/modparams.conf /etc/modprobe.d/ktest.conf
+COPY conf/modparams.conf /etc/modparams.conf
+COPY conf/setparams.conf /etc/setparams.conf
+
+COPY init/initramfs-init.sh /init
+COPY init/initramfs-boot.sh /usr/local/sbin/boot
+RUN chmod +x /init /usr/local/sbin/boot

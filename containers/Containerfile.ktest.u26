@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y \
     rpm dh-python dkms libcurl4-openssl-dev \
     libpam0g-dev python3-all-dev python3-cffi \
     python3-setuptools python3-sphinx \
-    iptables dnsmasq-base busybox-static zstd linux-firmware lcov && \
+    iptables dnsmasq-base busybox-static zstd linux-firmware lcov podman && \
     chmod 0644 /boot/vmlinuz* && \
     rm -rf /var/lib/apt/lists/*
 
@@ -76,12 +76,21 @@ RUN usermod -l ktest -d /home/ktest -m ubuntu && \
 # can mount onto them regardless of which host uid the invoker maps to.
 # Without this, crun's mkdir fails when the keep-id'd uid isn't ktest (1000)
 # because /home/ktest is 0755 owned by 1000.
+# The .config and .local containers dirs are for the podman remote client
+# (mk_initramfs runs podman against the host socket via CONTAINER_HOST):
+# it stats $HOME/.config and writes podman-connections.json under it, and
+# under keep-id it can't create these itself.
 RUN install -d -m 0777 \
     /home/ktest/git \
     /home/ktest/git/linux \
     /home/ktest/git/lustre-release \
     /home/ktest/git/zfs \
     /home/ktest/git/llvm-project \
+    /home/ktest/.config \
+    /home/ktest/.config/containers \
+    /home/ktest/.local \
+    /home/ktest/.local/share \
+    /home/ktest/.local/share/containers \
     /var/lib/ktest
 
 # Switch to ktest user

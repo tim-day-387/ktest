@@ -9,6 +9,7 @@
 # Author: Timothy Day <timday@amazon.com>
 #
 
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -157,6 +158,27 @@ class ContainerJob:
                 }
             )
 
+        # The initramfs build (lib/libinitramfs.sh) runs `podman` inside the
+        # job container to build and export its container image.  A rootless
+        # keep-id container can't nest another rootless podman, so expose the
+        # host's podman socket instead and point CONTAINER_HOST at it: podman
+        # inside the container transparently goes remote, images build in the
+        # host's storage, and the layer cache is shared across jobs.
+        environment = {}
+        socket_url = get_podman_socket(podman_socket)
+        if socket_url.startswith("unix://"):
+            host_socket = socket_url[len("unix://") :]
+            if os.path.exists(host_socket):
+                mounts.append(
+                    {
+                        "type": "bind",
+                        "source": host_socket,
+                        "target": "/run/podman/podman.sock",
+                        "read_only": False,
+                    }
+                )
+                environment["CONTAINER_HOST"] = "unix:///run/podman/podman.sock"
+
         # Create container (but don't start it yet)
         # Remove auto-remove so we can extract archives after completion
         # Serialize creation to avoid podman keep-id user namespace race,
@@ -183,10 +205,10 @@ class ContainerJob:
             pids_limit=100000,
             overlay_volumes=overlay_volumes,
             mounts=mounts,
+            environment=environment,
             remove=False,
             working_dir=self.working_dir,
         )
-        socket_url = get_podman_socket(podman_socket)
         max_retries = 3
         for attempt in range(max_retries):
             try:

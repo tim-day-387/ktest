@@ -1,19 +1,25 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# libinitramfs.sh - Build a minimal initramfs for ktest VMs
+# libinitramfs.sh - Build the ktest initramfs from a container image
 #
-# Compiles init.c (and the mount.lustreroot helper) and packages them into a
-# zstd-compressed cpio initramfs.  The same /init binary handles both standard
-# root= boots and lustreroot= boots; the decision is made at boot time from
-# /proc/cmdline.  On lustreroot= boots /init imports the ZFS pool and then
-# invokes /sbin/mount.lustreroot to mount the local servers and the client.
+# The initramfs userspace derives from a container image (a stripped-down
+# Ubuntu, see containers/Containerfile.initramfs), the same way root_image
+# derives the VM root filesystems.  /init is a bash script baked into the
+# image that mounts the kernel filesystems and always drops into an
+# interactive bash shell; running `boot` there hands off to /sbin/ktest-init
+# (compiled from init/init.c), which mounts the root named on the kernel
+# cmdline (root= or lustreroot=) and switch_roots into it.  The host-side
+# additions are kernel build artifacts (modules, optionally firmware) and
+# the static init/ binaries.
 
-# mk_initramfs [--no-firmware] [--base <initramfs>] [--modules <path>]
-#              [output-path]
-#   --base       path to an existing initramfs to use as a base (optional)
-#   --modules    path to a modules directory (e.g. $ktest_kernel_binary/lib/modules) to include (optional)
-#   output-path  path for the resulting initramfs image (default: initramfs)
+INITRAMFS_IMAGE_TAG=${INITRAMFS_IMAGE_TAG:-localhost/ktest-initramfs:latest}
+INITRAMFS_IMAGE_BASE=${INITRAMFS_IMAGE_BASE:-docker.io/library/ubuntu:26.04}
+
+# mk_initramfs
+#
+# Bundles the modules from $ktest_kernel_binary/lib/modules, includes firmware
+# when ktest_uki_firmware is set, and writes $ktest_kernel_binary/initramfs.
 #
 # Runs in a subshell so set -euo pipefail and the cleanup trap stay scoped to
 # this build and don't leak into the caller.
@@ -21,20 +27,14 @@
 function mk_initramfs() (
     set -euo pipefail
 
-    local FIRMWARE=true
-    local BASE_INITRAMFS=""
-    local MODULES_DIR=""
-    while [[ $# -gt 0 ]]; do
-	case $1 in
-	    --no-firmware)	FIRMWARE=false; shift ;;
-	    --base)		BASE_INITRAMFS="$(readlink -f "$2")"; shift 2 ;;
-	    --modules)		MODULES_DIR="$(readlink -f "$2")"; shift 2 ;;
-	    *)			break ;;
-	esac
-    done
+    local FIRMWARE=false
+    [[ $ktest_uki_firmware == 1 ]] && FIRMWARE=true
 
-    local OUTPUT="${1:-initramfs}"
-    OUTPUT="$(readlink -f "$OUTPUT")"
+    local MODULES_DIR OUTPUT
+    MODULES_DIR="$(readlink -f "$ktest_kernel_binary/lib/modules")"
+    OUTPUT="$(readlink -f "$ktest_kernel_binary")/initramfs"
+
+    command -v podman &>/dev/null || { echo "podman not found - install podman"; exit 1; }
 
     local FIRMWARE_DIR="$ktest_dir/../linux-firmware"
     # Fall back to the distro firmware tree (e.g. the linux-firmware apt package
@@ -47,43 +47,49 @@ function mk_initramfs() (
     trap 'rm -rf "$TMPDIR"' EXIT
 
     local INITRAMFS="$TMPDIR/initramfs"
-    mkdir -p "$INITRAMFS"/{dev,proc,sys,tmp,mnt,newroot}
+    mkdir -p "$INITRAMFS"
 
-    # Unpack base initramfs if provided
-    if [[ -n "$BASE_INITRAMFS" ]]; then
-	echo "Unpacking base initramfs: $BASE_INITRAMFS"
-	zstd -dcf "$BASE_INITRAMFS" | (cd "$INITRAMFS" && cpio -H newc -i --quiet --make-directories)
-    fi
+    # Build the initramfs container image.  Idempotent - re-runs use podman's
+    # layer cache, so a no-op rebuild is fast.  Build from a staged context
+    # holding only the files the Containerfile COPYs: the whole context is
+    # tarred up per build, and when podman runs remote (CONTAINER_HOST inside
+    # the pk job containers, see podman_ktest/models.py) it would otherwise
+    # stream all of $ktest_dir (.git, target/, ...) over the socket.
+    echo "Building initramfs container image ($INITRAMFS_IMAGE_TAG)..."
+    local CTX="$TMPDIR/context"
+    mkdir -p "$CTX/conf" "$CTX/containers" "$CTX/init"
+    cp "$ktest_dir/conf/modparams.conf" \
+       "$ktest_dir/conf/setparams.conf" "$CTX/conf/"
+    cp "$ktest_dir/containers/Containerfile.initramfs" "$CTX/containers/"
+    cp "$ktest_dir/init/initramfs-init.sh" \
+       "$ktest_dir/init/initramfs-boot.sh" "$CTX/init/"
+    podman build \
+	--build-arg "BASE=$INITRAMFS_IMAGE_BASE" \
+	-f "$CTX/containers/Containerfile.initramfs" \
+	-t "$INITRAMFS_IMAGE_TAG" \
+	"$CTX"
 
-    # Copy kernel modules if provided
-    if [[ -n "$MODULES_DIR" ]]; then
-	echo "Copying modules from $MODULES_DIR..."
-	mkdir -p "$INITRAMFS/lib/modules"
-	cp -a "$MODULES_DIR/." "$INITRAMFS/lib/modules/"
-    fi
+    # Extract the image into the staging tree.  No xattrs: rootless tar can't
+    # set system.* xattrs, and nothing in the initramfs needs file caps - the
+    # shell runs as root anyway.
+    echo "Extracting initramfs container image..."
+    local cid
+    cid=$(podman create "$INITRAMFS_IMAGE_TAG" /bin/true)
+    podman export "$cid" | tar -C "$INITRAMFS" -xf -
+    podman rm "$cid" >/dev/null
 
-    echo "Installing init..."
-    cp "$ktest_dir/init/init" "$INITRAMFS/init"
-
-    echo "Installing mount.lustreroot..."
-    mkdir -p "$INITRAMFS/sbin"
+    # Build and install the boot binaries.  /init execs /sbin/ktest-init
+    # when the shell user runs `boot`; ktest-init hands lustreroot= mounts
+    # off to /sbin/mount.lustreroot (the path is hardcoded in init.c).
+    echo "Building init binaries..."
+    make -C "$ktest_dir/init"
+    echo "Installing ktest-init + mount.lustreroot..."
+    cp "$ktest_dir/init/init" "$INITRAMFS/sbin/ktest-init"
     cp "$ktest_dir/init/mount.lustreroot" "$INITRAMFS/sbin/mount.lustreroot"
 
-    # Module parameters applied by /init at finit_module() time; see
-    # conf/modparams.conf for the syntax.
-    if [[ -e "$ktest_dir/conf/modparams.conf" ]]; then
-	echo "Installing modparams.conf..."
-	mkdir -p "$INITRAMFS/etc"
-	cp "$ktest_dir/conf/modparams.conf" "$INITRAMFS/etc/modparams.conf"
-    fi
-
-    # Lustre tunables applied by mount.lustreroot after each mount step; see
-    # conf/setparams.conf for the syntax.
-    if [[ -e "$ktest_dir/conf/setparams.conf" ]]; then
-	echo "Installing setparams.conf..."
-	mkdir -p "$INITRAMFS/etc"
-	cp "$ktest_dir/conf/setparams.conf" "$INITRAMFS/etc/setparams.conf"
-    fi
+    echo "Copying modules from $MODULES_DIR..."
+    mkdir -p "$INITRAMFS/lib/modules"
+    cp -a "$MODULES_DIR/." "$INITRAMFS/lib/modules/"
 
     # Populate firmware. Copy /lib/firmware first as a base so distro-packaged
     # firmware fills any gaps (e.g. GPU firmware not yet in linux-firmware upstream),
@@ -108,23 +114,21 @@ function mk_initramfs() (
 	# wholesale copies above still matter: i915/nvidia/iwlwifi pick some blob
 	# names at runtime (GuC/GSP images, ucode API fallback) that
 	# MODULE_FIRMWARE doesn't declare.
-	if [[ -d "$INITRAMFS/lib/modules" ]]; then
-	    echo "Copying firmware declared by packaged modules..."
-	    { find "$INITRAMFS/lib/modules" -name '*.ko*' -print0 \
-		  | xargs -0 -r modinfo -F firmware 2>/dev/null || true; \
-	      cat "$INITRAMFS"/lib/modules/*/modules.builtin.modinfo 2>/dev/null \
-		  | tr '\0' '\n' | sed -n 's/^[^=]*\.firmware=//p' || true; } \
-		| sort -u \
-		| while read -r fw; do
-		    for src in "${fw_srcs[@]}"; do
-			for f in "$src/$fw" "$src/$fw.zst" "$src/$fw.xz"; do
-			    [[ -e "$f" ]] || continue
-			    mkdir -p "$INITRAMFS/lib/firmware/$(dirname "$fw")"
-			    cp "$f" "$INITRAMFS/lib/firmware/$(dirname "$fw")/"
-			done
+	echo "Copying firmware declared by packaged modules..."
+	{ find "$INITRAMFS/lib/modules" -name '*.ko*' -print0 \
+	      | xargs -0 -r modinfo -F firmware 2>/dev/null || true; \
+	  cat "$INITRAMFS"/lib/modules/*/modules.builtin.modinfo 2>/dev/null \
+	      | tr '\0' '\n' | sed -n 's/^[^=]*\.firmware=//p' || true; } \
+	    | sort -u \
+	    | while read -r fw; do
+		for src in "${fw_srcs[@]}"; do
+		    for f in "$src/$fw" "$src/$fw.zst" "$src/$fw.xz"; do
+			[[ -e "$f" ]] || continue
+			mkdir -p "$INITRAMFS/lib/firmware/$(dirname "$fw")"
+			cp "$f" "$INITRAMFS/lib/firmware/$(dirname "$fw")/"
 		    done
-		done || true
-	fi
+		done
+	    done || true
 	cp "$FIRMWARE_DIR/regulatory.db" "$FIRMWARE_DIR/regulatory.db.p7s" "$INITRAMFS/lib/firmware/" 2>/dev/null || \
 	    cp /lib/firmware/regulatory.db /lib/firmware/regulatory.db.p7s "$INITRAMFS/lib/firmware/" 2>/dev/null || \
 	    echo "Warning: regulatory.db not found, WiFi regulatory domain will be unavailable"
