@@ -1,7 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# ktest initramfs /init - always boots to an interactive bash shell.
+# ktest initramfs /init - boots to an interactive bash shell, unless
+# ktest.bootnow on the kernel cmdline says to boot straight through.
 #
 # The initramfs userspace is a stripped-down Ubuntu container image (see
 # containers/Containerfile.initramfs); mk_initramfs overlays the freshly
@@ -16,6 +17,12 @@
 # respawns the shell.  If ktest-init fails it execs back into this script
 # (with the ktest-boot-failed argument), landing in the shell again instead
 # of panicking PID 1 - so the mounts below must tolerate re-entry.
+#
+# ktest.bootnow on the kernel cmdline (the ktest VMs pass it by default)
+# skips the shell entirely: `boot --now` preloads the boot-path modules and
+# arms the handoff, and ktest-init boots from the real /proc/cmdline.  A
+# failed boot still comes back to the shell - the ktest-boot-failed
+# re-entry doesn't honor the flag, so a bad root can't boot-loop.
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export HOME=/root
@@ -43,6 +50,18 @@ dmesg -n 4
 # kernels) must be loaded by hand before the shell can read the keyboard.
 # Serial consoles work without any of these; missing modules are ignored.
 modprobe -a -q xhci_pci ehci_pci ohci_pci uhci_hcd usbhid hid_generic atkbd
+
+# Instant boot: hand off without ever spawning a shell.  Skipped on the
+# ktest-boot-failed re-entry so a failing boot lands in the shell below
+# instead of looping.  If `boot --now` itself fails, fall through too.
+if [[ ${1-} != ktest-boot-failed ]] && grep -qw 'ktest\.bootnow' /proc/cmdline; then
+    boot --now
+    if [[ -e /run/ktest-boot && -x /sbin/ktest-init ]]; then
+	rm -f /run/ktest-boot
+	exec /sbin/ktest-init
+    fi
+    echo "ktest.bootnow: handoff failed, dropping to the initramfs shell"
+fi
 
 # PID 1 must never exit or the kernel panics; respawn the shell forever.
 # setsid --ctty gives the shell a controlling terminal so job control works.

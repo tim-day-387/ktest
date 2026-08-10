@@ -6,8 +6,9 @@
 # The initramfs userspace derives from a container image (a stripped-down
 # Ubuntu, see containers/Containerfile.initramfs), the same way root_image
 # derives the VM root filesystems.  /init is a bash script baked into the
-# image that mounts the kernel filesystems and always drops into an
-# interactive bash shell; running `boot` there hands off to /sbin/ktest-init
+# image that mounts the kernel filesystems and drops into an interactive
+# bash shell (or boots straight through when ktest.bootnow is on the kernel
+# cmdline, as the ktest VMs pass by default); `boot` hands off to /sbin/ktest-init
 # (compiled from init/init.c), which mounts the root named on the kernel
 # cmdline (root= or lustreroot=) and switch_roots into it.  The host-side
 # additions are kernel build artifacts (modules, optionally firmware) and

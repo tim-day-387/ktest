@@ -9,6 +9,12 @@
 # loads the boot-path modules, parses root=/lustreroot=, mounts the root on
 # /newroot and switch_roots into it.
 #
+# With --now (how /init calls this when ktest.bootnow is on the kernel
+# cmdline - the ktest VMs pass it by default) the handoff skips the shell
+# mechanics: modules are preloaded and /run/ktest-boot is flagged, but no
+# cmdline is staged - ktest-init reads the kernel's real /proc/cmdline -
+# and there is no shell to signal; /init execs ktest-init itself.
+#
 # Given a UKI path it kexecs into that image instead; the UKI carries its
 # own initrd.  The initramfs image ships kexec-tools >= 2.0.30, which has
 # the UKI loader (see Documentation/kexec-uki.md).  The kexec path also
@@ -50,6 +56,9 @@ The default cmdline is:
   $default_cmdline
 
 Options:
+      --now              non-interactive handoff: preload modules and arm
+                         the boot with the running kernel's cmdline; used
+                         by /init when ktest.bootnow is on the cmdline
   -d, --device DEV       lustreroot boot device (default /dev/nvme1n1p1)
   -f, --fsname NAME      lustre fsname (default dd961847)
   -m, --module-opt K=V   override a module option on the cmdline, e.g.
@@ -63,6 +72,7 @@ EOF
 
 kernel=
 no_exec=false
+boot_now=false
 device=
 fsname=
 module_opts=()
@@ -79,6 +89,10 @@ while [[ $# -gt 0 ]]; do
 	    ;;
 	-n|--no-exec)
 	    no_exec=true
+	    shift
+	    ;;
+	--now)
+	    boot_now=true
 	    shift
 	    ;;
 	-d|--device)
@@ -123,6 +137,13 @@ done
 
 if [[ $(id -u) -ne 0 ]]; then
     echo "boot: must be root - re-run under sudo" >&2
+    exit 1
+fi
+
+# --now hands off with the running kernel's cmdline as-is; every other
+# option edits the built-in default cmdline or kexecs, so none compose.
+if $boot_now && { $no_exec || [[ -n $kernel || -n $device || -n $fsname || ${#module_opts[@]} -gt 0 ]]; }; then
+    echo "boot: --now uses the running kernel's cmdline and takes no other options" >&2
     exit 1
 fi
 
@@ -227,6 +248,15 @@ if [[ ! -e /init || ! -x /sbin/ktest-init ]]; then
 fi
 
 modprobe -a -q nvme zfs lnet ksocklnd lustre osd_zfs || true
+
+if $boot_now; then
+    # ktest.bootnow handoff, called from /init before any shell exists:
+    # nothing is staged in /run/ktest-cmdline, so ktest-init falls back to
+    # the kernel's real /proc/cmdline (where the ktest VMs put the root),
+    # and /init execs ktest-init itself once this returns.
+    touch /run/ktest-boot
+    exit 0
+fi
 
 # Stage the assembled cmdline where ktest-init looks before falling back
 # to /proc/cmdline; ktest-init consumes the file.
