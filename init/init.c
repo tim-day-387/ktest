@@ -540,6 +540,10 @@ static int standard_main(char *cmdline)
 		usleep(100000);
 	}
 
+	/* The initramfs image ships without /newroot; the lustre path gets
+	 * it from mount.lustreroot, here we make it ourselves. */
+	mkdir(MOUNTPOINT, 0755);
+
 	if (rootfstype[0]) {
 		if (mount(rootspec, MOUNTPOINT, rootfstype, 0, NULL) < 0) {
 			kmsg_log(KMSG_ERR, "mount %s as %s: %s\n",
@@ -556,6 +560,10 @@ static int standard_main(char *cmdline)
 				mounted = 1;
 				break;
 			}
+			/* A probe miss is EINVAL; anything else (ENOENT,
+			 * ENODEV...) means more than a wrong guess. */
+			kmsg_log(KMSG_INFO, "mount %s as %s: %s\n",
+				 rootspec, fstypes[i], strerror(errno));
 		}
 		if (!mounted) {
 			kmsg_log(KMSG_ERR, "no fstype matched %s\n", rootspec);
