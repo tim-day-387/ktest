@@ -59,6 +59,11 @@ email = "timday@thelustrecollective.com"
 
 [templates]
 log = 'format_gerrit_link(self) ++ builtin_log_oneline'
+commit_trailers = 'format_signed_off_by_trailer(self)'
+
+[[--scope]]
+--when.repositories = ["~/ws/lustre-release"]
+[--scope.templates]
 commit_trailers = 'format_signed_off_by_trailer(self) ++ format_gerrit_change_id_trailer(self)'
 
 [revset-aliases]
