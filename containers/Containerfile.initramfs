@@ -36,9 +36,10 @@ RUN install -m 0644 /etc/skel/.bashrc  /root/.bashrc \
  && install -m 0644 /etc/skel/.profile /root/.profile
 
 # Module parameters for the bundled kernel modules, installed twice:
-# modprobe.d for modprobe(8) run from the shell, /etc/modparams.conf for
-# ktest-init's finit_module(2) loader.  setparams.conf holds the Lustre
-# tunables mount.lustreroot applies after each mount step.
+# modprobe.d for modprobe(8), which the initramfs scripts load all modules
+# with, and /etc/modparams.conf for ktest-init to install into the new
+# root's modprobe.d.  setparams.conf holds the Lustre tunables
+# mount.lustreroot applies after each mount step.
 COPY conf/modparams.conf /etc/modprobe.d/ktest.conf
 COPY conf/modparams.conf /etc/modparams.conf
 COPY conf/setparams.conf /etc/setparams.conf

@@ -3,43 +3,10 @@
 #
 # boot - hand control onward from the initramfs shell.
 #
-# Installed as /usr/local/sbin/boot in the initramfs.  With no arguments it
-# mounts the root named on the kernel cmdline and starts real init: it flags
-# PID 1 (/init) and exits the shell; /init then execs /sbin/ktest-init, which
-# loads the boot-path modules, parses root=/lustreroot=, mounts the root on
-# /newroot and switch_roots into it.
-#
-# With --now (how /init calls this when ktest.bootnow is on the kernel
-# cmdline - the ktest VMs pass it by default) the handoff skips the shell
-# mechanics: modules are preloaded and /run/ktest-boot is flagged, but no
-# cmdline is staged - ktest-init reads the kernel's real /proc/cmdline -
-# and there is no shell to signal; /init execs ktest-init itself.
-#
-# Given a UKI path it kexecs into that image instead; the UKI carries its
-# own initrd.  The initramfs image ships kexec-tools >= 2.0.30, which has
-# the UKI loader (see Documentation/kexec-uki.md).  The kexec path also
-# works from a booted system (sudo init/initramfs-boot.sh <image>); there
-# the jump goes through systemctl kexec so filesystems unmount cleanly.
-#
-# Both paths use the default cmdline below rather than the running kernel's:
-# -d/-f swap the lustreroot device and fsname, -m overrides or appends
-# module options (module_blacklist=, drm.panic_disabled=, mod.param=...).
-# kexec passes the result as the new kernel's cmdline; the no-argument
-# handoff stages it in /run/ktest-cmdline, which ktest-init prefers over
-# /proc/cmdline.  Note that on the handoff path the kernel has already
-# booted, so -m overrides are seen by ktest-init but cannot change what the
-# running kernel did with its real cmdline.
-#
-# The modules are pre-loaded here with modprobe(8) first: modprobe resolves
-# aliases and '-'/'_' spelling that ktest-init's own modules.dep loader has
-# tripped on (e.g. osd_zfs), and ktest-init treats already-loaded modules as
-# no-ops.  Parameters come from /etc/modprobe.d as usual.
 
-# The cmdline `boot` assumes; -d/-f/-m rewrite pieces of it and the
-# BOOT_IMAGE= token tracks the kernel actually being kexec'd.
 default_cmdline='root=/dev/lustre rw lustreroot=rootfs,device=/dev/nvme1n1p1,fsname=dd961847 module_blacklist=nouveau audit=0 drm.panic_disabled=1'
 
-usage() {
+function usage() {
     cat <<EOF
 Usage: boot [OPTION]... [KERNEL-IMAGE]
 
@@ -56,9 +23,9 @@ The default cmdline is:
   $default_cmdline
 
 Options:
-      --now              non-interactive handoff: preload modules and arm
-                         the boot with the running kernel's cmdline; used
-                         by /init when ktest.bootnow is on the cmdline
+      --now              non-interactive handoff: arm the boot with the
+                         running kernel's cmdline; used by /init when
+                         ktest.bootnow is on the cmdline
   -d, --device DEV       lustreroot boot device (default /dev/nvme1n1p1)
   -f, --fsname NAME      lustre fsname (default dd961847)
   -m, --module-opt K=V   override a module option on the cmdline, e.g.
@@ -77,7 +44,7 @@ device=
 fsname=
 module_opts=()
 
-need_value() {
+function need_value() {
     [[ $# -ge 2 ]] || { echo "boot: $1 needs a value" >&2; exit 1; }
 }
 
@@ -152,7 +119,7 @@ fi
 # being kexec'd, then apply -m overrides - each replaces the token sharing
 # its key (module_blacklist=..., drm.panic_disabled=..., mod.param=...) or
 # is appended when no token matches.
-build_cmdline() {
+function build_cmdline() {
     local -a toks parts
     local i p opt key hit
 
@@ -212,9 +179,9 @@ if [[ -n $kernel ]]; then
     fi
 
     # Wifi won't re-init across kexec without a hardware reset - unload the
-    # driver behind every wireless netdev and FLR-reset the device.  The
-    # initramfs never loads wifi drivers itself, so this is a no-op unless
-    # the shell user brought wifi up by hand.
+    # driver behind every wireless netdev and FLR-reset the device.  /init
+    # loads the wifi drivers at startup, so on wifi hardware this always
+    # runs.
     for dev in /sys/class/net/*; do
 	[[ -e $dev/phy80211 && -e $dev/device/driver/module ]] || continue
 	pci=$(basename "$(readlink -f "$dev/device")")
@@ -246,8 +213,6 @@ if [[ ! -e /init || ! -x /sbin/ktest-init ]]; then
     echo "boot: not in the ktest initramfs - pass a kernel image to kexec" >&2
     exit 1
 fi
-
-modprobe -a -q nvme zfs lnet ksocklnd lustre osd_zfs || true
 
 if $boot_now; then
     # ktest.bootnow handoff, called from /init before any shell exists:

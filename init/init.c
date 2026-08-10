@@ -12,8 +12,8 @@
  *   device on /newroot, switch_root into it.
  *
  *   Lustre root: when lustreroot=<pool>,device=<path>[,fsname=<name>] is
- *   present, load ZFS+Lustre modules, import the ZFS pool from the boot
- *   device, hand off to mount.lustreroot to bring up the local servers
+ *   present, import the ZFS pool from the boot device, hand off to
+ *   mount.lustreroot to bring up the local servers
  *   (MGS/MDT + OSTs) and mount the client on /newroot, then switch_root.
  *
  * Build (standalone, outside kernel tree):
@@ -33,7 +33,6 @@
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
-#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -48,54 +47,6 @@
 
 /* Path to the Lustre mount helper bundled alongside /init in the initramfs. */
 #define MOUNT_LUSTREROOT	"/sbin/mount.lustreroot"
-
-/*
- * load_modules - load all required ZFS and Lustre modules
- *
- * For each entry, resolves its path via modules.dep, then recursively loads
- * all transitive dependencies (depth-first) before loading the module itself.
- * Returns 0 if all modules loaded successfully, -1 on the first failure.
- */
-static int load_modules(void)
-{
-	static const char * const modules[] = {
-		/* NVMe block device */
-		"nvme_core",
-		"nvme",
-		/* ZFS */
-		"zfs",
-		/* Lustre networking */
-		"lnet",
-		"ksocklnd",
-		/* Lustre client and OSD */
-		"lustre",
-		"osd_zfs",
-		/* Hardware drivers */
-		"iwlwifi",	/* laptop Wi-Fi (Intel) */
-		"iwlmvm",
-		"mt7921e",	/* desktop Wi-Fi (MediaTek MT7921K/RZ608) */
-		"i915",
-		"nouveau",
-		NULL,
-	};
-	struct utsname uts;
-	int ret = 0;
-	int i;
-
-	if (uname(&uts) < 0) {
-		kmsg_log(KMSG_ERR, "uname: %s\n", strerror(errno));
-		return -1;
-	}
-
-	for (i = 0; modules[i]; i++) {
-		kmsg_log(KMSG_INFO, "loading module %s\n", modules[i]);
-		if (load_one_module(modules[i], uts.release) < 0) {
-			kmsg_log(KMSG_ERR, "failed to load %s\n", modules[i]);
-			ret = -1;
-		}
-	}
-	return ret;
-}
 
 /*
  * find_cmdline_arg - locate a named argument in a kernel cmdline string
@@ -395,8 +346,8 @@ static void copy_initramfs_to_newroot(void)
  *
  * /etc/modparams.conf (see ktest's conf/modparams.conf) uses modprobe.d(5)
  * "options" syntax, so installing it as a modprobe.d file makes modules
- * loaded after switch_root via modprobe(8) pick up the same parameters
- * /init applied in the initramfs.
+ * loaded after switch_root via modprobe(8) pick up the same parameters the
+ * initramfs's modprobe.d applied before the handoff.
  */
 static void install_modparams_to_newroot(void)
 {
@@ -663,7 +614,7 @@ int main(void)
 
 	/*
 	 * Disable /dev/kmsg ratelimiting.  The boot path emits a burst of
-	 * diagnostics (module loads, ZFS import, per-target mounts) and the
+	 * diagnostics (ZFS import, per-target mounts) and the
 	 * default ratelimiter silently drops them ("N output lines suppressed
 	 * due to ratelimiting"), hiding exactly the lines needed to debug a
 	 * failed mount.  Safe because no cmdline printk.devkmsg= locked it.
@@ -697,13 +648,11 @@ int main(void)
 	kmsg_log(KMSG_INFO, "cmdline: %s", cmdline);
 
 	/*
-	 * Load kernel modules before dispatching to either boot path: the
-	 * standard root may live on a device whose driver (e.g. nvme) is built
-	 * as a module, and the lustre path needs the ZFS/Lustre stack.
+	 * Modules are not loaded here: /init (init/initramfs-init.sh) loads
+	 * everything with modprobe(8) before the shell or any handoff, so
+	 * both the standard root's block driver (e.g. nvme) and the lustre
+	 * path's ZFS/Lustre stack are already in place.
 	 */
-	if (load_modules() < 0)
-		kmsg_log(KMSG_INFO, "module loading failed, continuing anyway\n");
-
 	if (find_cmdline_arg(cmdline, "lustreroot"))
 		lustre_main(cmdline);
 	else

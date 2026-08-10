@@ -2,7 +2,7 @@
 
 # Builds the initramfs /init, the mount.lustreroot helper and the zimport
 # CLI.  All are linked statically so they run without shared libs, and all
-# share init-common.c (kmsg logging + module loading); init and zimport
+# share init-common.c (kmsg logging + lustre tunables); init and zimport
 # also share zfs-import.c (the raw-ioctl pool importer).
 
 CC      ?= cc
