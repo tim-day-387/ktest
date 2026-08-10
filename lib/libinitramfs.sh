@@ -83,9 +83,10 @@ function mk_initramfs() (
     # off to /sbin/mount.lustreroot (the path is hardcoded in init.c).
     echo "Building init binaries..."
     make -C "$ktest_dir/init"
-    echo "Installing ktest-init + mount.lustreroot..."
+    echo "Installing ktest-init + mount.lustreroot + zimport..."
     cp "$ktest_dir/init/init" "$INITRAMFS/sbin/ktest-init"
     cp "$ktest_dir/init/mount.lustreroot" "$INITRAMFS/sbin/mount.lustreroot"
+    cp "$ktest_dir/init/zimport" "$INITRAMFS/sbin/zimport"
 
     echo "Copying modules from $MODULES_DIR..."
     mkdir -p "$INITRAMFS/lib/modules"

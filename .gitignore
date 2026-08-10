@@ -14,6 +14,7 @@ ltp-fsx/ltp-fsx
 
 init/init
 init/mount.lustreroot
+init/zimport
 
 tests/fs/bcachefs/bcachefs-tools
 tests/fs/bcachefs/linuxquota
