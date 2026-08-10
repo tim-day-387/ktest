@@ -13,7 +13,9 @@
 # Running `boot` in the shell mounts the root named on the kernel cmdline
 # and starts real init: it flags /run/ktest-boot and exits the shell, and
 # the loop below then execs /sbin/ktest-init as PID 1.  A plain `exit` just
-# respawns the shell.
+# respawns the shell.  If ktest-init fails it execs back into this script
+# (with the ktest-boot-failed argument), landing in the shell again instead
+# of panicking PID 1 - so the mounts below must tolerate re-entry.
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export HOME=/root
@@ -21,14 +23,14 @@ export HOME=/root
 # without this clear(1) and friends fall back to a dumb terminal.
 export TERM=linux
 
-mount -t proc     -o nosuid,nodev,noexec proc     /proc
-mount -t sysfs    -o nosuid,nodev,noexec sysfs    /sys
-mount -t devtmpfs -o nosuid              devtmpfs /dev
+mountpoint -q /proc    || mount -t proc     -o nosuid,nodev,noexec proc     /proc
+mountpoint -q /sys     || mount -t sysfs    -o nosuid,nodev,noexec sysfs    /sys
+mountpoint -q /dev     || mount -t devtmpfs -o nosuid              devtmpfs /dev
 mkdir -p /dev/pts /dev/shm
-mount -t devpts   -o nosuid,noexec,gid=5,mode=620 devpts /dev/pts
-mount -t tmpfs    -o nosuid,nodev                 tmpfs  /dev/shm
-mount -t tmpfs    -o nosuid,nodev                 tmpfs  /run
-mount -t tmpfs                                    tmpfs  /tmp
+mountpoint -q /dev/pts || mount -t devpts   -o nosuid,noexec,gid=5,mode=620 devpts /dev/pts
+mountpoint -q /dev/shm || mount -t tmpfs    -o nosuid,nodev                 tmpfs  /dev/shm
+mountpoint -q /run     || mount -t tmpfs    -o nosuid,nodev                 tmpfs  /run
+mountpoint -q /tmp     || mount -t tmpfs                                    tmpfs  /tmp
 
 # Quiet the console: only err and worse may print, so kernel chatter (late
 # module loads, firmware probes) stops scribbling over the shell.  The full
@@ -49,8 +51,15 @@ modprobe -a -q xhci_pci ehci_pci ohci_pci uhci_hcd usbhid hid_generic atkbd
 while true; do
     clear 2>/dev/null || printf '\033[H\033[2J'
     echo "ktest initramfs: bash shell ('boot' mounts the root and starts init)"
+    if [[ ${1-} == ktest-boot-failed ]]; then
+	echo "boot failed - back in the initramfs shell, dmesg has the log"
+	shift
+    fi
     setsid --ctty --wait bash -l
     if [[ -e /run/ktest-boot && -x /sbin/ktest-init ]]; then
+	# Consume the flag: if ktest-init fails and execs back into this
+	# script, a stale flag would re-run it instead of holding the shell.
+	rm -f /run/ktest-boot
 	exec /sbin/ktest-init
     fi
 done

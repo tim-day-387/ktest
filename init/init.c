@@ -1043,6 +1043,22 @@ static void switch_root_and_exec(void)
 }
 
 /*
+ * exec_initramfs_shell - drop back to the initramfs shell after a failed boot
+ *
+ * /init (the bash script) respawns the interactive shell; its filesystem
+ * setup is idempotent, and the "ktest-boot-failed" argument makes it announce
+ * the failure on the fresh shell's screen.  Returns only if the exec itself
+ * fails (e.g. the root was already moved by switch_root_and_exec); the
+ * caller then exits, panicking PID 1.
+ */
+static void exec_initramfs_shell(void)
+{
+	kmsg_log(KMSG_ERR, "boot failed, returning to the initramfs shell\n");
+	execl("/init", "init", "ktest-boot-failed", (char *)NULL);
+	kmsg_log(KMSG_ERR, "exec /init: %s\n", strerror(errno));
+}
+
+/*
  * standard_main - mount the block device named by root= and switch into it.
  *
  * Filesystem type comes from rootfstype= when present, otherwise a small
@@ -1224,6 +1240,7 @@ int main(void)
 		kmsg_log(KMSG_ERR, "cannot read %s\n", CMDLINE_PATH);
 		if (f)
 			fclose(f);
+		exec_initramfs_shell();
 		return 1;
 	}
 	fclose(f);
@@ -1244,6 +1261,6 @@ int main(void)
 		standard_main(cmdline);
 
 	/* Boot path failed (success paths exec into the new root) */
-	kmsg_log(KMSG_ERR, "boot failed\n");
+	exec_initramfs_shell();
 	return 1;
 }
