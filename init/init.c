@@ -5,7 +5,8 @@
  * init - the ktest boot binary, installed in the initramfs as
  * /sbin/ktest-init.  /init (a bash script, see init/initramfs-init.sh)
  * always drops into a shell; running `boot` there makes /init exec this
- * binary as PID 1.  Runs in two modes selected by /proc/cmdline:
+ * binary as PID 1.  Runs in two modes selected by the cmdline - the one
+ * `boot` staged in /run/ktest-cmdline when present, else /proc/cmdline:
  *
  *   Standard root: parse root= (and optional rootfstype=), mount that block
  *   device on /newroot, switch_root into it.
@@ -39,6 +40,9 @@
 /* Where the whole initramfs is preserved on the new root across switch_root. */
 #define INITRAMFS_SAVE	"/init.initramfs"
 #define CMDLINE_PATH	"/proc/cmdline"
+/* Cmdline assembled by the initramfs `boot` script (defaults plus its
+ * -d/-f/-m overrides); preferred over CMDLINE_PATH and consumed on read. */
+#define CMDLINE_STAGED_PATH	"/run/ktest-cmdline"
 #define CMDLINE_MAX	4096
 
 /* Path to the Lustre mount helper bundled alongside /init in the initramfs. */
@@ -1235,9 +1239,16 @@ int main(void)
 		}
 	}
 
-	f = fopen(CMDLINE_PATH, "r");
+	f = fopen(CMDLINE_STAGED_PATH, "r");
+	if (f) {
+		kmsg_log(KMSG_INFO, "using cmdline staged by boot at %s\n",
+			 CMDLINE_STAGED_PATH);
+		unlink(CMDLINE_STAGED_PATH);
+	} else {
+		f = fopen(CMDLINE_PATH, "r");
+	}
 	if (!f || !fgets(cmdline, sizeof(cmdline), f)) {
-		kmsg_log(KMSG_ERR, "cannot read %s\n", CMDLINE_PATH);
+		kmsg_log(KMSG_ERR, "cannot read cmdline\n");
 		if (f)
 			fclose(f);
 		exec_initramfs_shell();
