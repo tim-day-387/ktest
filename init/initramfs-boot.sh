@@ -13,7 +13,8 @@ Usage: boot [OPTION]... [KERNEL-IMAGE]
 With no arguments, mount the root named on the default cmdline and hand off
 to real init (/sbin/ktest-init).
 
-With KERNEL-IMAGE, kexec into that UKI instead with the default cmdline;
+With KERNEL-IMAGE, kexec into that UKI instead with the default cmdline
+plus ktest.bootnow, so the new kernel boots straight through its initramfs;
 the UKI carries its own initrd.  A bare name is also looked up under /boot
 (mount it here first), e.g. \`boot UkImage-v16-7.1\`.  This works from a
 booted system too, where the jump goes through systemctl kexec for a clean
@@ -23,9 +24,6 @@ The default cmdline is:
   $default_cmdline
 
 Options:
-      --now              non-interactive handoff: arm the boot with the
-                         running kernel's cmdline; used by /init when
-                         ktest.bootnow is on the cmdline
   -d, --device DEV       lustreroot boot device (default /dev/nvme1n1p1)
   -f, --fsname NAME      lustre fsname (default dd961847)
   -m, --module-opt K=V   override a module option on the cmdline, e.g.
@@ -39,7 +37,6 @@ EOF
 
 kernel=
 no_exec=false
-boot_now=false
 device=
 fsname=
 module_opts=()
@@ -56,10 +53,6 @@ while [[ $# -gt 0 ]]; do
 	    ;;
 	-n|--no-exec)
 	    no_exec=true
-	    shift
-	    ;;
-	--now)
-	    boot_now=true
 	    shift
 	    ;;
 	-d|--device)
@@ -107,18 +100,7 @@ if [[ $(id -u) -ne 0 ]]; then
     exit 1
 fi
 
-# --now hands off with the running kernel's cmdline as-is; every other
-# option edits the built-in default cmdline or kexecs, so none compose.
-if $boot_now && { $no_exec || [[ -n $kernel || -n $device || -n $fsname || ${#module_opts[@]} -gt 0 ]]; }; then
-    echo "boot: --now uses the running kernel's cmdline and takes no other options" >&2
-    exit 1
-fi
-
-# Assemble the cmdline from default_cmdline: swap the device=/fsname=
-# fields inside the lustreroot= token, point BOOT_IMAGE= at the kernel
-# being kexec'd, then apply -m overrides - each replaces the token sharing
-# its key (module_blacklist=..., drm.panic_disabled=..., mod.param=...) or
-# is appended when no token matches.
+# Assemble the cmdline from default_cmdline
 function build_cmdline() {
     local -a toks parts
     local i p opt key hit
@@ -159,12 +141,11 @@ function build_cmdline() {
 }
 
 if [[ -n $kernel ]]; then
-    # A bare name resolves under /boot, mirroring where qlkbuild installs
-    # the UkImage-* UKIs.
+    # A bare name resolves under /boot
     [[ -e $kernel || ! -e /boot/$kernel ]] || kernel=/boot/$kernel
     [[ -e $kernel ]] || { echo "boot: kernel image not found: $kernel" >&2; exit 1; }
 
-    cmdline=$(build_cmdline)
+    cmdline="$(build_cmdline) ktest.bootnow"
     echo "Staging: $kernel"
     echo "cmdline: $cmdline"
     kexec -l "$kernel" --command-line "$cmdline" || {
@@ -212,15 +193,6 @@ fi
 if [[ ! -e /init || ! -x /sbin/ktest-init ]]; then
     echo "boot: not in the ktest initramfs - pass a kernel image to kexec" >&2
     exit 1
-fi
-
-if $boot_now; then
-    # ktest.bootnow handoff, called from /init before any shell exists:
-    # nothing is staged in /run/ktest-cmdline, so ktest-init falls back to
-    # the kernel's real /proc/cmdline (where the ktest VMs put the root),
-    # and /init execs ktest-init itself once this returns.
-    touch /run/ktest-boot
-    exit 0
 fi
 
 # Stage the assembled cmdline where ktest-init looks before falling back

@@ -32,22 +32,15 @@ MODULES=(
 )
 modprobe -a -q "${MODULES[@]}"
 
-# Instant boot: hand off without ever spawning a shell.  Skipped on the
-# ktest-boot-failed re-entry so a failing boot lands in the shell below
-# instead of looping.  If `boot --now` itself fails, fall through too.
+# Instant boot: hand off without ever spawning a shell
 if [[ ${1-} != ktest-boot-failed ]] && grep -qw 'ktest\.bootnow' /proc/cmdline; then
-    boot --now
-    if [[ -e /run/ktest-boot && -x /sbin/ktest-init ]]; then
-	rm -f /run/ktest-boot
+    if [[ -x /sbin/ktest-init ]]; then
 	exec /sbin/ktest-init
     fi
     echo "ktest.bootnow: handoff failed, dropping to the initramfs shell"
 fi
 
-# PID 1 must never exit or the kernel panics; respawn the shell forever.
-# setsid --ctty gives the shell a controlling terminal so job control works.
-# Clear the boot scrollback before each shell so it starts on a clean
-# screen; dmesg still has the full log.
+# PID 1 must never exit or the kernel panics
 while true; do
     clear 2>/dev/null || printf '\033[H\033[2J'
     echo "ktest initramfs: bash shell ('boot' mounts the root and starts init)"
