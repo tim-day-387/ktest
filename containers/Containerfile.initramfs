@@ -44,6 +44,6 @@ COPY conf/modparams.conf /etc/modprobe.d/ktest.conf
 COPY conf/modparams.conf /etc/modparams.conf
 COPY conf/setparams.conf /etc/setparams.conf
 
-COPY init/initramfs-init.sh /init
-COPY init/initramfs-boot.sh /usr/local/sbin/boot
+COPY init/init /init
+COPY init/boot /usr/local/sbin/boot
 RUN chmod +x /init /usr/local/sbin/boot

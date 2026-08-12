@@ -62,8 +62,8 @@ function mk_initramfs() (
     cp "$ktest_dir/conf/modparams.conf" \
        "$ktest_dir/conf/setparams.conf" "$CTX/conf/"
     cp "$ktest_dir/containers/Containerfile.initramfs" "$CTX/containers/"
-    cp "$ktest_dir/init/initramfs-init.sh" \
-       "$ktest_dir/init/initramfs-boot.sh" "$CTX/init/"
+    cp "$ktest_dir/init/init" \
+       "$ktest_dir/init/boot" "$CTX/init/"
     podman build \
 	--build-arg "BASE=$INITRAMFS_IMAGE_BASE" \
 	-f "$CTX/containers/Containerfile.initramfs" \
@@ -85,7 +85,7 @@ function mk_initramfs() (
     echo "Building init binaries..."
     make -C "$ktest_dir/init"
     echo "Installing ktest-init + mount.lustreroot + zimport..."
-    cp "$ktest_dir/init/init" "$INITRAMFS/sbin/ktest-init"
+    cp "$ktest_dir/init/ktest-init" "$INITRAMFS/sbin/ktest-init"
     cp "$ktest_dir/init/mount.lustreroot" "$INITRAMFS/sbin/mount.lustreroot"
     cp "$ktest_dir/init/zimport" "$INITRAMFS/sbin/zimport"
 

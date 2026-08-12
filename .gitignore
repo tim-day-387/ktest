@@ -12,7 +12,7 @@ lib/supervisor
 
 ltp-fsx/ltp-fsx
 
-init/init
+init/ktest-init
 init/mount.lustreroot
 init/zimport
 

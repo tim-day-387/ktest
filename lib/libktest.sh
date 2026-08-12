@@ -280,7 +280,7 @@ start_vm()
     fi
     kernelargs+=(mitigations=off)
     # Boot straight through the initramfs shell: /init sees ktest.bootnow
-    # and hands off to ktest-init immediately (see init/initramfs-init.sh).
+    # and hands off to ktest-init immediately (see init/init).
     kernelargs+=(ktest.bootnow)
     kernelargs+=("ktest.dir=$ktest_dir")
     kernelargs+=(ktest.env=$(readlink -f "$ktest_out/vm/env"))

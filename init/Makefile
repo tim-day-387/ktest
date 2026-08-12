@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
-# Builds the initramfs /init, the mount.lustreroot helper and the zimport
-# CLI.  All are linked statically so they run without shared libs, and all
-# share init-common.c (kmsg logging + lustre tunables); init and zimport
-# also share zfs-import.c (the raw-ioctl pool importer).
+# Builds ktest-init (the compiled boot binary), the mount.lustreroot helper
+# and the zimport CLI.  All are linked statically so they run without shared
+# libs, and all share init-common.c (kmsg logging + lustre tunables);
+# ktest-init and zimport also share zfs-import.c (the raw-ioctl pool
+# importer).
 
 CC      ?= cc
 CFLAGS  ?= -Wall -g
@@ -11,7 +12,7 @@ LDFLAGS ?= -static
 
 COMMON  := init-common.c
 ZFS     := zfs-import.c
-BINS    := init mount.lustreroot zimport
+BINS    := ktest-init mount.lustreroot zimport
 
 
 quiet_cmd = printf '  %-8s %s\n' '[$(1)]' '$(2)'
@@ -21,8 +22,8 @@ quiet_cmd = printf '  %-8s %s\n' '[$(1)]' '$(2)'
 
 all: $(BINS)
 
-init: init.c $(COMMON) $(ZFS) init-common.h zfs-import.h
-	$(Q)$(call quiet_cmd,CC,init/init)
+ktest-init: init.c $(COMMON) $(ZFS) init-common.h zfs-import.h
+	$(Q)$(call quiet_cmd,CC,init/ktest-init)
 	$(Q)$(CC) $(CFLAGS) $(LDFLAGS) -o $@ init.c $(COMMON) $(ZFS)
 
 mount.lustreroot: mount.lustreroot.c $(COMMON) init-common.h
