@@ -387,6 +387,43 @@ static void install_setparams_to_newroot(void)
 }
 
 /*
+ * install_udev_rules - stage ktest udev rule overrides in /run
+ *
+ * udevd reads /run/udev/rules.d between /usr/lib and /etc; a 99- prefix
+ * sorts after the distro's 50-udev-default.rules, so its assignments win.
+ * Staging the rules here ships them with the UKI without touching the
+ * root filesystem: systemd leaves an already-mounted /run in place, so
+ * the file survives into the booted system.
+ *
+ * The kvm rule undoes Ubuntu's MODE="0660" on /dev/kvm.  With KVM built
+ * into the kernel there is no module-load uevent; static_node makes udevd
+ * apply the mode to the existing devtmpfs node at daemon startup.
+ */
+static void install_udev_rules(void)
+{
+	static const char kvm_rule[] =
+		"KERNEL==\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"\n";
+	ssize_t len = sizeof(kvm_rule) - 1;
+	int fd;
+
+	mkdir("/run/udev", 0755);
+	mkdir("/run/udev/rules.d", 0755);
+
+	fd = open("/run/udev/rules.d/99-ktest-kvm.rules",
+		  O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+	if (fd < 0) {
+		kmsg_log(KMSG_ERR, "open 99-ktest-kvm.rules: %s\n",
+			 strerror(errno));
+		return;
+	}
+
+	if (write(fd, kvm_rule, len) != len)
+		kmsg_log(KMSG_ERR, "write 99-ktest-kvm.rules: %s\n",
+			 strerror(errno));
+	close(fd);
+}
+
+/*
  * switch_root_and_exec - move /newroot on top of /, chroot in, exec init
  *
  * Returns only on failure (caller is expected to exit, panicking PID 1).
@@ -421,6 +458,8 @@ static void switch_root_and_exec(void)
 		kmsg_log(KMSG_ERR, "mount /run: %s\n", strerror(errno));
 		return;
 	}
+
+	install_udev_rules();
 
 	execl("/sbin/init", "init", NULL);
 	execl("/init", "init", NULL);
