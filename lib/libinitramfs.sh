@@ -47,6 +47,13 @@ function mk_initramfs() (
     TMPDIR="$(mktemp -d)"
     trap 'rm -rf "$TMPDIR"' EXIT
 
+    # The podman remote client requires $XDG_CONFIG_HOME (~/.config) and
+    # $XDG_DATA_HOME (~/.local/share) to be owned by the invoking uid.  Under
+    # --userns=keep-id the job may run as a host uid other than ktest (1000),
+    # which owns those dirs in the image, so use throwaway dirs instead.
+    export XDG_CONFIG_HOME="$TMPDIR/xdg/config" XDG_DATA_HOME="$TMPDIR/xdg/data"
+    mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+
     local INITRAMFS="$TMPDIR/initramfs"
     mkdir -p "$INITRAMFS"
 

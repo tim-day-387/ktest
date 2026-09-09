@@ -77,9 +77,10 @@ RUN usermod -l ktest -d /home/ktest -m ubuntu && \
 # Without this, crun's mkdir fails when the keep-id'd uid isn't ktest (1000)
 # because /home/ktest is 0755 owned by 1000.
 # The .config and .local containers dirs are for the podman remote client
-# (mk_initramfs runs podman against the host socket via CONTAINER_HOST):
-# it stats $HOME/.config and writes podman-connections.json under it, and
-# under keep-id it can't create these itself.
+# (mk_initramfs runs podman against the host socket via CONTAINER_HOST).
+# Note podman requires these to be *owned* by the invoking uid, so they only
+# help when the keep-id'd uid is ktest (1000); for any other uid
+# lib/libinitramfs.sh points XDG_CONFIG_HOME/XDG_DATA_HOME elsewhere.
 RUN install -d -m 0777 \
     /home/ktest/git \
     /home/ktest/git/linux \
