@@ -88,7 +88,7 @@ Your GitHub Pages site will be updated automatically.
 
 ## Management
 
-The CI container needs access to the host's podman socket to spawn job containers. This is mounted at `/run/podman/podman.sock` in the container and passed to `pk` via the `--podman-socket` parameter.
+The CI container needs access to the host's podman socket to spawn job containers. `pk deploy` mounts it into the container at the same path it has on the host (from `--ci-container-socket`, or `--podman-socket` when that is already a host path) and exports it as `PODMAN_SOCKET`. The daemon passes that path to `pk` via `--podman-socket`, and `pk` in turn bind-mounts it into each job container. Podman resolves bind-mount sources on the host, so the path must be identical inside and outside the CI container.
 
 ### View Logs
 

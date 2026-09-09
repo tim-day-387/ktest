@@ -302,7 +302,9 @@ def main():
     deploy_parser.add_argument(
         "--ci-container-socket",
         default=None,
-        help="Podman socket path to use inside the CI container (default: same as --podman-socket)",
+        help="Host path of the podman socket to mount into the CI container, "
+        "for use when --podman-socket is a forwarded local socket "
+        "(default: same as --podman-socket)",
     )
 
     args = parser.parse_args()

@@ -40,6 +40,10 @@ GERRIT_USERNAME = os.getenv("GERRIT_USERNAME")
 GERRIT_PASSWORD = os.getenv("GERRIT_PASSWORD")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/var/www/ci-lustre/upstream-patch-review")
 KTEST_DIR = "/home/ktest/ktest"
+# Host path of the podman socket, mounted at the same path inside this
+# container by `pk deploy` so bind-mount sources pk hands to podman resolve
+# correctly on the host.
+PODMAN_SOCKET = os.getenv("PODMAN_SOCKET", "/run/podman/podman.sock")
 LUSTRE_SOURCE = "/home/ktest/git/lustre-release"
 HOSTING_MODE = os.getenv("HOSTING_MODE", "github-pages")
 IGNORE_OLDER_THAN_DAYS = 60
@@ -290,7 +294,7 @@ class Reviewer(object):
         # Build pk command with socket parameter and output flags
         # pk writes directly to OUTPUT_DIR with metadata_store.json
         # Note: change_id already contains git_hash (format: {raw_change_id}_{git_hash})
-        socket_arg = "--podman-socket unix:///run/podman/podman.sock"
+        socket_arg = f"--podman-socket unix://{PODMAN_SOCKET}"
         # Escape subject for shell (replace quotes)
         escaped_subject = subject.replace("'", "'\\''") if subject else ""
         output_args = f"--output {OUTPUT_DIR} --git-hash {git_hash} --change-id {change_id} --subject '{escaped_subject}'"
@@ -485,7 +489,7 @@ class Reviewer(object):
         self._debug("successfully reviewed branches")
 
     def podman_reset(self):
-        socket_arg = "--podman-socket unix:///run/podman/podman.sock"
+        socket_arg = f"--podman-socket unix://{PODMAN_SOCKET}"
         command = f"cd {KTEST_DIR} && ./pk {socket_arg} stop"
         subprocess.run(command, shell=True)
 

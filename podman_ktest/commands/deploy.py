@@ -23,13 +23,18 @@ def cmd_deploy(args, podman_socket=None):
     """Deploy the Lustre CI container."""
     socket_url = get_podman_socket(podman_socket)
 
-    # Determine the socket path to mount from the host
-    # If --ci-container-socket is provided, use it as the source
-    # Otherwise, use the same path as the host socket
+    # Determine the host path of the podman socket.  If --ci-container-socket
+    # is provided (e.g. when --podman-socket is an ssh-forwarded local socket),
+    # use it; otherwise the --podman-socket path is already a host path.
+    #
+    # The socket is mounted into the CI container at the *same* path it has on
+    # the host.  pk inside the container passes this path along as a bind-mount
+    # source for job containers, and podman resolves bind-mount sources on the
+    # host -- so the in-container path must be valid on the host as well.
     if args.ci_container_socket:
-        host_socket_to_mount = args.ci_container_socket.replace("unix://", "")
+        host_socket = args.ci_container_socket.replace("unix://", "")
     else:
-        host_socket_to_mount = socket_url.replace("unix://", "")
+        host_socket = socket_url.replace("unix://", "")
 
     # Check if gerrit auth file exists and parse it
     gerrit_auth_path = Path(args.gerrit_auth).resolve()
@@ -126,7 +131,7 @@ def cmd_deploy(args, podman_socket=None):
             "GERRIT_USERNAME": gerrit_username,
             "GERRIT_PASSWORD": gerrit_password,
             "OUTPUT_DIR": "/var/www/ci-lustre/upstream-patch-review",
-            "PODMAN_SOCKET": "/run/podman/podman.sock",
+            "PODMAN_SOCKET": host_socket,
         }
 
         # Add GitHub token if provided
@@ -139,8 +144,8 @@ def cmd_deploy(args, podman_socket=None):
         mounts = [
             {
                 "type": "bind",
-                "source": host_socket_to_mount,
-                "target": "/run/podman/podman.sock",
+                "source": host_socket,
+                "target": host_socket,
                 "read_only": False,
             },
             {
@@ -159,6 +164,7 @@ def cmd_deploy(args, podman_socket=None):
         # Create and start the container
         print(f"Creating CI container '{DEPLOY_CONTAINER_NAME}'...")
         print(f"  Hosting mode: {args.hosting}")
+        print(f"  Podman socket: {host_socket}")
         if args.hosting == "nginx":
             print(f"  Nginx port: {DEPLOY_NGINX_PORT}")
             print(f"  Output dir: {env['OUTPUT_DIR']}")

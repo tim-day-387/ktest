@@ -52,11 +52,15 @@ git clone --depth 1 --branch "zfs-${ZVER}" https://github.com/openzfs/zfs.git /h
 
 echo "Repository fetch complete"
 
+# Host podman socket, mounted by `pk deploy` at the same path it has on the
+# host so that bind-mount sources pk passes to podman resolve on the host.
+PODMAN_SOCKET="${PODMAN_SOCKET:-/run/podman/podman.sock}"
+
 # Build a fresh VM root image (must run as root). root_image shells out to the
 # podman CLI; point it at the host daemon's socket so podman build/create/export
 # run against the host rather than a (nonexistent) in-container daemon.
 echo "Building root image with root_image create..."
-export CONTAINER_HOST="unix://${PODMAN_SOCKET:-/run/podman/podman.sock}"
+export CONTAINER_HOST="unix://${PODMAN_SOCKET}"
 /home/ktest/ktest/root_image create
 echo "Root image build complete"
 
@@ -105,11 +109,11 @@ fi
 sleep 2
 
 # Fix podman socket permissions for ktest user
-if [ -S "/run/podman/podman.sock" ]; then
-    echo "Setting permissions on /run/podman/podman.sock..."
-    chmod 666 /run/podman/podman.sock
+if [ -S "$PODMAN_SOCKET" ]; then
+    echo "Setting permissions on $PODMAN_SOCKET..."
+    chmod 666 "$PODMAN_SOCKET"
 else
-    echo "Warning: /run/podman/podman.sock not found"
+    echo "Warning: $PODMAN_SOCKET not found"
 fi
 
 # Function to start the CI daemon
