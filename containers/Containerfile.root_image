@@ -71,7 +71,7 @@ RUN apt-get update && apt-get install -y \
         nfs-kernel-server nfs-common ocfs2-tools openafs-dbserver openafs-fileserver \
         nbd-client nbd-server multipath-tools sg3-utils srptools bc attr gawk acl \
         capnproto jq smbclient minicom libunwind-dev qemu-system-x86 qemu-utils \
-        ubuntu-desktop-minimal podman podman-compose python3-podman fuse-overlayfs \
+        ubuntu-desktop-minimal podman podman-compose python3-podman python3-fusepy fuse-overlayfs \
         emacs keepassxc evolution tlp powertop firefox snapd gh \
         linux-image-generic linux-tools-generic systemd systemd-sysv dbus udev \
         systemd-resolved ca-certificates curl gnupg kmod less psmisc openssh-server \

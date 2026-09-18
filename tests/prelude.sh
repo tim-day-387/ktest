@@ -44,6 +44,7 @@ if [[ ! -v ktest_cpus ]]; then
     ktest_no_vm=false
     ktest_lustre_root=0
     ktest_networking=
+    ktest_host_helper=
     ktest_root_image=
     ktest_uki_firmware=0
     ktest_nvidia=0
@@ -309,6 +310,18 @@ config-networking()
     ktest_networking=$1
 }
 
+# Run a program on the host for as long as the VM is up, e.g. a network peer
+# for the test.  Both it and the test get $ktest_helper_dir, a host directory
+# (seen through /host in the VM) for the two sides to exchange files through.
+# A relative path is relative to the test.
+config-host-helper()
+{
+    local helper=$1
+
+    [[ $helper = /* ]] || helper="$(dirname "$(readlink -e "$0")")/$helper"
+    ktest_host_helper=$helper
+}
+
 config-no-kbuild()
 {
     ktest_no_kbuild=true
@@ -528,6 +541,9 @@ main()
 	    echo "ktest_lustre=$ktest_lustre"
 	    if [[ -n $ktest_networking ]]; then
 		echo "ktest_networking=$ktest_networking"
+	    fi
+	    if [[ -n $ktest_host_helper ]]; then
+		echo "ktest_host_helper=$ktest_host_helper"
 	    fi
 	    if [[ -n $ktest_root_image ]]; then
 		echo "ktest_root_image=$ktest_root_image"

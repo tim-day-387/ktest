@@ -35,6 +35,7 @@ export ZPOOL="$(command -v zpool 2>/dev/null || echo "$zfs_pkg_path/cmd/zpool/zp
 
 export LUSTRE="$lustre_pkg_path/lustre"
 export LCTL="$(command -v lctl 2>/dev/null || echo "$LUSTRE/utils/lctl")"
+export LFS="$(command -v lfs 2>/dev/null || echo "$LUSTRE/utils/lfs")"
 export LNETCTL="$(command -v lnetctl 2>/dev/null || echo "$LUSTRE/../lnet/utils/lnetctl")"
 export LNETDUMP="$(command -v lnetdump 2>/dev/null || echo "$LUSTRE/utils/lnetdump/lnetdump")"
 export LUSTRE_RMMOD="$(command -v lustre_rmmod 2>/dev/null || echo "$LUSTRE/scripts/lustre_rmmod")"

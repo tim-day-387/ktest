@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# Serve a Lustre filesystem over TCP and have the userspace client
+# (tools/lustre_tcp_client.py) run against it from the host, across the
+# TAP bridge. The host side is tcp-client-host.sh; the two meet in
+# $ktest_helper_dir, which the VM reaches through the /host 9p mount.
+#
+# The read-only FUSE mount of the same client is tested inside the VM, as
+# that is where /dev/fuse is: from a network namespace of its own, so that
+# the server sees a peer and not its own NID, and compared with what the
+# kernel client has mounted.
+#
+# Interactively (-I) the server stays up after the tests, so the client
+# can be pointed at the address in $ktest_helper_dir/server by hand.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lustre-libs.sh"
+
+require-lustre-kernel-config
+require-lustre-debug-kernel-config
+require-kernel-config FUSE_FS=y,NET_NS=y,VETH=y
+
+config-networking tap
+config-host-helper tcp-client-host.sh
+config-mem 10G
+config-timeout 600
+
+# Files for the client to copy back, one per layout it has to understand,
+# and a manifest to check the copies against.
+function populate_lustrefs()
+{
+    local dir="/mnt/lustre/tcptest"
+
+    # The client only goes to MDT0000, and osd-wbcfs cannot create
+    # directories across MDTs
+    "$LFS" mkdir -i 0 "$dir"
+    "$LFS" mkdir -i 0 "$dir/subdir"
+    cd "$dir"
+
+    echo "hello from the kernel client" > small
+    chmod 640 small
+    # osd-wbcfs has no symlinks
+    if [[ "$FSTYPE" == "zfs" ]]; then
+	ln -s small symlink
+    fi
+    touch empty
+    dd if=/dev/urandom of=plain bs=1M count=5 status=none
+
+    "$LFS" setstripe -c 2 -S 1M striped
+    dd if=/dev/urandom of=striped bs=1M count=7 status=none
+    # a tail that is not stripe aligned
+    echo "tail" >> striped
+
+    "$LFS" setstripe -E 1M -c 1 -E 4M -c 2 -S 1M -E -1 -c 2 -S 2M pfl
+    dd if=/dev/urandom of=pfl bs=1M count=9 status=none
+
+    "$LFS" setstripe -c 2 -S 1M sparse
+    dd if=/dev/urandom of=sparse bs=64k count=1 seek=50 status=none
+
+    dd if=/dev/urandom of=subdir/nested bs=4k count=3 status=none
+
+    md5sum small empty plain striped pfl sparse subdir/nested > MANIFEST
+    populate_dne
+    "$LFS" getstripe -y pfl
+
+    cd /
+    # Nothing left in the client cache, no locks left for the userspace
+    # client to wait on
+    sync
+    "$LCTL" set_param -n ldlm.namespaces.*.lru_size=clear
+}
+
+# DNE: directories on another MDT and striped over both, which the client
+# has to follow with FLD lookups and the LMV EA. osd-wbcfs cannot create
+# directories across MDTs, so this part needs FSTYPE=zfs. Runs in the
+# tcptest directory, after the MANIFEST is started.
+function populate_dne()
+{
+    local i
+
+    [[ "$FSTYPE" == "zfs" ]] || return 0
+
+    # a directory on MDT0001 under one on MDT0000, and back again
+    "$LFS" mkdir -i 1 remote
+    echo "on MDT0001" > remote/file
+    "$LFS" mkdir -i 0 remote/back
+    dd if=/dev/urandom of=remote/back/data bs=1M count=2 status=none
+
+    # a striped directory with enough names to land in both stripes,
+    # and a subdirectory wherever the MDTs put it
+    "$LFS" mkdir -c 2 stripedir
+    for i in $(seq 1 40); do
+	echo "file $i" > "stripedir/f$i"
+    done
+    mkdir stripedir/sub
+    dd if=/dev/urandom of=stripedir/sub/data bs=64k count=3 status=none
+
+    # the same with the other hash the client has to compute; names that
+    # land in the wrong stripe still turn up, but only after an ENOENT
+    "$LFS" mkdir -c 2 -H crush crushdir
+    for i in $(seq 1 20); do
+	echo "crush $i" > "crushdir/c$i"
+    done
+
+    "$LFS" getdirstripe remote remote/back stripedir stripedir/sub crushdir
+
+    md5sum remote/file remote/back/data stripedir/f* stripedir/sub/data \
+	crushdir/c* >> MANIFEST
+    # what readdir has to come up with
+    ls -A stripedir | sort > stripedir.ls
+    md5sum stripedir.ls >> MANIFEST
+}
+
+function server_address()
+{
+    local interface="$(ip -4 route show default | awk '{ print $5; exit }')"
+
+    ip -4 -o addr show dev "$interface" |
+	awk '{ split($4, a, "/"); print a[1]; exit }'
+}
+
+# The server and its files, set up by whichever test runs first
+function setup_server()
+{
+    local interface="$(ip -4 route show default | awk '{ print $5; exit }')"
+
+    [[ -f /tmp/tcp-server-up ]] && return 0
+    [[ -n "$(server_address)" ]] || { echo "no IPv4 address"; return 1; }
+
+    # A tcp NI brings up the acceptor; the targets themselves register
+    # as 0@lo, which the client does not care about.
+    load_lustre_modules
+    configure_lnet "$interface"
+
+    setup_lustrefs
+    populate_lustrefs
+    touch /tmp/tcp-server-up
+}
+
+# A network namespace for a client inside the VM: from there the server is
+# at the same address as from the host, and the client gets a NID of its own
+function setup_client_netns()
+{
+    ip netns list | grep -qw tcpcli && return 0
+
+    ip netns add tcpcli
+    ip link add veth-srv type veth peer name veth-cli netns tcpcli
+    ip addr add 10.99.0.1/24 dev veth-srv
+    ip link set veth-srv up
+    ip -n tcpcli link set lo up
+    ip -n tcpcli addr add 10.99.0.2/24 dev veth-cli
+    ip -n tcpcli link set veth-cli up
+    ip -n tcpcli route add default via 10.99.0.1
+}
+
+# Names, types and modes of everything under a directory, sizes of the files
+function tree_listing()
+{
+    (cd "$1" && find . -printf '%P %y %m\n' | sort &&
+     find . -type f -printf '%P %s\n' | sort &&
+     find . -type l -printf '%P -> %l\n' | sort)
+}
+
+# "! command" is not something set -e notices
+function must_fail()
+{
+    if "$@" 2>/dev/null; then
+	echo "should have failed: $*"
+	return 1
+    fi
+}
+
+test_1_host_client()
+{
+    local rendezvous="$ktest_helper_dir"
+    local waited=0
+
+    setup_server
+
+    # Tell the host where the server is and wait for its verdict
+    server_address > "$rendezvous/server.tmp"
+    mv "$rendezvous/server.tmp" "$rendezvous/server"
+
+    until [[ -f "$rendezvous/result" ]]; do
+	sleep 1
+	waited=$((waited + 1))
+	if ((waited > 180)); then
+	    echo "no result from the host side"
+	    return 1
+	fi
+    done
+
+    cat "$rendezvous/client.log"
+    "$LCTL" get_param -n mgs.MGS.exports.*.uuid 2>/dev/null || true
+
+    [[ "$(cat "$rendezvous/result")" == "0" ]]
+}
+
+test_2_fuse()
+{
+    local client="$ktest_dir/tools/lustre_tcp_client.py"
+    local mnt="/mnt/lustre-fuse"
+    local waited=0
+    local pid
+
+    setup_server
+    echo "== client network namespace"
+    setup_client_netns
+    nsenter --net=/run/netns/tcpcli ip route get "$(server_address)"
+
+    echo "== FUSE mount"
+    mkdir -p "$mnt"
+    nsenter --net=/run/netns/tcpcli \
+	python3 "$client" --server "$(server_address)" --fuse "$mnt" \
+	> /tmp/fuse-client.log 2>&1 &
+    pid=$!
+
+    until mountpoint -q "$mnt"; do
+	sleep 1
+	waited=$((waited + 1))
+	if ((waited > 60)) || ! kill -0 "$pid" 2>/dev/null; then
+	    cat /tmp/fuse-client.log
+	    echo "no FUSE mount"
+	    return 1
+	fi
+    done
+
+    # The namespace and the data, as the kernel client has them
+    echo "== compare with the kernel client"
+    diff <(tree_listing /mnt/lustre/tcptest) <(tree_listing "$mnt/tcptest")
+    diff -r /mnt/lustre/tcptest "$mnt/tcptest"
+    (cd "$mnt/tcptest" && md5sum --quiet -c MANIFEST)
+
+    # a read in the middle of a file, across a stripe boundary
+    cmp <(dd if=/mnt/lustre/tcptest/striped bs=1000 skip=1040 count=30 status=none) \
+	<(dd if="$mnt/tcptest/striped" bs=1000 skip=1040 count=30 status=none)
+
+    df "$mnt"
+    [[ "$(stat -f -c %T "$mnt")" == fuse* ]]
+
+    # read-only, and ENOENT is ENOENT
+    must_fail touch "$mnt/tcptest/new"
+    must_fail rm "$mnt/tcptest/small"
+    must_fail stat "$mnt/tcptest/does-not-exist"
+
+    echo "== unmount"
+    # unmounting is how the client is told to leave: it disconnects and
+    # exits with 0
+    fusermount -u "$mnt"
+    wait "$pid"
+    cat /tmp/fuse-client.log
+    grep -q "umount flow done" /tmp/fuse-client.log
+    must_fail grep "Traceback" /tmp/fuse-client.log
+}
+
+test_3_umount()
+{
+    [[ -f /tmp/tcp-server-up ]] || return 0
+
+    cleanup_lustrefs
+}
+
+main "$@"

@@ -29,6 +29,7 @@ ktest_crashdump=false
 ktest_kgdb=false
 ktest_ssh_port=0
 ktest_networking=user
+ktest_host_helper=""	# program to run on the host while the VM is up
 ktest_dio=off
 ktest_nice=0
 ktest_no_kbuild=false
@@ -499,11 +500,32 @@ start_vm()
     qemu_cmd+=("${ktest_qemu_append[@]}")
     qemu_cmd=("${ktest_qemu_prepend[@]}" "${qemu_cmd[@]}")
 
+    # The host side of a test (config-host-helper): it lives as long as the
+    # VM and talks to the test through $ktest_helper_dir
+    local helper_pid=
+    ktest_helper_dir="$ktest_tmp/helper"
+
     set +o errexit
     save_env
 
+    if [[ -n $ktest_host_helper ]]; then
+	mkdir -p "$ktest_helper_dir"
+	ktest_dir="$ktest_dir" ktest_helper_dir="$ktest_helper_dir"	\
+	    "$ktest_host_helper" &
+	helper_pid=$!
+    fi
+
+    stop_host_helper()
+    {
+	[[ -z $helper_pid ]] && return
+	pkill -P "$helper_pid" 2>/dev/null || true
+	kill "$helper_pid" 2>/dev/null || true
+	wait "$helper_pid" 2>/dev/null || true
+    }
+
     if $ktest_interactive; then
 	"${qemu_cmd[@]}"
+	stop_host_helper
 	return
     fi
 
@@ -531,6 +553,10 @@ start_vm()
 	-o "$test_logdir"				\
 	-f "$test_basename.$(date -Iseconds).log"	\
 	-- "${qemu_cmd[@]}"
+    local ret=$?
+
+    stop_host_helper
+    return $ret
 }
 
 map_clang_version() {
