@@ -1,0 +1,30 @@
+Nodemap client version policy (LU-17217) demo
+============================================
+
+# --- SERVER, once
+export LCTL=/home/timothy/ws/lustre-release/lustre/utils/lctl
+sudo $LCTL nodemap_set_version_policy                 # if "invalid ioctl", see below
+
+# --- CLIENT, once
+scp ~/ws/ktest/tools/lustre_tcp_client.py CLIENT:~/
+
+# --- SERVER: arm. On a root-on-Lustre server set admin/trusted BEFORE
+#     activating, or the local client's uids are squashed.
+sudo $LCTL nodemap_modify --name default --property admin   --value 1
+sudo $LCTL nodemap_modify --name default --property trusted --value 1
+sudo $LCTL nodemap_activate 1
+sudo $LCTL nodemap_set_version_policy --name default --policy hard_block --glob '2.15.*'
+
+# --- allow form
+sudo $LCTL nodemap_set_version_policy --name default --policy allow --glob '2.17.*'
+sudo python3 ~/lustre_tcp_client.py --server 192.168.0.122 --fsname dd961847 --version 2.16.1.0   # refused
+sudo python3 ~/lustre_tcp_client.py --server 192.168.0.122 --fsname dd961847 --version 2.17.58.0  # accepted
+
+# --- SERVER: restore
+sudo $LCTL nodemap_set_version_policy --name default --policy allow
+sudo $LCTL nodemap_activate 0
+sudo $LCTL nodemap_modify --name default --property admin   --value 0
+sudo $LCTL nodemap_modify --name default --property trusted --value 0
+
+# --- SERVER: show
+sudo $LCTL get_param nodemap.default.version_policy
