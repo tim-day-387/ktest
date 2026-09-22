@@ -193,7 +193,7 @@ static int run_mount_lustreroot(const char *fsname, const char *pool,
 
 static int copy_file(const char *src, const char *dst, mode_t mode)
 {
-	char buf[4096];
+	char buf[65536];
 	ssize_t nr;
 	int sfd, dfd;
 
@@ -208,16 +208,205 @@ static int copy_file(const char *src, const char *dst, mode_t mode)
 	}
 
 	while ((nr = read(sfd, buf, sizeof(buf))) > 0) {
-		if (write(dfd, buf, nr) != nr) {
-			close(sfd);
-			close(dfd);
-			return -1;
+		ssize_t off = 0;
+
+		while (off < nr) {
+			ssize_t nw = write(dfd, buf + off, nr - off);
+
+			if (nw < 0) {
+				close(sfd);
+				close(dfd);
+				return -1;
+			}
+			if (nw == 0) {
+				/* No progress and no error: the fs is full. */
+				errno = ENOSPC;
+				close(sfd);
+				close(dfd);
+				return -1;
+			}
+			off += nw;
 		}
 	}
 
 	close(sfd);
-	close(dfd);
+	if (close(dfd) < 0)
+		return -1;
 	return (nr < 0) ? -1 : 0;
+}
+
+/*
+ * Hard links seen so far by copy_tree: the source inode and the path of the
+ * copy already made for it.  Multiply-linked files are copied once and the
+ * remaining names become link(2)s to that copy, so a multicall binary
+ * installed under many names (Ubuntu 26.04's Rust coreutils: one ~11MB
+ * binary, ~110 names) costs its size once rather than ~110 times.  Without
+ * this the copied initramfs is ~3.5x the size of the cpio and overflows the
+ * destination tmpfs on small VMs.
+ */
+struct link_entry {
+	dev_t dev;
+	ino_t ino;
+	char *dst;
+};
+
+struct link_table {
+	struct link_entry *ents;
+	size_t n, cap;
+};
+
+static const char *link_table_find(const struct link_table *tab,
+				   const struct stat *st)
+{
+	size_t i;
+
+	for (i = 0; i < tab->n; i++)
+		if (tab->ents[i].dev == st->st_dev &&
+		    tab->ents[i].ino == st->st_ino)
+			return tab->ents[i].dst;
+
+	return NULL;
+}
+
+static int link_table_add(struct link_table *tab, const struct stat *st,
+			  const char *dst)
+{
+	struct link_entry *ent;
+
+	if (tab->n == tab->cap) {
+		size_t cap = tab->cap ? tab->cap * 2 : 64;
+		struct link_entry *ents;
+
+		ents = realloc(tab->ents, cap * sizeof(*ents));
+		if (!ents)
+			return -1;
+		tab->ents = ents;
+		tab->cap = cap;
+	}
+
+	ent = &tab->ents[tab->n];
+	ent->dst = strdup(dst);
+	if (!ent->dst)
+		return -1;
+	ent->dev = st->st_dev;
+	ent->ino = st->st_ino;
+	tab->n++;
+
+	return 0;
+}
+
+static void link_table_free(struct link_table *tab)
+{
+	size_t i;
+
+	for (i = 0; i < tab->n; i++)
+		free(tab->ents[i].dst);
+	free(tab->ents);
+	tab->ents = NULL;
+	tab->n = tab->cap = 0;
+}
+
+static int copy_tree_rec(const char *src, const char *dst, dev_t dev,
+			 struct link_table *links)
+{
+	char ssub[512], dsub[512];
+	struct dirent *e;
+	struct stat st;
+	int ret = 0;
+	DIR *d;
+
+	d = opendir(src);
+	if (!d) {
+		kmsg_log(KMSG_ERR, "opendir %s: %s\n", src, strerror(errno));
+		return -1;
+	}
+
+	while (ret == 0 && (e = readdir(d)) != NULL) {
+		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+			continue;
+
+		if (snprintf(ssub, sizeof(ssub), "%s/%s", src, e->d_name) >=
+		    (int)sizeof(ssub) ||
+		    snprintf(dsub, sizeof(dsub), "%s/%s", dst, e->d_name) >=
+		    (int)sizeof(dsub)) {
+			kmsg_log(KMSG_ERR, "path too long: %s/%s\n", src,
+				 e->d_name);
+			ret = -1;
+			break;
+		}
+
+		if (lstat(ssub, &st) < 0) {
+			/* Vanished under us; nothing to copy. */
+			if (errno == ENOENT)
+				continue;
+			kmsg_log(KMSG_ERR, "lstat %s: %s\n", ssub,
+				 strerror(errno));
+			ret = -1;
+			break;
+		}
+
+		if (S_ISDIR(st.st_mode)) {
+			if (mkdir(dsub, st.st_mode & 0777) < 0 &&
+			    errno != EEXIST) {
+				kmsg_log(KMSG_ERR, "mkdir %s: %s\n", dsub,
+					 strerror(errno));
+				ret = -1;
+				break;
+			}
+			if (st.st_dev == dev)
+				ret = copy_tree_rec(ssub, dsub, dev, links);
+		} else if (S_ISREG(st.st_mode)) {
+			const char *existing = NULL;
+
+			if (st.st_nlink > 1)
+				existing = link_table_find(links, &st);
+
+			if (existing) {
+				if (link(existing, dsub) < 0) {
+					kmsg_log(KMSG_ERR, "link %s -> %s: %s\n",
+						 dsub, existing,
+						 strerror(errno));
+					ret = -1;
+				}
+				continue;
+			}
+
+			if (copy_file(ssub, dsub, st.st_mode & 0777) < 0) {
+				kmsg_log(KMSG_ERR, "copy %s: %s\n", ssub,
+					 strerror(errno));
+				ret = -1;
+				break;
+			}
+
+			if (st.st_nlink > 1 &&
+			    link_table_add(links, &st, dsub) < 0) {
+				kmsg_log(KMSG_ERR, "link table: %s\n",
+					 strerror(errno));
+				ret = -1;
+				break;
+			}
+		} else if (S_ISLNK(st.st_mode)) {
+			char lbuf[512];
+			ssize_t llen = readlink(ssub, lbuf, sizeof(lbuf) - 1);
+
+			if (llen < 0) {
+				kmsg_log(KMSG_ERR, "readlink %s: %s\n", ssub,
+					 strerror(errno));
+				ret = -1;
+				break;
+			}
+			lbuf[llen] = '\0';
+			if (symlink(lbuf, dsub) < 0) {
+				kmsg_log(KMSG_ERR, "symlink %s: %s\n", dsub,
+					 strerror(errno));
+				ret = -1;
+				break;
+			}
+		}
+	}
+
+	closedir(d);
+	return ret;
 }
 
 /*
@@ -227,47 +416,22 @@ static int copy_file(const char *src, const char *dst, mode_t mode)
  * different device is a mount point (e.g. /proc, /sys, /dev, /newroot, or the
  * destination tmpfs when copying "/"), so it is recreated empty as a mount
  * target but not crossed.  Pass the st_dev of @src to copy everything.
+ *
+ * Hard links among regular files are preserved (see struct link_table).
+ * Any failure to create an entry (typically ENOSPC on the destination) is
+ * logged with the path and aborts the copy with -1: a silently truncated
+ * tree would later surface as baffling "module not found" errors from
+ * modprobe(8), since an empty modules.dep.bin hides every module.
  */
 static int copy_tree(const char *src, const char *dst, dev_t dev)
 {
-	char ssub[512], dsub[512];
-	struct dirent *e;
-	struct stat st;
-	DIR *d;
+	struct link_table links = { 0 };
+	int ret;
 
-	d = opendir(src);
-	if (!d)
-		return -1;
+	ret = copy_tree_rec(src, dst, dev, &links);
+	link_table_free(&links);
 
-	while ((e = readdir(d)) != NULL) {
-		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
-			continue;
-
-		snprintf(ssub, sizeof(ssub), "%s/%s", src, e->d_name);
-		snprintf(dsub, sizeof(dsub), "%s/%s", dst, e->d_name);
-
-		if (lstat(ssub, &st) < 0)
-			continue;
-
-		if (S_ISDIR(st.st_mode)) {
-			mkdir(dsub, st.st_mode & 0777);
-			if (st.st_dev == dev)
-				copy_tree(ssub, dsub, dev);
-		} else if (S_ISREG(st.st_mode)) {
-			copy_file(ssub, dsub, st.st_mode & 0777);
-		} else if (S_ISLNK(st.st_mode)) {
-			char lbuf[512];
-			ssize_t llen = readlink(ssub, lbuf, sizeof(lbuf) - 1);
-
-			if (llen >= 0) {
-				lbuf[llen] = '\0';
-				symlink(lbuf, dsub);
-			}
-		}
-	}
-
-	closedir(d);
-	return 0;
+	return ret;
 }
 
 /*
@@ -286,6 +450,10 @@ static int copy_tree(const char *src, const char *dst, dev_t dev)
  * when switch_root_and_exec() moves /newroot onto /; the later /run remount
  * does not shadow /init.initramfs.  A no-op if the initramfs bundled no
  * modules.
+ *
+ * The tmpfs has no explicit size, so it is capped at half of RAM.  If the
+ * copy does not fit, copy_tree() logs the failing path and the copy is
+ * abandoned without bind-mounting the partial tree.
  */
 static void copy_initramfs_to_newroot(void)
 {
