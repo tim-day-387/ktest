@@ -21,6 +21,8 @@ DATA_FILES = [
     "status.txt",
     "version.json",
     "gerrit_changes.json",
+    "branch_status.json",
+    "coverity_status.json",
 ]
 
 
@@ -30,7 +32,8 @@ def generate_local_site(ktest_dir, results_dir):
     results_dir holds the files nginx would normally serve
     alongside the site: metadata_store.json (created empty if
     missing) and the per-test .log files, plus optionally
-    status.txt, version.json, and gerrit_changes.json.
+    status.txt, version.json, gerrit_changes.json,
+    branch_status.json, and coverity_status.json.
     """
     data_dir = Path(results_dir)
     site_dir = Path(ktest_dir) / "ci-lustre" / "static-site"

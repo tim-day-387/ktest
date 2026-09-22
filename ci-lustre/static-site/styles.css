@@ -146,6 +146,18 @@ pre {
     margin-bottom: 2em;
 }
 
+/* Home page section headers */
+h2 {
+    font-size: 1.2em;
+    margin: 1.5em 0 0.5em;
+}
+
+h2 + table,
+h2 + p,
+h2 + #profiles {
+    margin-top: 0;
+}
+
 .test-results-table caption {
     font-weight: bold;
     font-size: 1.2em;

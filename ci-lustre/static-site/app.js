@@ -11,6 +11,8 @@
 const app = {
   metadata: null,
   gerritChanges: null,
+  branchStatus: null,
+  coverityStatus: null,
   homeRows: [],
   homeAuthors: [],
   currentView: "home",
@@ -43,12 +45,22 @@ const app = {
   async init() {
     try {
       await this.loadMetadata();
-      // The Gerrit change list is optional; the page still
-      // renders test runs without it
+      // The Gerrit change list, branch heads and Coverity summary
+      // are optional; the page still renders test runs without them
       try {
         await this.loadGerritChanges();
       } catch (error) {
         this.gerritChanges = null;
+      }
+      try {
+        await this.loadBranchStatus();
+      } catch (error) {
+        this.branchStatus = null;
+      }
+      try {
+        await this.loadCoverityStatus();
+      } catch (error) {
+        this.coverityStatus = null;
       }
       this.loadVersion();
       this.handleRoute();
@@ -261,6 +273,199 @@ const app = {
     );
   },
 
+  // Load the watched branch heads, written by the CI daemon each
+  // time it polls the branches in branch-ci.json
+  async loadBranchStatus() {
+    if (this.branchStatus) return;
+    this.branchStatus = JSON.parse(
+      await this.loadResource("branch_status.json"),
+    );
+  },
+
+  // Load the Coverity Scan project summary scraped by
+  // 'tools/coverity-status'
+  async loadCoverityStatus() {
+    if (this.coverityStatus) return;
+    this.coverityStatus = JSON.parse(
+      await this.loadResource("coverity_status.json"),
+    );
+  },
+
+  // Format a unix timestamp the way the tables show times
+  formatTime(timeStamp) {
+    return new Date(parseFloat(timeStamp) * 1000).toLocaleString("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  },
+
+  // Describe how long ago a unix timestamp was, e.g. "3 days ago"
+  formatAge(timeStamp) {
+    const seconds = Math.max(0, Date.now() / 1000 - parseFloat(timeStamp));
+    const units = [
+      ["day", 86400],
+      ["hour", 3600],
+      ["minute", 60],
+    ];
+    for (const [name, size] of units) {
+      const count = Math.floor(seconds / size);
+      if (count >= 1) return `${count} ${name}${count === 1 ? "" : "s"} ago`;
+    }
+    return "just now";
+  },
+
+  // Collect the per-job results stored in a run's metadata
+  collectResults(data) {
+    const results = [];
+    for (const key in data) {
+      if (key.startsWith("result")) {
+        const name = key.substring("result".length);
+        const rc = parseInt(data[key]);
+        const enforcedKey = "enforced" + name;
+        const enforced =
+          data[enforcedKey] === "True" || data[enforcedKey] === true;
+        results.push({ name, rc: isNaN(rc) ? -1 : rc, enforced });
+      }
+    }
+    return results;
+  },
+
+  // Roll a list of job results up into one PASS/FAIL cell
+  summarizeResults(results) {
+    if (results.length === 0) return { text: "-", color: "gray" };
+    if (results.every((r) => r.rc === 0)) return { text: "PASS", color: "green" };
+    return { text: "FAIL", color: "red" };
+  },
+
+  // Branch summary shown above the main table: where each watched
+  // branch head is, when it was committed and when the branch was
+  // last pushed to (from branch_status.json), against when ktest
+  // last tested it; then what Coverity Scan says about its last
+  // build (from coverity_status.json). Branch runs are the
+  // "{commitHash}_{group}" entries whose change_id is the branch
+  // name; testRuns arrives sorted newest-first.
+  renderBranchSummary(testRuns, gerrit, project) {
+    const heads = this.branchStatus ? this.branchStatus.branches || [] : [];
+    const branchNames = heads.map((b) => b.branch);
+
+    const branchRuns = testRuns.filter((r) => r.gitHash.includes("_"));
+
+    // Branches only known from past runs, e.g. before the daemon
+    // has written branch_status.json
+    for (const r of branchRuns) {
+      const name = r.data.change_id;
+      if (name && !branchNames.includes(name)) branchNames.push(name);
+    }
+
+    const coverity = this.coverityStatus;
+
+    const commitLink = (hash) =>
+      `<a href="${this.escapeHtml(`${gerrit}/plugins/gitiles/${project}/+/${hash}`)}" target="_blank">${this.escapeHtml(hash.substring(0, 12))}</a>`;
+
+    let html = "";
+
+    if (branchNames.length > 0) {
+      html += `
+            <h2>Branches</h2>
+            <table class="branch-table">
+                <colgroup>
+                    <col style="width: 10%">
+                    <col style="width: 32%">
+                    <col style="width: 14%">
+                    <col style="width: 14%">
+                    <col style="width: 20%">
+                    <col style="width: 10%">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th>Branch</th>
+                        <th>Head</th>
+                        <th>Committed</th>
+                        <th title="When the daemon saw the branch move to a new head">Pushed</th>
+                        <th>Last tested</th>
+                        <th>Enforced</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+    }
+
+    for (const name of branchNames) {
+      const head = heads.find((b) => b.branch === name) || null;
+      const runs = branchRuns.filter((r) => r.data.change_id === name);
+      const latest = runs[0] || null;
+
+      let headCell = "-";
+      let committed = "-";
+      let pushed = "-";
+      if (head) {
+        headCell = `${commitLink(head.hash)} ${this.escapeHtml(head.commit_subject)}`;
+        committed = this.formatTime(head.commit_time);
+        if (head.updated_time) {
+          pushed = `<span title="${this.formatTime(head.updated_time)}">${this.formatAge(head.updated_time)}</span>`;
+        }
+      } else if (latest) {
+        headCell = commitLink(latest.gitHash.split("_")[0]);
+      }
+
+      // The result covers every group run at the last tested commit
+      let tested = "-";
+      let summary = { text: "Untested", color: "gray" };
+      if (latest) {
+        const testedHash = latest.gitHash.split("_")[0];
+        tested = this.formatTime(latest.data.time_stamp);
+        if (head && head.hash !== testedHash) {
+          tested += ` (${commitLink(testedHash)}, head untested)`;
+        }
+        const results = runs
+          .filter((r) => r.gitHash.split("_")[0] === testedHash)
+          .flatMap((r) => this.collectResults(r.data))
+          .filter((x) => x.enforced);
+        summary = this.summarizeResults(results);
+      }
+
+      html += `
+                <tr>
+                    <td>${this.escapeHtml(name)}</td>
+                    <td>${headCell}</td>
+                    <td>${committed}</td>
+                    <td>${pushed}</td>
+                    <td>${tested}</td>
+                    <td><span style="color:${summary.color};">${summary.text}</span></td>
+                </tr>
+            `;
+    }
+
+    if (branchNames.length > 0) {
+      html += `
+                </tbody>
+            </table>
+        `;
+    }
+
+    // Coverity Scan only publishes the age of the last analyzed
+    // build as a phrase, so quote it as-is with when it was read
+    if (coverity) {
+      const checked = coverity.generated
+        ? ` (checked ${this.formatTime(coverity.generated)})`
+        : "";
+      html += `
+            <h2>Coverity Scan</h2>
+            <p>
+                Last build analyzed <b>${this.escapeHtml(coverity.last_build_analyzed)}</b>${checked}
+                &mdash; <a href="${this.escapeHtml(coverity.url)}" target="_blank">${this.escapeHtml(coverity.project)} on scan.coverity.com</a>
+            </p>
+        `;
+    }
+
+    return html;
+  },
+
   // Show error message
   showError(message) {
     const content = document.getElementById("content");
@@ -286,13 +491,6 @@ const app = {
     const changes = doc ? doc.changes || [] : [];
     const gerrit = doc ? doc.gerrit : "https://review.whamcloud.com";
     const project = doc ? doc.project : "fs/lustre-release";
-
-    const summarize = (results) => {
-      if (results.length === 0) return { text: "-", color: "gray" };
-      if (results.every((r) => r.rc === 0))
-        return { text: "PASS", color: "green" };
-      return { text: "FAIL", color: "red" };
-    };
 
     // Get all git hashes with complete metadata, newest first
     const testRuns = Object.keys(this.metadata)
@@ -337,6 +535,8 @@ const app = {
 
     let html = `
             <h1>Testing Status</h1>
+            ${this.renderBranchSummary(testRuns, gerrit, project)}
+            <h2>Test runs</h2>
             <div id="profiles">
                 Profile:
                 <label><input type="radio" name="profile" onchange="app.applyProfile(this.value)" value="Patches" checked> Tested patches</label>
@@ -449,34 +649,16 @@ const app = {
       let runtime = "-";
 
       if (data) {
-        // Collect all result/enforced metadata
-        const results = [];
-        for (const key in data) {
-          if (key.startsWith("result")) {
-            const name = key.substring("result".length);
-            const rc = parseInt(data[key]);
-            const enforcedKey = "enforced" + name;
-            const enforced =
-              data[enforcedKey] === "True" || data[enforcedKey] === true;
-            results.push({ name, rc: isNaN(rc) ? -1 : rc, enforced });
-          }
-        }
+        const results = this.collectResults(data);
 
-        enforcedSummary = summarize(results.filter((x) => x.enforced));
-        optionalSummary = summarize(results.filter((x) => !x.enforced));
-
-        time = new Date(parseFloat(data.time_stamp) * 1000).toLocaleString(
-          "en-US",
-          {
-            timeZone: "America/New_York",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          },
+        enforcedSummary = this.summarizeResults(
+          results.filter((x) => x.enforced),
         );
+        optionalSummary = this.summarizeResults(
+          results.filter((x) => !x.enforced),
+        );
+
+        time = this.formatTime(data.time_stamp);
         runtime = data.total_runtime || "-";
       }
 

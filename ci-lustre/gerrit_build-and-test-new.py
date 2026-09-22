@@ -51,6 +51,7 @@ BRANCH_CONFIG_PATH = os.getenv(
     "BRANCH_CONFIG", os.path.join(KTEST_DIR, "ci-lustre/branch-ci.json")
 )
 CHANGES_REFRESH_INTERVAL = 60 * 30
+COVERITY_REFRESH_INTERVAL = 60 * 60
 
 
 def _now():
@@ -82,9 +83,9 @@ def load_branch_config(config_path=BRANCH_CONFIG_PATH):
         return []
 
 
-def get_branch_head_hash(repo_url, branch_name, repo_path=LUSTRE_SOURCE):
+def get_branch_head(repo_url, branch_name, repo_path=LUSTRE_SOURCE):
     """
-    Get the latest commit hash for a given branch.
+    Fetch a branch and describe its head commit.
 
     Args:
         repo_url: Git repository URL to fetch the branch from
@@ -92,24 +93,77 @@ def get_branch_head_hash(repo_url, branch_name, repo_path=LUSTRE_SOURCE):
         repo_path: Path to the local working clone used to run git
 
     Returns:
-        The commit hash as a string, or None if the fetch fails
+        A dict with the head's "hash", "commit_time" (committer date as
+        a unix timestamp) and "commit_subject", or None if the fetch
+        fails
     """
     try:
         # Fetch the branch from the configured repository
         fetch_cmd = f"cd {repo_path} && git fetch {repo_url} {branch_name}"
         subprocess.run(fetch_cmd, shell=True, check=True, capture_output=True)
 
-        # Get the hash of the just-fetched branch head
-        rev_parse_cmd = f"cd {repo_path} && git rev-parse FETCH_HEAD"
+        # Describe the just-fetched branch head, one field per line
+        log_cmd = f"cd {repo_path} && git log -1 --format=%H%n%ct%n%s FETCH_HEAD"
         result = subprocess.run(
-            rev_parse_cmd, shell=True, check=True, capture_output=True, text=True
+            log_cmd, shell=True, check=True, capture_output=True, text=True
         )
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as e:
+        git_hash, commit_time, subject = result.stdout.split("\n", 2)
+        return {
+            "hash": git_hash,
+            "commit_time": int(commit_time),
+            "commit_subject": subject.strip()[:90],
+        }
+    except (subprocess.CalledProcessError, ValueError) as e:
         logging.error(
             f"Failed to get branch head for {branch_name} from {repo_url}: {e}"
         )
         return None
+
+
+def load_branch_status():
+    """
+    Load the branch list from the last branch_status.json written, or
+    an empty list if there is none yet.
+    """
+    status_path = os.path.join(OUTPUT_DIR, "branch_status.json")
+
+    try:
+        with open(status_path, "r") as f:
+            return json.load(f).get("branches", [])
+    except (IOError, json.JSONDecodeError, AttributeError):
+        return []
+
+
+def write_branch_status(heads):
+    """
+    Write branch_status.json for the status site's branch summary.
+
+    heads is a list of branch config dicts, each with the "head" dict
+    from poll_branch_heads() merged in. The site pairs this with the
+    branch runs in metadata_store.json to show when each branch last
+    moved versus when ktest last tested it.
+    """
+    status = {
+        "generated": _now(),
+        "branches": [
+            {
+                "branch": b["branch"],
+                "repo": b["repo"],
+                "subject": b.get("subject", ""),
+                "groups": b.get("groups", []),
+                **b["head"],
+            }
+            for b in heads
+        ],
+    }
+
+    status_path = os.path.join(OUTPUT_DIR, "branch_status.json")
+    temp_path = status_path + ".tmp"
+
+    with open(temp_path, "w") as f:
+        json.dump(status, f, indent=2)
+    os.chmod(temp_path, 0o644)  # Make readable by nginx
+    os.replace(temp_path, status_path)
 
 
 class Reviewer(object):
@@ -136,6 +190,9 @@ class Reviewer(object):
         self.last_push = 0
         self.branch_review_interval = 60 * 60 * 12
         self.last_branch_review = 0
+        self.branch_poll_interval = 60 * 10
+        self.last_branch_poll = 0
+        self.branch_heads = []
 
     def _debug(self, msg, *args):
         """_"""
@@ -397,6 +454,7 @@ class Reviewer(object):
 
     def update(self):
         self.check_for_branches()
+        self.poll_branch_heads()
 
         new_timestamp = _now()
         age = 48
@@ -439,27 +497,68 @@ class Reviewer(object):
         self.podman_reset()
         self.run_tests(group, change_id, storage_key, group_subject)
 
-    def check_for_branches(self):
-        if _now() - self.last_branch_review < self.branch_review_interval:
-            return
+    def poll_branch_heads(self, force=False):
+        """
+        Fetch every watched branch head and publish branch_status.json.
+
+        Runs far more often than the branch tests so the site can show
+        when a branch was last pushed to: a head is "updated" the first
+        time this poll sees it at a new hash. Between polls (and across
+        restarts) the previous file is the memory, so a head first seen
+        with no record falls back to its commit date. Returns the list
+        of branch config dicts with their "head" merged in.
+        """
+        if not force and _now() - self.last_branch_poll < self.branch_poll_interval:
+            return self.branch_heads
+
+        previous = {b["branch"]: b for b in load_branch_status()}
+        heads = []
 
         for branch in load_branch_config():
             branch_name = branch.get("branch")
             repo_url = branch.get("repo")
-            subject = branch.get("subject", "")
             groups = branch.get("groups", [])
 
             if not branch_name or not repo_url or not groups:
                 continue
 
-            # Get the latest commit hash for this branch
-            git_hash = get_branch_head_hash(repo_url, branch_name)
+            head = get_branch_head(repo_url, branch_name)
 
-            if git_hash is None:
+            if head is None:
                 self._error(
                     f"Failed to get git hash for branch {branch_name}, skipping"
                 )
                 continue
+
+            old = previous.get(branch_name)
+
+            if old and old.get("hash") == head["hash"]:
+                head["updated_time"] = old.get("updated_time", head["commit_time"])
+            elif old:
+                head["updated_time"] = _now()
+                self._debug(f"Branch {branch_name} moved to {head['hash']}")
+            else:
+                head["updated_time"] = head["commit_time"]
+
+            heads.append({**branch, "head": head})
+
+        write_branch_status(heads)
+
+        self.branch_heads = heads
+        self.last_branch_poll = _now()
+
+        return heads
+
+    def check_for_branches(self):
+        if _now() - self.last_branch_review < self.branch_review_interval:
+            return
+
+        for branch in self.poll_branch_heads(force=True):
+            branch_name = branch["branch"]
+            repo_url = branch["repo"]
+            subject = branch.get("subject", "")
+            groups = branch["groups"]
+            git_hash = branch["head"]["hash"]
 
             # Only run the groups we haven't already tested at this commit.
             pending = [
@@ -595,6 +694,27 @@ def print_Status_to_HTML():
 
 
 last_changes_refresh = 0
+last_coverity_refresh = 0
+
+
+def refresh_coverity_status():
+    """
+    Scrape the public Coverity Scan project page into
+    coverity_status.json for the site's branch summary. Throttled: the
+    page only reports the age of the last analyzed build as a phrase,
+    which changes slowly.
+    """
+    global last_coverity_refresh
+
+    if _now() - last_coverity_refresh < COVERITY_REFRESH_INTERVAL:
+        return
+
+    command = f"cd {KTEST_DIR} && ./tools/coverity-status --output '{OUTPUT_DIR}'"
+
+    _, returncode, _ = Reviewer.run_script(command, timeout_seconds=120)
+
+    if returncode == 0:
+        last_coverity_refresh = _now()
 
 
 def refresh_gerrit_changes():
@@ -650,6 +770,9 @@ def copy_static_site():
 
     # Refresh the open-change list for the Patches page
     refresh_gerrit_changes()
+
+    # Refresh the Coverity Scan summary
+    refresh_coverity_status()
 
 
 if __name__ == "__main__":
