@@ -377,17 +377,29 @@ pub fn mount_oss(end: u32) {
     }
 }
 
-// ZFS pool/dataset naming convention: pool "lustre-mdt0" contains dataset "mdt0",
-// giving the full device path "lustre-mdt0/mdt0". The caller is responsible for
-// creating the zpools (e.g. via `zpool create lustre-mdt0 /dev/ram0`) before
-// invoking these functions. Lustre formats each dataset on first mount (virgin).
+// ZFS pool/dataset naming convention: pool "lustre-mdt1" contains dataset "mdt1",
+// giving the full device path "lustre-mdt1/mdt1". Pools are numbered from 1,
+// matching the Lustre test framework's defaults (mdsdevname/ostdevname:
+// "${FSNAME}-mdt${num}/mdt${num}" for num in 1..MDSCOUNT), so auster's
+// facet setup finds the devices lustre-ktest created. Lustre target indices
+// stay 0-based (MDT0000 lives on lustre-mdt1/mdt1). The caller is responsible
+// for creating the zpools before invoking these functions. Lustre formats
+// each dataset on first mount (virgin).
+
+fn zfs_mdt_pool(index: u32) -> String {
+    format!("lustre-mdt{}", index + 1)
+}
 
 fn zfs_mdt_device(index: u32) -> String {
-    format!("lustre-mdt{}/mdt{}", index, index)
+    format!("{}/mdt{}", zfs_mdt_pool(index), index + 1)
+}
+
+fn zfs_ost_pool(index: u32) -> String {
+    format!("lustre-ost{}", index + 1)
 }
 
 fn zfs_ost_device(index: u32) -> String {
-    format!("lustre-ost{}/ost{}", index, index)
+    format!("{}/ost{}", zfs_ost_pool(index), index + 1)
 }
 
 fn zfs_mgs_device() -> String {
@@ -485,8 +497,8 @@ fn mount_mds_zfs(start: u32, end: u32, ram_offset: u32) {
     for index in start..end {
         let sv_name = get_service_name(FSNAME, "MDT", index);
         let ram_dev = format!("/dev/ram{}", ram_offset + index);
-        let pool = format!("lustre-mdt{}", index);
-        let dataset = format!("{}/mdt{}", pool, index);
+        let pool = zfs_mdt_pool(index);
+        let dataset = zfs_mdt_device(index);
 
         boldln!("Mounting ZFS MDT {}...", sv_name);
 
@@ -506,8 +518,8 @@ pub fn mount_mds_combined_zfs(mds_count: u32) -> u32 {
     boldln!("Mounting ZFS combined MGS/MDT...");
 
     // MDT0 is also the MGS; uses /dev/ram0
-    zpool_create("lustre-mdt0", "/dev/ram0").test_call().ok();
-    zfs_dataset_create("lustre-mdt0/mdt0", false)
+    zpool_create(&zfs_mdt_pool(0), "/dev/ram0").test_call().ok();
+    zfs_dataset_create(&zfs_mdt_device(0), false)
         .test_call()
         .ok();
 
@@ -545,8 +557,8 @@ pub fn mount_oss_zfs(end: u32, ost_ram_offset: u32) {
     for index in 0..end {
         let sv_name = get_service_name(FSNAME, "OST", index);
         let ram_dev = format!("/dev/ram{}", ost_ram_offset + index);
-        let pool = format!("lustre-ost{}", index);
-        let dataset = format!("{}/ost{}", pool, index);
+        let pool = zfs_ost_pool(index);
+        let dataset = zfs_ost_device(index);
 
         boldln!("Mounting ZFS OST {}...", sv_name);
 

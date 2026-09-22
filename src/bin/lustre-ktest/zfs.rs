@@ -297,12 +297,14 @@ pub fn zpool_destroy(pool: &str) -> Result<(), String> {
 }
 
 /// Destroy all lustre-mdt*, lustre-ost*, and lustre-mgs ZFS pools.
+///
+/// Pools are numbered from 1 (see the naming convention in mount.rs).
 pub fn zpool_destroy_lustre_pools() {
     // Destroy MGS pool (standalone MGS case)
     let _ = zpool_destroy("lustre-mgs");
 
     // Destroy MDT pools until first failure
-    for i in 0..64 {
+    for i in 1..=64 {
         let pool = format!("lustre-mdt{}", i);
         if zfs_ioctl(ZFS_IOC_POOL_DESTROY, &pool, None, None).is_err() {
             break;
@@ -310,7 +312,7 @@ pub fn zpool_destroy_lustre_pools() {
     }
 
     // Destroy OST pools until first failure
-    for i in 0..64 {
+    for i in 1..=64 {
         let pool = format!("lustre-ost{}", i);
         if zfs_ioctl(ZFS_IOC_POOL_DESTROY, &pool, None, None).is_err() {
             break;
