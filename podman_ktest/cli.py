@@ -151,6 +151,11 @@ def main():
         action="store_true",
         help="Use tarballs for source input (default: use overlay mounts)",
     )
+    parser.add_argument(
+        "--lustre-cwd",
+        action="store_true",
+        help="Use the Lustre tree containing the current directory instead of ktest_lustre_source from ~/.ktestrc",
+    )
     subparsers = parser.add_subparsers(dest="cmd", help="Command to run", required=True)
 
     # Commands
@@ -317,7 +322,7 @@ def main():
 
     if args.cmd == "job":
         # Get directory configuration early for git hash
-        dirs = get_ktest_dirs(ktest_dir)
+        dirs = get_ktest_dirs(ktest_dir, args.lustre_cwd)
 
         # Determine output directory and git hash for log naming
         output_dir = args.output if args.output else "/tmp/ktest-results"
@@ -362,7 +367,10 @@ def main():
 
         # Get directory configuration (may already be loaded for job command)
         if args.cmd != "job" or args.stdout:
-            dirs = get_ktest_dirs(ktest_dir)
+            dirs = get_ktest_dirs(ktest_dir, args.lustre_cwd)
+
+        if args.lustre_cwd:
+            print(f"Using Lustre source: {dirs['ktest_lustre_source']}")
 
         # Validate environment before running jobs
         if not valid_env(args.podman_socket, args.shared_filesystem):

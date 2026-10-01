@@ -226,11 +226,42 @@ def load_ktestrc():
     return env_vars
 
 
-def get_ktest_dirs(ktest_dir):
+def get_cwd_lustre_source():
+    """Resolve the Lustre source tree containing the current directory.
+
+    Uses the top of the enclosing git checkout, so pk can be run from any
+    subdirectory of a Lustre tree, and falls back to the current directory
+    itself when it is not in a git checkout.
+    """
+    import sys
+
+    cwd = Path.cwd().resolve()
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        source = Path(result.stdout.strip()).resolve()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        source = cwd
+
+    if not (source / "lustre").is_dir() or not (source / "lnet").is_dir():
+        print(f"Error: --lustre-cwd: {source} does not look like a Lustre source tree")
+        sys.exit(1)
+
+    return str(source)
+
+
+def get_ktest_dirs(ktest_dir, lustre_cwd=False):
     """Get ktest directory paths.
 
     Args:
         ktest_dir: Path to the ktest directory (where pk lives)
+        lustre_cwd: Use the Lustre tree containing the current directory
+            instead of the one configured in ~/.ktestrc
 
     Returns:
         Dictionary with ktest_dir, ktest_kernel_source, ktest_lustre_source, ktest_zfs_source
@@ -262,7 +293,11 @@ def get_ktest_dirs(ktest_dir):
             )
         sys.exit(1)
 
-    ktest_lustre_source = ktestrc_vars.get("ktest_lustre_source")
+    ktest_lustre_source = None
+    if lustre_cwd:
+        ktest_lustre_source = get_cwd_lustre_source()
+    if not ktest_lustre_source:
+        ktest_lustre_source = ktestrc_vars.get("ktest_lustre_source")
     if not ktest_lustre_source:
         ktest_lustre_source = str(Path(ktest_kernel_source).parent / "lustre-release")
 
