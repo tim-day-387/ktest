@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+name: scratch
+description: Empty workspace with a shell and a browser
+variables:
+  purpose:
+    prompt: What is this workspace for?
+    default: scratch work
+    from: text
+task:
+  title: "{{purpose}}"
+  body: |
+    ## Goal
+
+    {{purpose}}
+
+    ## Notes
+browser:
+  profile: isolated
+  tabs:
+    - https://duckduckgo.com
+terminal:
+  panes:
+    - name: shell

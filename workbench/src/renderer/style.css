@@ -1,0 +1,583 @@
+:root {
+    /* classic light gray shell; header and accent from the ktest site
+       (ci-lustre/static-site/styles.css) */
+    --bg: #ddd;
+    --strip: #c8c8c8;
+    --border: #999;
+    --hover: #d0d0d0;
+    --selected: #c0c0c0;
+    --fg: #333;
+    --muted: #555;
+    --accent: #ae0c00;
+    --header: #333;
+    --header-hover: #555;
+    --danger: #ae0c00;
+    --sidebar-w: 320px;
+    --terminal-h: 40%;
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-size: 13px;
+    color: var(--fg);
+}
+* {
+    box-sizing: border-box;
+}
+html,
+body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    overflow: hidden;
+}
+body {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) 1fr;
+}
+/* While a page is in its own (HTML) fullscreen, only the browser slot remains, filling the window. */
+body.page-fullscreen {
+    grid-template-columns: 1fr;
+}
+body.page-fullscreen #sidebar,
+body.page-fullscreen #tab-strip,
+body.page-fullscreen #browser-bar,
+body.page-fullscreen #bookmark-bar,
+body.page-fullscreen #terminal-tabs,
+body.page-fullscreen #terminal-slot {
+    display: none !important;
+}
+#fullscreen {
+    font-size: 15px;
+    line-height: 1;
+}
+
+aside,
+main {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+#sidebar {
+    border-right: 1px solid var(--border);
+}
+/* Same bar as the site: dark, logo, title underlined in red. */
+header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--header);
+    color: #fff;
+}
+header img {
+    width: 32px;
+    height: 32px;
+    image-rendering: pixelated; /* 16px pixel art */
+}
+header button {
+    margin-left: auto;
+    background: transparent;
+    border-color: #777;
+    color: #fff;
+}
+header button:hover {
+    background: var(--header-hover);
+}
+h1 {
+    font-size: 18px;
+    margin: 0;
+    padding-bottom: 4px;
+    border-bottom: 2px solid var(--accent);
+}
+h2 {
+    font-size: 12px;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    flex: 1;
+}
+.muted {
+    color: var(--muted);
+}
+.error {
+    color: var(--danger);
+    white-space: pre-wrap;
+    font-family: monospace;
+    font-size: 11px;
+    margin: 4px 0;
+}
+.hidden {
+    display: none !important;
+}
+.fill {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.center {
+    align-items: center;
+    justify-content: center;
+}
+
+#workspace-list {
+    list-style: none;
+    margin: 0;
+    padding: 6px 0;
+    flex: 1;
+    overflow-y: auto;
+}
+#workspace-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+}
+#workspace-list li:hover {
+    background: var(--hover);
+}
+#workspace-list li.active {
+    background: var(--selected);
+    box-shadow: inset 3px 0 var(--accent);
+}
+#workspace-list .name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#workspace-list .destroy {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: transparent;
+    border: 1.5px solid var(--danger);
+    color: var(--danger);
+    font-size: 12px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.55;
+}
+#workspace-list li:hover .destroy,
+#workspace-list li.active .destroy {
+    opacity: 1;
+}
+#workspace-list .destroy:hover {
+    background: var(--danger);
+    color: #fff;
+}
+.dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+}
+.dot.ready {
+    background: #1e6b22;
+}
+.dot.creating,
+.dot.destroying {
+    background: #b88600;
+}
+.dot.failed {
+    background: var(--danger);
+}
+
+input,
+select,
+textarea,
+button {
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 7px;
+}
+input:focus,
+select:focus,
+textarea:focus {
+    outline: 1px solid var(--fg);
+}
+button {
+    cursor: pointer;
+    background: var(--header);
+    border-color: var(--header);
+    color: #fff;
+}
+button:hover {
+    background: var(--header-hover);
+}
+button.danger {
+    background: transparent;
+    border-color: var(--danger);
+    color: var(--danger);
+}
+button.danger:hover {
+    background: #ffe6e6;
+}
+#browser-bar button {
+    background: transparent;
+    border-color: transparent;
+    color: var(--fg);
+    padding: 3px 7px;
+}
+#browser-bar button:hover {
+    background: var(--hover);
+}
+#browser-bar button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+#tab-strip {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    padding: 4px 6px 0;
+    background: var(--strip);
+    border-bottom: 1px solid var(--border);
+}
+#tabs {
+    display: flex;
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: 2px;
+    overflow: hidden;
+}
+.tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 160px;
+    min-width: 60px;
+    max-width: 220px;
+    padding: 4px 6px 4px 10px;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 12px;
+}
+.tab:hover {
+    background: var(--hover);
+}
+.tab.active {
+    background: var(--bg);
+    border-color: var(--border);
+    color: var(--fg);
+}
+.tab .title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.tab .close {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    padding: 0 4px;
+    border-radius: 3px;
+    line-height: 1;
+}
+.tab .close:hover {
+    background: var(--border);
+    color: var(--fg);
+}
+.tab.loading .title::before {
+    content: "\21BB ";
+    color: var(--accent);
+}
+#tab-new {
+    background: transparent;
+    border-color: transparent;
+    color: var(--fg);
+    padding: 2px 8px;
+    margin-bottom: 2px;
+    flex-shrink: 0;
+}
+#tab-new:hover {
+    background: var(--hover);
+}
+#browser-bar {
+    display: flex;
+    gap: 4px;
+    padding: 6px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+}
+#url {
+    flex: 1;
+    font-family: monospace;
+}
+#bookmark-bar {
+    display: flex;
+    align-items: center;
+    padding: 2px 6px;
+    gap: 2px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+}
+#bookmark-items {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    gap: 2px;
+    white-space: nowrap;
+}
+#bookmark-bar button {
+    background: transparent;
+    border-color: transparent;
+    color: var(--fg);
+    padding: 2px 7px;
+    font-size: 12px;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+}
+#bookmark-bar button:hover {
+    background: var(--hover);
+}
+#bookmark-bar button.folder::before {
+    content: "\25BE";
+    margin-right: 4px;
+    color: var(--muted);
+}
+#bookmark-bar button.overflow {
+    visibility: hidden;
+    position: absolute;
+}
+#browser-slot {
+    flex: 1;
+    min-height: 0;
+    background: var(--bg);
+}
+#terminal-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 4px 6px 0;
+    background: var(--strip);
+    border-top: 1px solid var(--border);
+}
+#terminal-tabs button {
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    color: var(--muted);
+    padding: 3px 10px;
+    border-radius: 4px 4px 0 0;
+}
+#terminal-tabs button:hover {
+    background: var(--hover);
+}
+#terminal-tabs button.active {
+    color: var(--fg);
+    background: var(--bg);
+    border-color: var(--border);
+}
+#terminal-slot {
+    height: var(--terminal-h);
+    position: relative;
+    background: var(--bg);
+}
+#terminal-slot .pane {
+    position: absolute;
+    inset: 4px;
+}
+
+/* top-style host status */
+#sysinfo {
+    border-top: 1px solid var(--border);
+    padding: 6px 12px;
+    font-family: monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--muted);
+    overflow: hidden;
+}
+#sysinfo div {
+    white-space: pre;
+}
+#home-toggle {
+    padding: 2px 8px;
+}
+.badge {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--border);
+}
+.badge.failed {
+    background: var(--danger);
+    color: #fff;
+}
+.badge.ready {
+    background: #cfe6cc;
+    color: #24552a;
+}
+
+/* ---- home: the two workspace spawners, one above the other ---- */
+#home {
+    overflow-y: auto;
+}
+#home > section {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px 24px;
+}
+#home > section + section {
+    border-top: 1px solid var(--border);
+}
+#home > section > h2 {
+    flex: none;
+}
+button.secondary {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--fg);
+}
+button.secondary:hover {
+    background: var(--hover);
+}
+#preset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+}
+.preset {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    text-align: left;
+    padding: 18px 20px;
+    min-height: 120px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--fg);
+}
+.preset:hover,
+.preset:focus-visible {
+    background: var(--hover);
+    border-color: var(--accent);
+    outline: none;
+}
+.preset strong {
+    font-size: 15px;
+}
+.preset span {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.4;
+}
+.preset small {
+    margin-top: auto;
+    color: var(--muted);
+    font-size: 11px;
+}
+#preset-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 520px;
+}
+#preset-form h2 {
+    font-size: 16px;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--fg);
+    margin-top: 8px;
+}
+#preset-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 12px;
+    color: var(--muted);
+}
+#preset-form input {
+    font-size: 14px;
+    padding: 7px 9px;
+}
+#preset-form button[type="submit"] {
+    align-self: flex-start;
+    padding: 8px 18px;
+    font-size: 14px;
+}
+#preset-back {
+    align-self: flex-start;
+}
+
+/* ---- new workspaces from Gerrit: the change table of the ktest site ---- */
+#gerrit-bar,
+#gerrit-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+#gerrit-profiles {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+}
+#gerrit-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+#gerrit-table th,
+#gerrit-table td {
+    padding: 4px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+}
+#gerrit-table thead th {
+    background: var(--strip);
+}
+#gerrit-table select {
+    max-width: 100%;
+    padding: 2px 4px;
+    font-weight: normal;
+}
+#gerrit-table tbody tr:hover {
+    background: var(--hover);
+}
+#gerrit-table tr.filtered {
+    display: none;
+}
+#gerrit-table a {
+    color: var(--accent);
+}
+#gerrit-table .pass {
+    color: #1e6b22;
+}
+#gerrit-table .fail {
+    color: var(--danger);
+}
+button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+/* The subject gets the room; the author list would otherwise take it. */
+#gerrit-table td.subject {
+    width: 45%;
+}
+#gerrit-author {
+    width: 170px;
+}

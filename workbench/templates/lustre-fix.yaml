@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+name: lustre-fix
+description: Lustre patch — a git worktree with a Gerrit change checked out, with its Jira ticket open
+variables:
+  change:
+    prompt: Gerrit change to check out (68716, or 68716/2 for a patchset)
+    pattern: "[0-9]+(/[0-9]+)?"
+    from: url
+    match: "review\\.whamcloud\\.com/(?:c/.+?/\\+/|#/c/)?([0-9]+)"
+  ticket:
+    prompt: Jira ticket (optional)
+    pattern: "LU-[0-9]+"
+    optional: true
+  repo:
+    prompt: Lustre checkout to add the worktree to
+    default: "~/ws/lustre-release"
+task:
+  title: "Gerrit {{change}} {{ticket}}"
+  body: |
+    ## Goal
+
+    Land Gerrit change {{change}}.
+
+    ## Acceptance criteria
+
+    - [ ] Root cause understood
+    - [ ] Fix with test coverage
+    - [ ] Patch pushed to Gerrit
+browser:
+  profile: shared
+  tabs:
+    - https://review.whamcloud.com/c/fs/lustre-release/+/{{change}}
+    - https://jira.whamcloud.com/browse/{{ticket}}
+terminal:
+  cwd: "{{workspace_dir}}/lustre"
+  env:
+    KTEST_JOB: "{{ticket}}"
+  panes:
+    - name: shell
+    - name: agent
+hooks:
+  create: |
+    repo="{{repo}}"; repo="${repo/#\~/$HOME}"
+    wt="$WORKSPACE_DIR/lustre"
+    change="{{change}}"
+    # The branch is named after the ticket, or after the change without one.
+    name="{{ticket}}"; name="${name:-change-${change%%/*}}"
+    gerrit=https://review.whamcloud.com
+    if git -C "$repo" show-ref --verify -q "refs/heads/$name"; then
+      # A branch from before, maybe with commits of yours: work on it as it is.
+      git -C "$repo" worktree add "$wt" "$name"
+      note="Reused the existing branch $name; change ${change%%/*} was not fetched."
+    else
+      # "number ref" of the change's current patchset
+      found=$(curl -sSf -m 30 -G "$gerrit/changes/" \
+        --data-urlencode "q=project:fs/lustre-release change:${change%%/*}" \
+        --data-urlencode o=CURRENT_REVISION | tail -n +2 |
+        jq -r '.[] | "\(._number) \(.revisions[.current_revision].ref)"')
+      [ -n "$found" ] || { echo "no change ${change%%/*} in Gerrit" >&2; exit 1; }
+      read -r number ref <<< "$found"
+      [[ $change == */* ]] && ref="${ref%/*}/${change##*/}"
+      # The patchset is fetched straight into the new branch, so the repo needs no
+      # base branch to start it from.
+      timeout 300 git -C "$repo" fetch -q --no-tags "$gerrit/fs/lustre-release" \
+        "$ref:refs/heads/$name"
+      # Destroy deletes the branch only while it still points here: it is then the
+      # workspace's own and has no commits of yours.
+      git -C "$repo" rev-parse "refs/heads/$name" > "$WORKSPACE_DIR/branch-start"
+      git -C "$repo" worktree add "$wt" "$name"
+      note="Checked out $gerrit/$number ($(git -C "$wt" log -1 --format=%s))."
+    fi
+    printf '\n## Gerrit\n\n%s\n' "$note" >> "$TASK_FILE"
+    if [ -n "{{ticket}}" ]; then
+      printf '\n## Links\n\n- https://jira.whamcloud.com/browse/%s\n' "{{ticket}}" >> "$TASK_FILE"
+    fi
+  # Destroy discards none of your work: uncommitted changes go to a stash in the
+  # repo, and the branch stays unless the workspace made it and nothing was
+  # committed on it. If a step fails the workspace is kept.
+  destroy: |
+    repo="{{repo}}"; repo="${repo/#\~/$HOME}"
+    wt="$WORKSPACE_DIR/lustre"
+    change="{{change}}"
+    name="{{ticket}}"; name="${name:-change-${change%%/*}}"
+    if [ -e "$wt/.git" ]; then
+      if [ -n "$(git -C "$wt" status --porcelain)" ]; then
+        git -C "$wt" stash push -q -u -m "workbench: $name workspace destroyed"
+      fi
+      git -C "$repo" worktree remove --force "$wt"
+    fi
+    start=$(cat "$WORKSPACE_DIR/branch-start" 2> /dev/null || true)
+    tip=$(git -C "$repo" rev-parse -q --verify "refs/heads/$name" || true)
+    if [ -n "$start" ] && [ "$tip" = "$start" ]; then
+      git -C "$repo" branch -q -D "$name"
+    fi

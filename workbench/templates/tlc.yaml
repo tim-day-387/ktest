@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+name: tlc
+description: The Lustre Collective — email, Teams and Gerrit from your Firefox bookmarks
+task:
+  title: TLC
+browser:
+  profile: shared
+  bookmarks:
+    - TLC/Outlook
+    - TLC/Teams
+    - Personal Links/Gerrit
+terminal:
+  panes:
+    - name: shell

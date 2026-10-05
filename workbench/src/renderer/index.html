@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+        />
+        <title>Workbench</title>
+        <link rel="stylesheet" href="./style.css" />
+    </head>
+    <body>
+        <aside id="sidebar">
+            <header>
+                <img src="../../build/icon.png" alt="" />
+                <h1>Workbench</h1>
+                <button id="home-toggle" title="Home: spawn workspaces">Home</button>
+            </header>
+            <ul id="workspace-list"></ul>
+            <footer id="sysinfo">
+                <div id="sys-time"></div>
+                <div id="sys-load"></div>
+                <div id="sys-mem"></div>
+            </footer>
+        </aside>
+
+        <main id="main">
+            <div id="home" class="fill">
+                <section id="spawn-single">
+                    <h2>Single workspace</h2>
+                    <div id="preset-grid"></div>
+                    <form id="preset-form" class="hidden">
+                        <button type="button" id="preset-back" class="secondary">
+                            &#8592; Presets
+                        </button>
+                        <h2 id="preset-title"></h2>
+                        <p id="preset-desc" class="muted"></p>
+                        <div id="var-fields"></div>
+                        <p id="form-error" class="error"></p>
+                        <button type="submit">Create</button>
+                    </form>
+                </section>
+                <section id="spawn-gerrit">
+                    <h2>Workspaces from Gerrit</h2>
+                    <div id="gerrit-bar">
+                        <label>
+                            Template
+                            <select
+                                id="gerrit-template"
+                                title="Each change becomes a workspace of this template, filled in like a right-clicked Gerrit link"
+                            ></select>
+                        </label>
+                        <span id="gerrit-profiles"></span>
+                        <button type="button" id="gerrit-refresh" class="secondary">Refresh</button>
+                    </div>
+                    <table id="gerrit-table">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>Change</th>
+                                <th>Subject</th>
+                                <th>Author</th>
+                                <th>Diff</th>
+                                <th>Reviews</th>
+                                <th>Maloo</th>
+                                <th>Workspace</th>
+                            </tr>
+                            <tr class="filter-row">
+                                <th>
+                                    <input
+                                        id="gerrit-all"
+                                        type="checkbox"
+                                        title="Select or deselect the listed changes"
+                                    />
+                                </th>
+                                <th></th>
+                                <th></th>
+                                <th>
+                                    <select
+                                        id="gerrit-author"
+                                        multiple
+                                        size="4"
+                                        title="Ctrl-click to select multiple authors"
+                                    ></select>
+                                </th>
+                                <th></th>
+                                <th><select id="gerrit-ready"></select></th>
+                                <th><select id="gerrit-test"></select></th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div id="gerrit-actions">
+                        <button type="button" id="gerrit-create" disabled>Create workspaces</button>
+                        <span id="gerrit-status" class="muted"></span>
+                    </div>
+                    <p id="gerrit-error" class="error"></p>
+                </section>
+            </div>
+            <div id="workspace" class="fill hidden">
+                <div id="tab-strip">
+                    <div id="tabs"></div>
+                    <button id="tab-new" title="New tab (Ctrl+T)">+</button>
+                </div>
+                <div id="browser-bar">
+                    <button id="nav-back" title="Back">&#8592;</button>
+                    <button id="nav-forward" title="Forward">&#8594;</button>
+                    <button id="nav-reload" title="Reload">&#8635;</button>
+                    <input id="url" type="text" spellcheck="false" placeholder="URL" />
+                    <button id="fullscreen" title="Full screen (F11)">&#x26F6;</button>
+                    <button id="cookies" title="Re-import Firefox cookies into this workspace">
+                        Cookies
+                    </button>
+                    <button id="ublock" title="uBlock Origin dashboard for this workspace">
+                        uBlock
+                    </button>
+                </div>
+                <div id="bookmark-bar" class="hidden">
+                    <div id="bookmark-items"></div>
+                    <button id="bookmark-more" title="More bookmarks">&raquo;</button>
+                </div>
+                <div id="browser-slot"></div>
+                <div id="terminal-tabs"></div>
+                <div id="terminal-slot"></div>
+            </div>
+        </main>
+
+        <script type="module" src="./main.ts"></script>
+    </body>
+</html>

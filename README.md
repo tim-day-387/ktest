@@ -28,3 +28,11 @@ Run a command in the container directly:
 pk run ls -l
 pk run whoami
 ```
+
+## Workbench
+
+```
+make workbench
+make workbench-install    # package and install under ~/.local
+workbench                 # or launch "Workbench" from the app grid
+```
