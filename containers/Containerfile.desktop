@@ -54,7 +54,7 @@ COPY --chown=${DESKTOP_UID}:${DESKTOP_UID} tools/timbashrc /home/${DESKTOP_USER}
 # bundles into the initramfs is out of reach by then (init bind-mounts
 # /lib/modules across the switch, but not /lib/firmware).  Extract once and
 # reuse the tree for both halves so this is a single download.
-ARG NVIDIA_DRIVER_VERSION=610.43.02
+ARG NVIDIA_DRIVER_VERSION=615.78.08
 RUN cd /tmp \
  && run=NVIDIA-Linux-x86_64-${NVIDIA_DRIVER_VERSION}.run \
  && curl -fsSL -O "https://us.download.nvidia.com/XFree86/Linux-x86_64/${NVIDIA_DRIVER_VERSION}/$run" \

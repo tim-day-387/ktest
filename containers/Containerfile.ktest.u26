@@ -145,7 +145,7 @@ RUN for chip in ad102 ad103 ad104 ad106 ad107; do \
 # (config-nvidia-modules tests only).  Pinned to the release matching the host
 # driver / the decompressed AD-series firmware above; bump this tag in lockstep
 # when the host driver is upgraded.
-RUN git clone --depth=1 --branch 610.43.02 \
+RUN git clone --depth=1 --branch 615.78.08 \
     https://github.com/NVIDIA/open-gpu-kernel-modules.git \
     /home/ktest/git/open-gpu-kernel-modules
 
@@ -157,11 +157,11 @@ RUN git clone --depth=1 --branch 610.43.02 \
 # baked linux-firmware tree so mk-initramfs bundles it.  Keep this version in
 # lockstep with the open-gpu-kernel-modules tag above.
 RUN cd /tmp && \
-    wget -q https://us.download.nvidia.com/XFree86/Linux-x86_64/610.43.02/NVIDIA-Linux-x86_64-610.43.02.run && \
-    sh NVIDIA-Linux-x86_64-610.43.02.run --extract-only --target nvidia-run && \
-    mkdir -p /home/ktest/linux-firmware/nvidia/610.43.02 && \
-    cp nvidia-run/firmware/*.bin /home/ktest/linux-firmware/nvidia/610.43.02/ && \
-    rm -rf nvidia-run NVIDIA-Linux-x86_64-610.43.02.run
+    wget -q https://us.download.nvidia.com/XFree86/Linux-x86_64/615.78.08/NVIDIA-Linux-x86_64-615.78.08.run && \
+    sh NVIDIA-Linux-x86_64-615.78.08.run --extract-only --target nvidia-run && \
+    mkdir -p /home/ktest/linux-firmware/nvidia/615.78.08 && \
+    cp nvidia-run/firmware/*.bin /home/ktest/linux-firmware/nvidia/615.78.08/ && \
+    rm -rf nvidia-run NVIDIA-Linux-x86_64-615.78.08.run
 
 # Copy the ktest repository into the container (kept late so repo changes
 # don't invalidate the layers above)
