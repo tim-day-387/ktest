@@ -65,6 +65,9 @@ commit_trailers = 'format_signed_off_by_trailer(self)'
 --when.repositories = ["~/ws/lustre-release"]
 [--scope.templates]
 commit_trailers = 'format_signed_off_by_trailer(self) ++ format_gerrit_change_id_trailer(self)'
+[--scope.revset-aliases]
+# whamcloud Gerrit is upstream; the github.com/lustre mirror (origin) lags.
+"trunk()" = "master@wc"
 
 [revset-aliases]
 "immutable_heads()" = "(remote_bookmarks() ~ remote_bookmarks(remote='personal')) | tags()"
