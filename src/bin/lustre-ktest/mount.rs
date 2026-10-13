@@ -225,7 +225,7 @@ fn mount_lustre_internal(mop: &MountOpts) -> Result<(), String> {
     let c_fstype = CString::new(mop.fstype.as_str()).map_err(|_| "Invalid filesystem type")?;
 
     let c_options = if !options_str.is_empty() {
-        Some(CString::new(options_str.clone()).map_err(|_| "Invalid mount options")?)
+        Some(CString::new(options_str).map_err(|_| "Invalid mount options")?)
     } else {
         None
     };
@@ -460,8 +460,6 @@ pub fn mount_mds_combined_zfs(mds_count: u32) -> u32 {
     mds_count
 }
 
-/// Mount standalone MGS + MDT targets using ZFS datasets on ramdisks.
-/// MGS uses /dev/ram0; MDT{i} uses /dev/ram{i+1}. Returns next RAM device index.
 /// Mount a standalone MGS using a ZFS dataset on /dev/ram0.
 pub fn mount_mgs_zfs() {
     boldln!("Mounting ZFS standalone MGS...");
@@ -473,6 +471,8 @@ pub fn mount_mgs_zfs() {
     mount_lustre_mgs_zfs(&mgs_mount, "MGS0000").test_call().ok();
 }
 
+/// Mount standalone MGS + MDT targets using ZFS datasets on ramdisks.
+/// MGS uses /dev/ram0; MDT{i} uses /dev/ram{i+1}. Returns next RAM device index.
 pub fn mount_mds_split_zfs(mds_count: u32) -> u32 {
     mount_mgs_zfs();
     mount_mds_zfs(0, mds_count, 1);

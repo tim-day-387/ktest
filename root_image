@@ -10,7 +10,6 @@ set -o errtrace
 ktest_dir=$(dirname "$(readlink -f "$0")")
 
 . "$ktest_dir/lib/util.sh"
-. "$ktest_dir/lib/common.sh"
 
 if [[ $(id -u) != 0 ]] ; then
     echo this script must be run as root

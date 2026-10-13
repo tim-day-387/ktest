@@ -1,3 +1,0 @@
-ignore = [
-    "src/*_capnp.rs",
-]

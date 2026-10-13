@@ -49,7 +49,6 @@ function process_file() {
 }
 
 export -f process_file
-export CHECKPATCH
 export TMPDIR
 
 # Build the find prune expression for userspace-only directories.
@@ -82,7 +81,6 @@ for LINES_FILE in "$TMPDIR"/*.lines; do
 	# Extract directory path from filename
 	DIR_PREFIX=$(basename "$LINES_FILE" .lines)
 	DIR_PATH=$(echo "$DIR_PREFIX" | sed 's/@@/\//g')
-	TYPES_FILE="$TMPDIR/${DIR_PREFIX}.types"
 
 	# Sum up lines and errors from all files in this directory
 	TOT=$(awk '{sum+=$1} END {print sum}' "$LINES_FILE")

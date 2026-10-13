@@ -46,7 +46,7 @@ def cmd_build(args, ktest_dir, podman_socket=None):
             img for img in IMAGES if img["name"] in ("ktest-runner", "ci-lustre")
         ]
     else:
-        # Default (also --local-only): only build ktest-runner
+        # Default: only build ktest-runner
         images_to_build = [img for img in IMAGES if img["name"] == "ktest-runner"]
 
     # Fetch git version info from the host repo for the ci-lustre build arg

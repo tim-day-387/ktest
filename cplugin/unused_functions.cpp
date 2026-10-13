@@ -19,7 +19,6 @@
 #include <mutex>
 #include <set>
 #include <string>
-#include <vector>
 
 using namespace clang;
 using namespace clang::ast_matchers;

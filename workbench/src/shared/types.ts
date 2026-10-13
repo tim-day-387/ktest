@@ -92,7 +92,6 @@ export interface GerritChange {
   subject: string;
   /** Display name of the owner. */
   author: string;
-  revision: string;
   /** Humans voting Code-Review +1 or better. */
   reviews: number;
   /** Someone, human or bot, voted negative on some label. */
@@ -108,7 +107,6 @@ export interface GerritChange {
 export interface GerritChangeList {
   gerrit: string;
   project: string;
-  branch: string;
   /** When the list was scraped, in seconds since the epoch. */
   generated: number;
   changes: GerritChange[];

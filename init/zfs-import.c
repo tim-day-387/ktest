@@ -401,8 +401,6 @@ static int xdr_nvlist(struct xdr *x, struct nvbuf *out, int depth,
 				nv_add_scalar8(&root, "guid", DT_UINT64,
 					       *pool_guid);
 				nv_add_nvlist_array(&root, "children", &child, 1);
-				if (root.err)
-					out->err = 1;
 				nv_add_nvlist(out, "vdev_tree", &root);
 				free(root.data);
 			} else {

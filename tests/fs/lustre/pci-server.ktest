@@ -28,7 +28,6 @@ require-qemu-prepend numactl --cpunodebind=0 --membind=0
 test_llmount()
 {
     local interface="eth1"
-    local mntpnt="/mnt/lustre"
 
     configure_interface "$interface"
     set_hostname_interface "$interface"

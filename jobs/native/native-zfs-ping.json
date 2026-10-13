@@ -16,7 +16,6 @@
     {
       "name": "boot",
       "platform": "native_2",
-      "build": "tests/fs/lustre/ping.ktest",
       "run": "tests/fs/lustre/ping.ktest",
       "backing_storage": "zfs",
       "depends_on": ["kernel_build"]

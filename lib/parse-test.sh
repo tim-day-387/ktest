@@ -1,7 +1,6 @@
 
 parse_test_deps()
 {
-    export ktest_crashdump
     export ktest_out
 
     eval $( "$ktest_test" deps $ktest_testargs )

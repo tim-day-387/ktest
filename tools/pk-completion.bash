@@ -75,7 +75,7 @@ _pk() {
 
     case "$cmd" in
 	build)
-	    COMPREPLY=($(compgen -W "--ci-only --local-only --all" -- "$cur"))
+	    COMPREPLY=($(compgen -W "--ci-only --all" -- "$cur"))
 	    ;;
 	stop)
 	    COMPREPLY=($(compgen -W "--all" -- "$cur"))

@@ -56,7 +56,7 @@ export interface WorkbenchApi {
     reload(id: string): Promise<void>;
     /** Zoom the active tab; Chromium remembers the level per site in the workspace profile. */
     zoom(id: string, action: "in" | "out" | "reset"): Promise<void>;
-    newTab(id: string, url?: string): Promise<string>;
+    newTab(id: string, url?: string): Promise<void>;
     closeTab(id: string, tabId: string): Promise<void>;
     closeActiveTab(id: string): Promise<void>;
     activateTab(id: string, tabId: string): Promise<void>;
@@ -85,7 +85,7 @@ export interface WorkbenchApi {
   };
   cookies: {
     /** Re-import Firefox cookies into workspace `id`'s browser profile and reload it. */
-    import(id: string): Promise<{ imported: number; failed: number; profile: boolean }>;
+    import(id: string): Promise<{ imported: number; profile: boolean }>;
   };
   menu: {
     /** Pop up a native context menu at the pointer; a click is reported to onAction by item id. */

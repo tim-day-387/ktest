@@ -9,7 +9,6 @@ import { findProfile, readCookies } from "../core/firefox";
 
 export interface ImportResult {
   imported: number;
-  failed: number;
   /** false when no Firefox profile was found. */
   profile: boolean;
 }
@@ -17,7 +16,7 @@ export interface ImportResult {
 /** Copy Firefox's first-party cookies into an Electron session. Existing cookies with the same key are overwritten. */
 export async function importFirefoxCookies(ses: Session): Promise<ImportResult> {
   const profile = await findProfile();
-  if (!profile) return { imported: 0, failed: 0, profile: false };
+  if (!profile) return { imported: 0, profile: false };
   const cookies = await readCookies(profile);
   let imported = 0;
   let failed = 0;
@@ -47,5 +46,5 @@ export async function importFirefoxCookies(ses: Session): Promise<ImportResult> 
     );
   }
   if (failed) console.warn(`cookie import: ${imported} imported, ${failed} rejected by Chromium`);
-  return { imported, failed, profile: true };
+  return { imported, profile: true };
 }

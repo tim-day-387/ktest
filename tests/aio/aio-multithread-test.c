@@ -1,17 +1,12 @@
 #define _GNU_SOURCE
-#define _LARGEFILE_SOURCE
 #define _FILE_OFFSET_BITS	64
 
 #include <errno.h>
 #include <fcntl.h>
-#include <linux/fs.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <sys/ioctl.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include <string.h>
 
 #include <libaio.h>
 #include <pthread.h>

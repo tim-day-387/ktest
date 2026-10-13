@@ -201,17 +201,15 @@ def _validate_ccache_directory(client, ccache_dir) -> Optional[ValidationError]:
 
 
 def _validate_package_directory(
-    client, package_dir, shared_filesystem=None
+    client, package_dir, shared_filesystem
 ) -> Optional[ValidationError]:
     """Create and validate the package output directory.
 
-    The default (/tmp/ktest-packages) sits directly under /tmp, and the shared
-    variant under the shared-filesystem root, so bind-mount that root rather
-    than the path's grandparent (which would be / for the default).
+    It sits under the shared-filesystem root, so bind-mount that root rather
+    than the path's grandparent.
     """
-    mount_source = shared_filesystem if shared_filesystem else "/tmp"
     return _validate_host_directory(
-        client, package_dir, "package_directory", "package output", mount_source
+        client, package_dir, "package_directory", "package output", shared_filesystem
     )
 
 

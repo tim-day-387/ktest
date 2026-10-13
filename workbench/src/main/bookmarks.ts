@@ -12,7 +12,7 @@ const source = new BookmarkSource();
 
 /** Contents of the Firefox "Bookmarks Toolbar" folder, or [] when there is no profile. */
 export async function toolbarBookmarks(): Promise<BookmarkNode[]> {
-  const { tree } = await source.get();
+  const tree = await source.get();
   return tree.find((r) => r.title === "Bookmarks Toolbar")?.children ?? [];
 }
 

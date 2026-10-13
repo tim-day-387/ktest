@@ -10,11 +10,9 @@ if [[ $(id -u) = 0 ]] ; then
 fi
 
 ktest_root_image=""	# virtual machine root filesystem
-                        #       set with: -i <path>
                         #       defaults: /var/lib/ktest/root
                         #       auto-override: $HOME/.ktest/root
 ktest_kernel_source="."	# dir of kernel source
-			#       set with: -k <path>
 			#       defaults: current directory
 ktest_kernel_build=
 ktest_out="./ktest-out"	# dir for test output (logs, code coverage, etc.)
@@ -46,9 +44,6 @@ checkdep brotli
 # config files:
 [[ -f $ktest_dir/ktestrc ]]	&& . "$ktest_dir/ktestrc"
 [[ -f /etc/ktestrc ]]		&& . /etc/ktestrc
-[[ -f $HOME/.ktestrc ]]		&& . "$HOME/.ktestrc"
-
-# defaults:
 [[ -f $HOME/.ktestrc ]]		&& . "$HOME/.ktestrc"
 
 # args:
@@ -473,10 +468,6 @@ start_vm()
 	qemu_disk file="$file",snapshot=on,cache.no-flush=on,cache.direct=$ktest_dio
     done
 
-    for file in "${ktest_rw_images[@]}"; do
-	qemu_disk file="$file",cache.no-flush=on,cache.direct=$ktest_dio
-    done
-
     for size in "${ktest_scratch_dev_sizes[@]}"; do
 	local file="$ktest_out/vm/dev-$disknr"
 
@@ -581,8 +572,6 @@ do_make()
 new_config()
 {
     local kconfig="$ktest_kernel_build/.config"
-    local config_tool="$ktest_kernel_source/scripts/config"
-
     if [[ ! -f $kconfig ]]; then
 	do_make allnoconfig
 

@@ -16,7 +16,6 @@
     {
       "name": "boot",
       "platform": "native_2",
-      "build": "tests/fs/lustre/unionmount.ktest",
       "run": "tests/fs/lustre/unionmount.ktest",
       "backing_storage": "zfs",
       "depends_on": ["lustre_native_zfs"]

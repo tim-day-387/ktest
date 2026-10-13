@@ -165,7 +165,7 @@ def load_job_file(job_name, ktest_dir):
         print(f"Error: 'jobs' must be an array in {job_path}")
         sys.exit(1)
 
-    for _, job in enumerate(jobs):
+    for job in jobs:
         if not valid_job_config(job):
             print("Invalid job configuration")
             sys.exit(1)
@@ -173,12 +173,8 @@ def load_job_file(job_name, ktest_dir):
     return namespace_jobs(jobs, job_path.stem)
 
 
-def topological_sort(jobs):
-    """Perform topological sort on jobs based on dependencies.
-
-    Returns a list of job "levels" where each level contains jobs
-    that can run in parallel.
-    """
+def check_job_dependencies(jobs):
+    """Exit if a job depends on an unknown job or the dependencies form a cycle."""
     # Build dependency graph
     job_map = {job["name"]: job for job in jobs}
 
@@ -189,9 +185,6 @@ def topological_sort(jobs):
             if dep not in job_map:
                 print(f"Error: Job '{job['name']}' depends on unknown job '{dep}'")
                 sys.exit(1)
-
-    # Track in-degree (number of dependencies) for each job
-    in_degree = {job["name"]: len(job.get("depends_on", [])) for job in jobs}
 
     # Build reverse dependency graph (who depends on me)
     dependents = {job["name"]: [] for job in jobs}
@@ -222,24 +215,6 @@ def topological_sort(jobs):
             if has_cycle(job_name):
                 print("Error: Circular dependency detected in job dependencies")
                 sys.exit(1)
-
-    # Perform topological sort by levels
-    levels = []
-    remaining = set(job_map.keys())
-
-    while remaining:
-        # Find all jobs with no remaining dependencies
-        ready = [name for name in remaining if in_degree[name] == 0]
-
-        levels.append([job_map[name] for name in ready])
-
-        # Remove ready jobs and update in-degrees
-        for name in ready:
-            remaining.remove(name)
-            for dependent in dependents[name]:
-                in_degree[dependent] -= 1
-
-    return levels
 
 
 def any_job_needs_kernel(jobs):
@@ -523,7 +498,6 @@ def run_tool(
     use_tarball_input=False,
     ccache_dir=None,
     no_cleanup=False,
-    package_dir=None,
 ):
     """Run a tool job."""
     task_name = get_task_name(job_config, "tool")
@@ -642,7 +616,6 @@ def run_job_config(
             use_tarball_input,
             ccache_dir,
             no_cleanup,
-            package_dir,
         )
 
     return return_code, runtime, task_name

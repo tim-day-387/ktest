@@ -251,7 +251,6 @@ function configure_lustre()
 
     # Find headers
     export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
-    export CFLAGS="$CFLAGS -I$LINUX_OBJ/include"
     export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated"
     export CFLAGS="$CFLAGS -I$LINUX_OBJ/arch/$SUBARCH/include/generated/uapi"
     export CFLAGS="$CFLAGS -I$LINUX_OBJ/include/generated"

@@ -130,7 +130,7 @@ app.whenReady().then(async () => {
       );
     },
     (wsId, action) => shortcuts[action](wsId),
-    (_wsId, on) => {
+    (on) => {
       // A page's own fullscreen (video players): Chromium puts the window into
       // fullscreen and restores it by itself. Calling setFullScreen while that
       // transition is in flight corrupts the window's restore bounds, so only

@@ -32,12 +32,12 @@ RUN apt-get update && apt-get install -y \
     gnupg clang bear pahole kmod swig quilt \
     libstdc++-16-dev \
     cmake ninja-build libtool pkg-config libpython3-dev libmount-dev \
-    libaio-dev libssl-dev libnl-genl-3-dev \
+    libaio-dev libnl-genl-3-dev \
     libkeyutils-dev libyaml-dev libreadline-dev \
     module-assistant debhelper libsnmp-dev quota \
     mpi-default-dev curl libguestfs-tools \
-    qemu-utils linux-image-generic ccache \
-    python3-ply python3-git capnproto reuse \
+    linux-image-generic ccache \
+    python3-ply python3-git reuse \
     libtirpc-dev libblkid-dev libudev-dev \
     rpm dh-python dkms libcurl4-openssl-dev \
     libpam0g-dev python3-all-dev python3-cffi \

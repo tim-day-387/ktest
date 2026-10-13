@@ -81,10 +81,6 @@ def build_cookie(raw):
     return "COVJSESSIONID-build=%s" % raw
 
 
-class _Transient(Exception):
-    """A retryable server hiccup (5xx, 404 error page, empty body)."""
-
-
 def _get(host, cookie, path, params, accept="application/json, text/plain, */*"):
     """GET a path+params under host; return (body, url). Retries transient
     server errors; exits immediately on auth failure."""

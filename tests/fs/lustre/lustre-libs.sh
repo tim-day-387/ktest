@@ -37,7 +37,6 @@ export LUSTRE="$lustre_pkg_path/lustre"
 export LCTL="$(command -v lctl 2>/dev/null || echo "$LUSTRE/utils/lctl")"
 export LFS="$(command -v lfs 2>/dev/null || echo "$LUSTRE/utils/lfs")"
 export LNETCTL="$(command -v lnetctl 2>/dev/null || echo "$LUSTRE/../lnet/utils/lnetctl")"
-export LNETDUMP="$(command -v lnetdump 2>/dev/null || echo "$LUSTRE/utils/lnetdump/lnetdump")"
 export LUSTRE_RMMOD="$(command -v lustre_rmmod 2>/dev/null || echo "$LUSTRE/scripts/lustre_rmmod")"
 export RUNAS_ID="1000"
 
@@ -123,7 +122,7 @@ function set_hostname_interface()
     local local_ip="$(ip address show $interface | awk -F' ' '$1 == "inet" { print $2 }' | awk -F'/' '{ print $1 }')"
     local host_name="$(hostname)"
 
-    sed -i '/$host_name/d' /etc/hosts
+    sed -i "/$host_name/d" /etc/hosts
     echo "$local_ip" "$host_name" >> /etc/hosts
 }
 
@@ -206,8 +205,6 @@ function __setup_lustrefs()
     fi
 
     # TODO: Make this tunable...
-    # valgrind --leak-check=full "$LNETDUMP" &
-    # "$LNETDUMP" &
 
     # Disable identity upcall (required for OSD wbcfs; harmless for ZFS)
     "$LCTL" set_param mdt.*.identity_upcall=NONE

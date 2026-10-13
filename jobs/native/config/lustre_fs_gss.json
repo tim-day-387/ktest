@@ -16,7 +16,6 @@
     {
       "name": "lustre_native_lustre_fs_gss",
       "platform": "native_2",
-      "build": "tests/fs/lustre/config/lustre_fs_gss.ktest",
       "run": "tests/fs/lustre/config/lustre_fs_gss.ktest",
       "backing_storage": "zfs",
       "depends_on": ["lustre_native"]

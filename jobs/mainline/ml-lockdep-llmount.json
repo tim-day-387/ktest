@@ -9,7 +9,6 @@
     {
       "name": "boot",
       "platform": "mainline",
-      "build": "tests/fs/lustre/lockdep-llmount.ktest",
       "run": "tests/fs/lustre/lockdep-llmount.ktest",
       "depends_on": ["lustre_mainline"]
     }

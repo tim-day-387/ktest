@@ -16,7 +16,6 @@
     {
       "name": "lustre_native_libcfs",
       "platform": "native_2",
-      "build": "tests/fs/lustre/config/libcfs.ktest",
       "run": "tests/fs/lustre/config/libcfs.ktest",
       "backing_storage": "zfs",
       "depends_on": ["lustre_native"]

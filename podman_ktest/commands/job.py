@@ -23,7 +23,7 @@ from pathlib import Path
 from ..jobs import (
     load_job_file,
     expand_job_args,
-    topological_sort,
+    check_job_dependencies,
     run_job_config,
     any_job_needs_kernel,
 )
@@ -277,7 +277,7 @@ def cmd_job(
         tarball_paths = create_source_tarballs(dirs, include_kernel=include_kernel)
 
     # Ensure tarballs are cleaned up when the function exits
-    def cleanup_tarballs(ktest_dirs=None):
+    def cleanup_tarballs(ktest_dirs):
         # Clean up source tarballs (only if using tarball input)
         if tarball_paths:
             for tarball in tarball_paths.values():
@@ -307,7 +307,7 @@ def cmd_job(
     job_map = {job["name"]: job for job in all_jobs}
 
     # Validate that dependencies exist and are acyclic
-    topological_sort(all_jobs)
+    check_job_dependencies(all_jobs)
 
     print(f"Executing {len(all_jobs)} job{'s' if len(all_jobs) > 1 else ''}")
     if len(all_jobs) > 1:
@@ -456,11 +456,8 @@ def cmd_job(
                 futures[future] = job_name
 
         # Process completed jobs and start new ones
-        while futures or pending_jobs:
-            if not futures:
-                # No jobs running but jobs pending - must be blocked by failures
-                break
-
+        # Ends with jobs still pending when a failure blocked their dependents.
+        while futures:
             # Wait for next job to complete
             done_futures = as_completed(futures)
             for future in done_futures:

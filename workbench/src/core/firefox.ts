@@ -25,8 +25,8 @@ export function firefoxDirs(): string[] {
 }
 
 /** Find the default profile directory by parsing profiles.ini. */
-export async function findProfile(dirs = firefoxDirs()): Promise<string | undefined> {
-  for (const dir of dirs) {
+export async function findProfile(): Promise<string | undefined> {
+  for (const dir of firefoxDirs()) {
     let ini: string;
     try {
       ini = await readFile(path.join(dir, "profiles.ini"), "utf8");
@@ -200,9 +200,9 @@ export class BookmarkSource {
   private stamp = "";
   private tree: BookmarkNode[] = [];
 
-  async get(): Promise<{ tree: BookmarkNode[] }> {
+  async get(): Promise<BookmarkNode[]> {
     const profile = await findProfile();
-    if (!profile) return { tree: [] };
+    if (!profile) return [];
     const src = path.join(profile, "places.sqlite");
     const stamp = await Promise.all(
       [src, `${src}-wal`].map((f) =>
@@ -217,6 +217,6 @@ export class BookmarkSource {
       this.tree = await readBookmarks(profile);
       this.stamp = key;
     }
-    return { tree: this.tree };
+    return this.tree;
   }
 }

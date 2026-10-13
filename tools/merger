@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 #
-# gerrit-predict-conflicts.py
+# merger
 #
 # Predict conflicts between a local patch and open Gerrit changes
 # WITHOUT touching the worktree/index.
@@ -601,12 +601,10 @@ for ch in changes:
 
     remote_files = set(revinfo["files"].keys())
 
-    overlap = sorted(local_files & remote_files)
-
-    if not overlap:
+    if not local_files & remote_files:
         continue
 
-    overlapping.append((ch, rev, overlap))
+    overlapping.append((ch, rev))
 
 #
 # With --ready-only, filter on review state before any merge work:
@@ -615,7 +613,7 @@ for ch in changes:
 if READY_ONLY:
     overlapping = [it for it in overlapping if review_status(it[0])[0]]
 
-skipped = ensure_patchsets([(ch, rev) for ch, rev, _ in overlapping])
+skipped = ensure_patchsets(overlapping)
 
 if skipped:
     overlapping = [
@@ -628,7 +626,7 @@ def predict(item):
     Run the in-memory merge prediction for one change and return the
     conflict record, or None if it merges cleanly.
     """
-    ch, rev, overlap = item
+    ch, rev = item
 
     #
     # Modern merge-tree finds the merge base itself and runs the real

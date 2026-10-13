@@ -16,7 +16,6 @@
     {
       "name": "boot",
       "platform": "native_2",
-      "build": "tests/fs/lustre/podman.ktest",
       "run": "tests/fs/lustre/podman.ktest",
       "backing_storage": "zfs",
       "depends_on": ["kernel_build"]

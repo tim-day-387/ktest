@@ -111,10 +111,7 @@ LOLND = 9
 KSOCK_PROTO_V3 = 3
 KSOCK_MSG_NOOP = 0xC0
 KSOCK_MSG_LNET = 0xC1
-SOCKLND_CONN_ANY = 0
 SOCKLND_CONN_CONTROL = 1
-SOCKLND_CONN_BULK_IN = 2
-SOCKLND_CONN_BULK_OUT = 3
 
 RESERVED_PORTS = range(1023, 511, -1)
 DEFAULT_TIMEOUT = 30.0  # seconds to wait for a reply
@@ -232,9 +229,7 @@ NM_FLAG2_NAMES = (
 )
 NODEMAP_VERSION_POLICY_NAMES = {0: "allow", 1: "hard_block"}
 PING_INTERVAL = 30  # seconds between OBD_PINGs; eviction is at 6 missed
-FID_SEQ_OST_MDT0 = 0
 FID_SEQ_LLOG = 0xA
-FID_SEQ_LOV_DEFAULT = 0xFFFFFFFFFFFFFFFF
 FID_SEQ_NORMAL = 0x200000400  # below it: the root and the like, on MDT0000
 
 # DNE: the FID location database and striped directories (lustre_idl.h,
@@ -282,12 +277,10 @@ OBD_CONNECT_FULL20 = 0x1000000000
 OBD_CONNECT_64BITHASH = 0x4000000000
 OBD_CONNECT_LVB_TYPE = 0x400000000000  # what the MDT takes for a DNE client
 OBD_CONNECT_DIR_STRIPE = 0x400000000000000  # striped directories
-OBD_CONNECT_FLAGS2 = 0x8000000000000000
 MDS_INODELOCK_FULL = 0x7F
 
 OBD_TIMEOUT_DEFAULT = 100
 LUSTRE_VERSION_DEFAULT = (2, 17, 58, 0)  # claimed in ocd_version
-UUID_MAX = 40
 LUSTRE_JOBID_SIZE = 32
 
 # mdt_body valid bits and directory entry attributes (lustre_idl.h)
@@ -638,7 +631,6 @@ NODEMAP_OFFSET = struct.Struct("<8I")  # start/limit uid, gid, projid
 NODEMAP_CAPS = struct.Struct("<QB")  # caps, type
 NODEMAP_VERSION = struct.Struct("<B31s")  # policy, glob
 NODEMAP_RANGE = struct.Struct("<QQ")  # start nid, end nid (nid4)
-NODEMAP_FILESET_HDR = struct.Struct("<B")
 NODEMAP_FILESET_FRAG = struct.Struct("<28sH")
 assert NODEMAP_CLUSTER.size == NODEMAP_REC_SIZE
 
@@ -875,7 +867,6 @@ class SockLND:
         self.peer_nid = mknid(server_ip)
         self.peer_pid = LNET_PID_LUSTRE
         self.incarnation = time.time_ns()
-        self.peer_incarnation = None
         self.expected = set()  # match_bits somebody is waiting for
         self.pending = {}  # match_bits -> payload of PUTs we have not consumed
         self.bulk = {}  # match_bits -> data landed on a bulk portal
@@ -1002,7 +993,6 @@ class SockLND:
             )
         self.peer_nid = src_nid
         self.peer_pid = src_pid
-        self.peer_incarnation = src_inc
         log.info(
             "LNet: %s:%d <-> %s:%d, socklnd V%d, server incarnation %d",
             nidstr(self.nid),
@@ -1288,7 +1278,6 @@ class Target:
     handle: int = 0
     conn_cnt: int = 1
     connected: bool = False
-    server_ocd: Optional[dict] = None
 
 
 @dataclasses.dataclass
@@ -1299,7 +1288,6 @@ class Component:
     end: int
     stripe_size: int
     stripe_count: int
-    pattern: int
     objects: list  # (ost_id bytes, OST index) per stripe
     mirror: int = 0
     flags: int = 0
@@ -1309,7 +1297,6 @@ class Component:
 class FuseNode:
     """What the FUSE layer caches per path."""
 
-    fid: bytes
     attrs: dict  # mdt_body
     size: int
     comps: Optional[list] = None  # None: no readable layout
@@ -1413,7 +1400,6 @@ class LustreClient:
         target.handle = rpb["pb_handle"]
         target.connected = True
         srv = OBD_CONNECT_DATA.unpack(rbufs[1])
-        target.server_ocd = srv
         flags = []
         if rpb["pb_op_flags"] & MSG_CONNECT_RECONNECT:
             flags.append("reconnect")
@@ -2422,7 +2408,7 @@ def parse_lov_mds_md(ea, start=0, end=LUSTRE_EOF, mirror=0, flags=0):
         ooi, _ogen, oidx = LOV_OST_DATA.unpack_from(ea, off)
         objects.append((ooi, oidx))
         off += LOV_OST_DATA.size
-    return Component(start, end, ssize, scount, pattern, objects, mirror, flags)
+    return Component(start, end, ssize, scount, objects, mirror, flags)
 
 
 def parse_layout(ea):
@@ -2833,7 +2819,7 @@ def make_fuse_ops(fusepy, client, mdts, osts):
             except RpcError as e:
                 self.fids.pop(path, None)
                 raise fusepy.FuseOSError(self._rpc_errno(e)) from None
-            node = FuseNode(fid, attrs, attrs["mb_size"])
+            node = FuseNode(attrs, attrs["mb_size"])
             if stat.S_ISREG(attrs["mb_mode"]) and ea:
                 try:
                     node.comps = parse_layout(ea)

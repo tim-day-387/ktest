@@ -3,7 +3,7 @@
 
 /*
  * init - the ktest boot binary, installed in the initramfs as
- * /sbin/ktest-init.  /init (a bash script, see init/initramfs-init.sh)
+ * /sbin/ktest-init.  /init (a bash script, see init/init)
  * always drops into a shell; running `boot` there makes /init exec this
  * binary as PID 1.  Runs in two modes selected by the cmdline - the one
  * `boot` staged in /run/ktest-cmdline when present, else /proc/cmdline:
@@ -853,7 +853,7 @@ int main(void)
 	kmsg_log(KMSG_INFO, "cmdline: %s", cmdline);
 
 	/*
-	 * Modules are not loaded here: /init (init/initramfs-init.sh) loads
+	 * Modules are not loaded here: /init (init/init) loads
 	 * everything with modprobe(8) before the shell or any handoff, so
 	 * both the standard root's block driver (e.g. nvme) and the lustre
 	 * path's ZFS/Lustre stack are already in place.

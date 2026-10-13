@@ -34,7 +34,6 @@ function require-lustre-base-kernel-config()
     # More tracing support!
     require-kernel-config BPF_SYSCALL
     require-kernel-config DEBUG_INFO_BTF
-    # require-kernel-config DEBUG_INFO_BTF_MODULES
     require-kernel-config BPF_JIT
     require-kernel-config FUNCTION_GRAPH_RETVAL
 
@@ -99,15 +98,6 @@ function require-lustre-inkernel-kernel-config()
     if [[ ! "${FSTYPE:-}" =~ "zfs" ]]; then
 	require-kernel-config LUSTRE_FS_WBCFS=m
     fi
-}
-
-function require-lustre-ebpf-config()
-{
-    # More tracing support!
-    require-kernel-config BPF_SYSCALL=y
-    require-kernel-config DEBUG_INFO_BTF=y
-    require-kernel-config DEBUG_INFO_BTF_MODULES=y
-    require-kernel-config BPF_JIT=y
 }
 
 function require-lustre-debug-kernel-config()

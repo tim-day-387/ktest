@@ -57,7 +57,7 @@ export class BrowserHost {
     private onTabs: (wsId: string, tabs: TabInfo[]) => void,
     private onShortcut: (wsId: string, action: Shortcut) => void,
     /** A page entered or left HTML fullscreen (e.g. a video player's own button). */
-    private onHtmlFullscreen: (wsId: string, on: boolean) => void,
+    private onHtmlFullscreen: (on: boolean) => void,
     /** A page was right-clicked. */
     private onContextMenu: (wsId: string, wc: WebContents, params: ContextMenuParams) => void
   ) {}
@@ -74,7 +74,7 @@ export class BrowserHost {
       this.newTab(wsId, url, i === 0);
   }
 
-  newTab(wsId: string, url = "about:blank", activate = true): string {
+  newTab(wsId: string, url = "about:blank", activate = true): void {
     const partition = this.partitions.get(wsId);
     if (partition === undefined) throw new Error(`workspace ${wsId} has no browser`);
     const tabId = `${wsId}#${++this.seq}`;
@@ -105,11 +105,11 @@ export class BrowserHost {
     let htmlFullscreen = false;
     wc.on("enter-html-full-screen", () => {
       htmlFullscreen = true;
-      this.onHtmlFullscreen(wsId, true);
+      this.onHtmlFullscreen(true);
     });
     wc.on("leave-html-full-screen", () => {
       htmlFullscreen = false;
-      this.onHtmlFullscreen(wsId, false);
+      this.onHtmlFullscreen(false);
     });
     wc.on("context-menu", (_e, params) => this.onContextMenu(wsId, wc, params));
     wc.on("before-input-event", (e, input) => {
@@ -143,7 +143,6 @@ export class BrowserHost {
     this.order.get(wsId)!.push(tabId);
     if (activate || !this.activeTab.has(wsId)) this.activate(wsId, tabId);
     else this.emit(wsId);
-    return tabId;
   }
 
   closeTab(wsId: string, tabId: string): void {

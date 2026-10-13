@@ -10,13 +10,10 @@ cross.conf
 lib/lwip-connect
 lib/supervisor
 
-ltp-fsx/ltp-fsx
-
 init/ktest-init
 init/mount.lustreroot
 init/zimport
 
-tests/fs/bcachefs/bcachefs-tools
 tests/fs/bcachefs/linuxquota
 tests/fs/xfstests
 

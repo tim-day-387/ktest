@@ -32,7 +32,6 @@ interface RawChange {
   _more_changes?: boolean;
   subject?: string;
   owner?: { name?: string };
-  current_revision?: string;
   insertions?: number;
   deletions?: number;
   labels?: Record<string, { all?: Vote[] }>;
@@ -43,7 +42,6 @@ async function queryPage(query: string, start: number): Promise<RawChange[]> {
     ["q", query],
     ["o", "DETAILED_LABELS"],
     ["o", "DETAILED_ACCOUNTS"],
-    ["o", "CURRENT_REVISION"],
     ["S", String(start)]
   ]);
   const res = await fetch(`${GERRIT}/changes/?${params}`, { signal: AbortSignal.timeout(30000) });
@@ -89,7 +87,6 @@ function toRow(change: RawChange): GerritChange {
     number: change._number,
     subject: change.subject ?? "",
     author: change.owner?.name ?? "?",
-    revision: change.current_revision ?? "",
     ...reviewCount(change),
     test: testStatus(change),
     insertions,
@@ -111,7 +108,6 @@ export async function fetchGerritChanges(): Promise<GerritChangeList> {
   return {
     gerrit: GERRIT,
     project: PROJECT,
-    branch: BRANCH,
     generated: Math.floor(Date.now() / 1000),
     changes: raw.map(toRow).sort((a, b) => a.size - b.size || a.number - b.number)
   };

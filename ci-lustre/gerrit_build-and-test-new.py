@@ -180,8 +180,7 @@ class Reviewer(object):
         self.branch = branch
         self.auth = requests.auth.HTTPBasicAuth(username, password)
         self.logger = logging.getLogger(__name__)
-        self.history = {}
-        self.timestamp = 0
+        self.history = set()
         self.request_timeout = 30
         self.post_interval = 30
         self.update_interval = 30
@@ -246,33 +245,18 @@ class Reviewer(object):
         # Derive history from metadata
         for git_hash, hash_data in metadata.items():
             change_id = hash_data.get("change_id")
-            time_stamp = hash_data.get("time_stamp")
 
             if change_id and git_hash:
-                # Add to in-memory history
-                self.history[change_id + " " + git_hash] = "0"
+                self.history.add(change_id + " " + git_hash)
 
-                # Update timestamp to the most recent review
-                if time_stamp:
-                    try:
-                        ts = int(time_stamp)
-                        if ts > self.timestamp:
-                            self.timestamp = ts
-                    except (ValueError, TypeError):
-                        pass
+        self._debug("load_history: history size = %d", len(self.history))
 
-        self._debug(
-            "load_history: history size = %d, timestamp = %d",
-            len(self.history),
-            self.timestamp,
-        )
-
-    def write_history(self, change_id, revision, score):
+    def write_history(self, change_id, revision):
         """
-        Add review record to in-memory history dict.
+        Add review record to the in-memory history.
         All persistent data is stored in metadata_store.json.
         """
-        self.history[change_id + " " + revision] = score
+        self.history.add(change_id + " " + revision)
 
     def in_history(self, change_id, revision):
         """
@@ -429,10 +413,6 @@ class Reviewer(object):
 
     def review_change(self, change):
         current_revision = change.get("current_revision")
-        if not current_revision:
-            self._debug("Can't review change with missing revision")
-            return
-
         user = getpass.getuser()
         pid = os.getpid()
 
@@ -442,13 +422,12 @@ class Reviewer(object):
 
         self.podman_reset()
         self.analyze_patch(change)
-        self.write_history(change["id"], current_revision, 0)
+        self.write_history(change["id"], current_revision)
 
     def update(self):
         self.check_for_branches()
         self.poll_branch_heads()
 
-        new_timestamp = _now()
         age = 48
         open_changes = self.get_changes(
             {"status": "open", "-age": str(age) + "h", "-label": "Code-Review=-2"}
@@ -460,16 +439,12 @@ class Reviewer(object):
         for change in sorted(open_changes, key=lambda x: x["_number"], reverse=True):
             if self.change_needs_review(change):
                 self.review_change(change)
-
-                copy_static_site()
-
                 self.git_commit_and_push()
 
                 # Don't POST more than every post_interval seconds.
                 time.sleep(self.post_interval)
 
         self.git_commit_and_push()
-        self.timestamp = new_timestamp
 
     def run_branch_group(self, branch_name, git_hash, subject, group):
         """
@@ -570,7 +545,7 @@ class Reviewer(object):
                     f"Reviewing branch {branch_name} group {group} at commit {git_hash}"
                 )
                 self.run_branch_group(branch_name, git_hash, subject, group)
-                self.write_history(branch_name, f"{git_hash}_{group}", 0)
+                self.write_history(branch_name, f"{git_hash}_{group}")
                 copy_static_site()
                 self.git_commit_and_push()
 
@@ -585,11 +560,7 @@ class Reviewer(object):
 
     def git_commit_and_push(self):
         """
-        Commit and push all uncommitted changes in the given git repository directory.
-
-        Args:
-        output_dir (str): Path to the git repository.
-        message (str, optional): Commit message. If not provided, a timestamped message is used.
+        Commit and push all uncommitted changes in the static-site repository.
         """
         # Only push to GitHub if in github-pages mode
         if HOSTING_MODE != "github-pages":
@@ -659,8 +630,7 @@ class Reviewer(object):
             os.chdir(cwd)
 
     def run(self):
-        if self.timestamp <= 0:
-            self.load_history()
+        self.load_history()
 
         while True:
             self.update()

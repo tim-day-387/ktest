@@ -61,9 +61,6 @@
       }
     ],
     "linux": {
-      "target": [
-        "dir"
-      ],
       "category": "Development",
       "icon": "build/icon.png",
       "executableName": "workbench",

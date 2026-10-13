@@ -170,11 +170,6 @@ def main():
         help="Only build ktest-runner and ci-lustre containers",
     )
     build_parser.add_argument(
-        "--local-only",
-        action="store_true",
-        help="Only build ktest-runner container (this is the default)",
-    )
-    build_parser.add_argument(
         "--all",
         action="store_true",
         help="Build all container images (default: only ktest-runner)",

@@ -9,7 +9,6 @@
     {
       "name": "boot",
       "platform": "mainline",
-      "build": "tests/fs/lustre/llmount.ktest",
       "run": "tests/fs/lustre/llmount.ktest",
       "backing_storage": "zfs",
       "depends_on": ["lustre_mainline"]

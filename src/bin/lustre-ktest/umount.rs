@@ -113,7 +113,6 @@ pub fn umount_lustre_force_lazy(mount_point: &str) -> Result<(), String> {
         mount_point: mount_point.to_string(),
         force: true,
         lazy: true,
-        ..Default::default()
     };
 
     umount_lustre_with_opts(&opts)

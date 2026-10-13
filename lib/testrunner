@@ -42,9 +42,6 @@ dmesg --console-on
 dmesg --console-level 8
 
 echo 1 > /proc/sys/kernel/sysrq
-ulimit -c unlimited
-
-# Log file system visible to host
 
 # Core dump settings
 echo 1 > /proc/sys/fs/suid_dumpable
@@ -154,14 +151,6 @@ do_reboot()
 
 echo -n "Kernel version: "
 uname -r
-
-if [[ -z $ktest_tests ]] && ! $ktest_tests_unknown; then
-    echo "No tests found"
-    echo "TEST FAILED"
-    exit 1
-fi
-
-ktest_tests=$(echo $ktest_tests)
 
 if [[ $ktest_tests = "none" ]]; then
     echo "No tests to run"

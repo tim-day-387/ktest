@@ -5,7 +5,6 @@
 //
 
 import { app } from "electron";
-import path from "node:path";
 
 /**
  * Directory holding bundled data that must exist as real files on disk

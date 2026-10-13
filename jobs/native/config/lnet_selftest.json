@@ -16,7 +16,6 @@
     {
       "name": "lustre_native_lnet_selftest",
       "platform": "native_2",
-      "build": "tests/fs/lustre/config/lnet_selftest.ktest",
       "run": "tests/fs/lustre/config/lnet_selftest.ktest",
       "backing_storage": "zfs",
       "depends_on": ["lustre_native"]
