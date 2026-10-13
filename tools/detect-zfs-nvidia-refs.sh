@@ -102,10 +102,10 @@ fi
 # --- colors (only when writing to a terminal) -------------------------------
 
 if [ -t 1 ]; then
-	BOLD=$'\e[1m'; RED=$'\e[31m'; CYAN=$'\e[36m'; DIM=$'\e[2m'; RST=$'\e[0m'
+	BOLD=$'\e[1m'; RED=$'\e[31m'; DIM=$'\e[2m'; RST=$'\e[0m'
 	grep_color=always
 else
-	BOLD=""; RED=""; CYAN=""; DIM=""; RST=""
+	BOLD=""; RED=""; DIM=""; RST=""
 	grep_color=never
 fi
 

@@ -11,9 +11,7 @@
 
 import json
 import shlex
-import shutil
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -222,7 +220,7 @@ def topological_sort(jobs):
     for job_name in job_map:
         if job_name not in visited:
             if has_cycle(job_name):
-                print(f"Error: Circular dependency detected in job dependencies")
+                print("Error: Circular dependency detected in job dependencies")
                 sys.exit(1)
 
     # Perform topological sort by levels
@@ -232,10 +230,6 @@ def topological_sort(jobs):
     while remaining:
         # Find all jobs with no remaining dependencies
         ready = [name for name in remaining if in_degree[name] == 0]
-
-        if not ready:
-            print(f"Error: Circular dependency detected (no jobs ready to run)")
-            sys.exit(1)
 
         levels.append([job_map[name] for name in ready])
 
@@ -312,8 +306,7 @@ def run_ktest(
             is_vm_run=True,
             no_cleanup=no_cleanup,
         )
-        with job:
-            return_code = job.run(client, podman_socket=podman_socket)
+        return_code = job.run(client, podman_socket=podman_socket)
 
     runtime = int(time.time() - start_time)
     return return_code, runtime, task_name
@@ -398,8 +391,7 @@ def run_build_lustre(
             package_dir=package_dir,
             no_cleanup=no_cleanup,
         )
-        with job:
-            return_code = job.run(client, podman_socket=podman_socket)
+        return_code = job.run(client, podman_socket=podman_socket)
 
     runtime = int(time.time() - start_time)
     return return_code, runtime, task_name
@@ -456,8 +448,7 @@ def run_package(
             package_dir=package_dir,
             no_cleanup=no_cleanup,
         )
-        with job:
-            return_code = job.run(client, podman_socket=podman_socket)
+        return_code = job.run(client, podman_socket=podman_socket)
 
     runtime = int(time.time() - start_time)
     return return_code, runtime, task_name
@@ -515,8 +506,7 @@ def run_dkms(
             package_dir=package_dir,
             no_cleanup=no_cleanup,
         )
-        with job:
-            return_code = job.run(client, podman_socket=podman_socket)
+        return_code = job.run(client, podman_socket=podman_socket)
 
     runtime = int(time.time() - start_time)
     return return_code, runtime, task_name
@@ -558,8 +548,7 @@ def run_tool(
             log_path=log_path,
             no_cleanup=no_cleanup,
         )
-        with job:
-            return_code = job.run(client, podman_socket=podman_socket)
+        return_code = job.run(client, podman_socket=podman_socket)
 
     runtime = int(time.time() - start_time)
     return return_code, runtime, task_name

@@ -26,7 +26,7 @@ from .commands import (
     cmd_stop,
 )
 from .commands.patch_status import BRANCH, GERRIT, PROJECT
-from .utils import get_ktest_dirs, get_git_hash, is_on_lustre, TeeWriter
+from .utils import get_ktest_dirs, get_git_hash, TeeWriter
 from .validation import valid_env
 
 
@@ -365,8 +365,8 @@ def main():
             result = cmd_stop(args, args.podman_socket)
             sys.exit(result)
 
-        # Get directory configuration (may already be loaded for job command)
-        if args.cmd != "job" or args.stdout:
+        # Get directory configuration (already loaded for the job command)
+        if args.cmd != "job":
             dirs = get_ktest_dirs(ktest_dir, args.lustre_cwd)
 
         if args.lustre_cwd:
@@ -375,16 +375,6 @@ def main():
         # Validate environment before running jobs
         if not valid_env(args.podman_socket, args.shared_filesystem):
             sys.exit(1)
-
-        # Auto-enable tarball input when source directories are on Lustre,
-        # since Lustre does not support the overlay filesystem used for mounts.
-        if not args.tarball_input:
-            check_path = dirs.get("ktest_lustre_source") or dirs.get(
-                "ktest_kernel_source"
-            )
-            if check_path and is_on_lustre(check_path):
-                print("Lustre filesystem detected: defaulting to tarball input mode")
-                args.tarball_input = True
 
         # Execute the command with appropriate parameters
         if args.cmd == "job":
@@ -403,9 +393,6 @@ def main():
                 args.shared_filesystem,
                 args.tarball_input,
             )
-        else:
-            print(f"Unknown command: {args.cmd}")
-            sys.exit(1)
 
         sys.exit(result)
     finally:

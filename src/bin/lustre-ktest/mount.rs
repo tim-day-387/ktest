@@ -14,10 +14,6 @@ pub struct MountOpts {
     pub mount_point: String,
     pub fstype: String,
     pub options: Vec<String>,
-    pub force: bool,
-    pub verbose: bool,
-    pub retry: u32,
-    pub fake: bool,
 }
 
 impl Default for MountOpts {
@@ -27,19 +23,11 @@ impl Default for MountOpts {
             mount_point: String::new(),
             fstype: "lustre".to_string(),
             options: Vec::new(),
-            force: false,
-            verbose: false,
-            retry: 0,
-            fake: false,
         }
     }
 }
 
-pub fn check_mtab_entry(
-    spec1: &str,
-    spec2: &str,
-    mount_point: Option<&str>,
-) -> Result<bool, String> {
+pub fn check_mtab_entry(spec: &str, mount_point: Option<&str>) -> Result<bool, String> {
     let mtab_path = "/proc/mounts";
     let contents = fs::read_to_string(mtab_path)
         .map_err(|e| format!("Failed to read {}: {}", mtab_path, e))?;
@@ -51,8 +39,7 @@ pub fn check_mtab_entry(
             let mount_dir = fields[1];
             let mount_type = fields[2];
 
-            if (compare_lustre_sources(mount_dev, spec1)
-                || compare_lustre_sources(mount_dev, spec2))
+            if compare_lustre_sources(mount_dev, spec)
                 && mount_point.map_or(true, |mp| mount_dir == mp)
                 && mount_type == "lustre"
             {
@@ -79,12 +66,6 @@ pub fn parse_options(options_str: &str) -> Vec<String> {
         .split(',')
         .map(|s| s.trim().to_string())
         .collect()
-}
-
-pub fn convert_hostnames(source: &str) -> Result<String, String> {
-    // For now, return source as-is. In full implementation,
-    // this would resolve hostnames to IP addresses
-    Ok(source.to_string())
 }
 
 pub fn generate_random_mount_point(service_type: &str, index: &str) -> String {
@@ -116,9 +97,8 @@ pub fn mount_lustre_client(
     let mut mop = MountOpts::default();
     mop.mount_point = mount_point.to_string();
 
-    // Parse MGS target (format: mgsnid:filesystem[/subdir])
-    let converted_source = convert_hostnames(mgs_target)?;
-    mop.device = converted_source;
+    // MGS target (format: mgsnid:filesystem[/subdir])
+    mop.device = mgs_target.to_string();
 
     if let Some(opts) = options {
         mop.options = parse_options(opts);
@@ -227,28 +207,13 @@ fn mount_lustre_internal(mop: &MountOpts) -> Result<(), String> {
                 mop.mount_point, e
             ));
         }
-        if mop.verbose {
-            println!("Created mount point directory: {}", mop.mount_point);
-        }
     }
 
-    // Check if already mounted (unless force flag is set)
-    if !mop.force {
-        if check_mtab_entry(&mop.device, &mop.device, Some(&mop.mount_point))? {
-            return Err(format!(
-                "{} is already mounted on {}",
-                mop.device, mop.mount_point
-            ));
-        }
-    }
-
-    if mop.fake {
-        // Fake mount - just print what would be done
-        println!(
-            "Would mount {} at {} with options: {:?}",
-            mop.device, mop.mount_point, mop.options
-        );
-        return Ok(());
+    if check_mtab_entry(&mop.device, Some(&mop.mount_point))? {
+        return Err(format!(
+            "{} is already mounted on {}",
+            mop.device, mop.mount_point
+        ));
     }
 
     // Prepare mount options string
@@ -270,57 +235,20 @@ fn mount_lustre_internal(mop: &MountOpts) -> Result<(), String> {
         None => 0,
     };
 
-    if mop.verbose {
-        println!(
-            "Mounting {} at {} with fstype={} options={}",
-            mop.device, mop.mount_point, mop.fstype, options_str
-        );
-    }
+    let result = unsafe {
+        syscall!(
+            Sysno::mount,
+            c_device.as_ptr() as usize,
+            c_mount_point.as_ptr() as usize,
+            c_fstype.as_ptr() as usize,
+            0usize, // mountflags (could be extended to support MS_RDONLY, etc.)
+            options_ptr
+        )
+    };
 
-    // Retry logic
-    let max_retries = if mop.retry > 0 { mop.retry } else { 1 };
-
-    for attempt in 0..max_retries {
-        let result = unsafe {
-            syscall!(
-                Sysno::mount,
-                c_device.as_ptr() as usize,
-                c_mount_point.as_ptr() as usize,
-                c_fstype.as_ptr() as usize,
-                0usize, // mountflags (could be extended to support MS_RDONLY, etc.)
-                options_ptr
-            )
-        };
-
-        match result {
-            Ok(_) => {
-                if mop.verbose {
-                    println!("Successfully mounted {} on {}", mop.device, mop.mount_point);
-                }
-                return Ok(());
-            }
-            Err(errno) => {
-                if attempt == max_retries - 1 {
-                    // Last attempt failed
-                    return Err(format!(
-                        "Mount failed after {} attempts: {}",
-                        max_retries, errno
-                    ));
-                } else if mop.verbose {
-                    println!(
-                        "Mount attempt {} failed: {}, retrying...",
-                        attempt + 1,
-                        errno
-                    );
-                }
-
-                // Sleep before retry (exponential backoff)
-                std::thread::sleep(std::time::Duration::from_secs(1 << (attempt.min(5))));
-            }
-        }
-    }
-
-    unreachable!()
+    result
+        .map(|_| ())
+        .map_err(|errno| format!("Mount failed: {}", errno))
 }
 
 fn mount_mds(start: u32, end: u32) {

@@ -11,7 +11,6 @@
 
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 
 from ..config import IMAGES
 from ..utils import get_git_version_info, get_podman_client, get_zfs_version

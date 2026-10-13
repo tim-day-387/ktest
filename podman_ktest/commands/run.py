@@ -39,7 +39,4 @@ def cmd_run(
             ccache_dir=ccache_dir,
             log_path=None,
         )
-        with job:
-            return_code = job.run(client)
-
-        return return_code
+        return job.run(client)

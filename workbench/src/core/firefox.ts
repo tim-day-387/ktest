@@ -200,7 +200,7 @@ export class BookmarkSource {
   private stamp = "";
   private tree: BookmarkNode[] = [];
 
-  async get(): Promise<{ tree: BookmarkNode[]; profile?: string }> {
+  async get(): Promise<{ tree: BookmarkNode[] }> {
     const profile = await findProfile();
     if (!profile) return { tree: [] };
     const src = path.join(profile, "places.sqlite");
@@ -217,6 +217,6 @@ export class BookmarkSource {
       this.tree = await readBookmarks(profile);
       this.stamp = key;
     }
-    return { tree: this.tree, profile };
+    return { tree: this.tree };
   }
 }

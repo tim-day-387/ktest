@@ -16,8 +16,6 @@ pub struct UmountOpts {
     pub mount_point: String,
     pub force: bool,
     pub lazy: bool,
-    pub verbose: bool,
-    pub fake: bool,
 }
 
 impl Default for UmountOpts {
@@ -26,8 +24,6 @@ impl Default for UmountOpts {
             mount_point: String::new(),
             force: false,
             lazy: false,
-            verbose: false,
-            fake: false,
         }
     }
 }
@@ -60,18 +56,6 @@ pub fn umount_lustre_with_opts(opts: &UmountOpts) -> Result<(), String> {
 
     // Check if actually mounted
     if !check_is_mounted(&opts.mount_point)? {
-        if opts.verbose {
-            println!("{} is not mounted", opts.mount_point);
-        }
-        return Ok(());
-    }
-
-    if opts.fake {
-        // Fake umount - just print what would be done
-        println!(
-            "Would unmount {} (force: {}, lazy: {})",
-            opts.mount_point, opts.force, opts.lazy
-        );
         return Ok(());
     }
 
@@ -87,16 +71,6 @@ pub fn umount_lustre_with_opts(opts: &UmountOpts) -> Result<(), String> {
         flags |= MNT_DETACH;
     }
 
-    if opts.verbose {
-        let flag_desc = match (opts.force, opts.lazy) {
-            (true, true) => " (force + lazy)",
-            (true, false) => " (force)",
-            (false, true) => " (lazy)",
-            (false, false) => "",
-        };
-        println!("Unmounting {}{}", opts.mount_point, flag_desc);
-    }
-
     let result = unsafe {
         syscall!(
             Sysno::umount2,
@@ -106,12 +80,7 @@ pub fn umount_lustre_with_opts(opts: &UmountOpts) -> Result<(), String> {
     };
 
     match result {
-        Ok(_) => {
-            if opts.verbose {
-                println!("Successfully unmounted {}", opts.mount_point);
-            }
-            Ok(())
-        }
+        Ok(_) => Ok(()),
         Err(errno) => {
             // Provide more detailed error messages like the C implementation
             let error_msg = match errno.into_raw() {
@@ -130,10 +99,9 @@ pub fn umount_lustre_with_opts(opts: &UmountOpts) -> Result<(), String> {
     }
 }
 
-pub fn umount_lustre(mount_point: &str, force: bool) -> Result<(), String> {
+pub fn umount_lustre(mount_point: &str) -> Result<(), String> {
     let opts = UmountOpts {
         mount_point: mount_point.to_string(),
-        force,
         ..Default::default()
     };
 
@@ -197,7 +165,7 @@ pub fn discover_lustre_mounts() -> Result<Vec<LustreMountPoint>, String> {
 
 pub fn umount_all() {
     boldln!("Unmount of client...");
-    umount_lustre("/mnt/lustre", false).test_call().ok();
+    umount_lustre("/mnt/lustre").test_call().ok();
 
     let mounts = match discover_lustre_mounts() {
         Ok(mounts) => mounts,

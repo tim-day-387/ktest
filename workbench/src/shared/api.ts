@@ -63,12 +63,7 @@ export interface WorkbenchApi {
     /** Fired whenever a workspace's tab list or any tab's state changes. */
     onTabs(cb: (id: string, tabs: TabInfo[]) => void): () => void;
     /** Keyboard shortcuts captured while a page has focus. */
-    onShortcut(
-      cb: (
-        id: string,
-        action: "new-tab" | "close-tab" | "next-tab" | "prev-tab" | "focus-url"
-      ) => void
-    ): () => void;
+    onShortcut(cb: (id: string, action: "focus-url") => void): () => void;
     /** A page entered or left its own (HTML) fullscreen; the page then gets the whole window. */
     onHtmlFullscreen(cb: (on: boolean) => void): () => void;
   };

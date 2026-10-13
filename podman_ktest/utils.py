@@ -11,6 +11,7 @@
 
 import os
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -129,16 +130,6 @@ def is_in_home(path):
         return False
 
 
-def is_on_lustre(path):
-    """Check if a path resides on a Lustre filesystem.
-
-    Reads /proc/mounts and finds the most specific (longest) mount point
-    that covers the given path, then checks whether its filesystem type
-    is 'lustre'.
-    """
-    return False
-
-
 def create_source_tarballs(dirs, include_kernel=True):
     """Create tarballs for kernel, lustre, and optionally zfs sources in /tmp/.
 
@@ -233,8 +224,6 @@ def get_cwd_lustre_source():
     subdirectory of a Lustre tree, and falls back to the current directory
     itself when it is not in a git checkout.
     """
-    import sys
-
     cwd = Path.cwd().resolve()
     try:
         result = subprocess.run(
@@ -266,8 +255,6 @@ def get_ktest_dirs(ktest_dir, lustre_cwd=False):
     Returns:
         Dictionary with ktest_dir, ktest_kernel_source, ktest_lustre_source, ktest_zfs_source
     """
-    import sys
-
     # Load variables from ~/.ktestrc
     ktestrc_vars = load_ktestrc()
 
@@ -283,10 +270,10 @@ def get_ktest_dirs(ktest_dir, lustre_cwd=False):
     if not ktest_kernel_source or not Path(ktest_kernel_source).exists():
         ktestrc_path = Path.home() / ".ktestrc"
         if not ktestrc_path.exists():
-            print(f"Error: kernel source directory not found")
-            print(f"")
-            print(f"Please run 'pk setup' to configure paths,")
-            print(f"or set the ktest_kernel_source environment variable")
+            print("Error: kernel source directory not found")
+            print("")
+            print("Please run 'pk setup' to configure paths,")
+            print("or set the ktest_kernel_source environment variable")
         else:
             print(
                 f"Error: kernel source directory {ktest_kernel_source} does not exist"

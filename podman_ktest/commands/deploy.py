@@ -115,7 +115,7 @@ def cmd_deploy(args, podman_socket=None):
             print(f"Warning: Error checking for existing container: {e}")
             # Try to force remove by name in case it's in a bad state
             try:
-                print(f"Attempting to force remove container by name...")
+                print("Attempting to force remove container by name...")
                 client.containers.get(DEPLOY_CONTAINER_NAME).remove(force=True)
                 print(f"Successfully force removed container {DEPLOY_CONTAINER_NAME}")
             except Exception as e2:
@@ -196,7 +196,7 @@ def cmd_deploy(args, podman_socket=None):
             )
         elif args.hosting == "github-pages":
             print(
-                f"Results will be pushed to: https://tim-day-387.github.io/upstream-patch-review/"
+                "Results will be pushed to: https://tim-day-387.github.io/upstream-patch-review/"
             )
 
         return 0

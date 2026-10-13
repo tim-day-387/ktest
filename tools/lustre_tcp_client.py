@@ -1290,11 +1290,6 @@ class Target:
     connected: bool = False
     server_ocd: Optional[dict] = None
 
-    @property
-    def index(self):
-        """The target's index; only OSTs carry one in their connect data."""
-        return self.ocd_extra.get("ocd_index")
-
 
 @dataclasses.dataclass
 class Component:
@@ -2396,14 +2391,6 @@ def format_attrs(body):
         f"{body['mb_uid']:5d} {body['mb_gid']:5d} {body['mb_size']:10d} "
         f"{mtime} {fidstr(body['mb_fid1'])}"
     )
-
-
-def ostidstr(oi):
-    """DOSTID: an ost_id is a lu_fid unless its second word says pre-FID."""
-    oid, seq = struct.unpack("<QQ", oi)
-    if seq in (FID_SEQ_OST_MDT0, FID_SEQ_LOV_DEFAULT):
-        return f"{seq:#x}:{oid}"
-    return fidstr(oi)
 
 
 def parse_lov_mds_md(ea, start=0, end=LUSTRE_EOF, mirror=0, flags=0):

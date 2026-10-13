@@ -76,12 +76,6 @@ class MetadataStore:
             self.data[git_hash] = {}
         self.data[git_hash][key] = value
 
-    def get(self, git_hash, key, default=None):
-        """Get metadata for a git hash"""
-        if git_hash in self.data:
-            return self.data[git_hash].get(key, default)
-        return default
-
     def cleanup_orphaned_files(self):
         """
         Delete log files in the output directory that aren't tracked in metadata.
@@ -310,19 +304,10 @@ def cmd_job(
         print(f"Error: Duplicate job names found: {', '.join(set(duplicates))}")
         sys.exit(1)
 
-    # Build dependency structures
     job_map = {job["name"]: job for job in all_jobs}
 
-    # Validate dependencies exist
-    for job in all_jobs:
-        depends_on = job.get("depends_on", [])
-        for dep in depends_on:
-            if dep not in job_map:
-                print(f"Error: Job '{job['name']}' depends on unknown job '{dep}'")
-                sys.exit(1)
-
-    # Check for cycles using topological sort (reuse existing validation)
-    levels = topological_sort(all_jobs)
+    # Validate that dependencies exist and are acyclic
+    topological_sort(all_jobs)
 
     print(f"Executing {len(all_jobs)} job{'s' if len(all_jobs) > 1 else ''}")
     if len(all_jobs) > 1:
@@ -332,7 +317,6 @@ def cmd_job(
     print()
 
     pending_jobs = set(job_map.keys())
-    running_jobs = set()
     completed_jobs = {}  # job_name -> (return_code, log_path, runtime)
     job_ktest_dirs = {}  # job_name -> ktest_out_dir
     lock = threading.Lock()
@@ -395,15 +379,12 @@ def cmd_job(
         with lock:
             if job_name in pending_jobs:
                 pending_jobs.remove(job_name)
-                running_jobs.add(job_name)
                 return True
             return False
 
     def mark_job_completed(job_name, return_code, log_path, runtime):
         """Mark a job as completed and return newly ready jobs"""
         with lock:
-            if job_name in running_jobs:
-                running_jobs.remove(job_name)
             completed_jobs[job_name] = (return_code, log_path, runtime)
 
             # Find jobs that can now start

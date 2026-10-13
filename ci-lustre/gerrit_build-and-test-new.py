@@ -25,8 +25,7 @@ import sys
 import requests
 import time
 import getpass
-import urllib.request, urllib.parse, urllib.error
-import threading
+import urllib.parse
 from datetime import datetime
 import dateutil.parser
 import shutil
@@ -273,8 +272,7 @@ class Reviewer(object):
         Add review record to in-memory history dict.
         All persistent data is stored in metadata_store.json.
         """
-        if change_id != "-":
-            self.history[change_id + " " + revision] = score
+        self.history[change_id + " " + revision] = score
 
     def in_history(self, change_id, revision):
         """
@@ -282,7 +280,7 @@ class Reviewer(object):
         """
         return change_id + " " + revision in self.history
 
-    def get_changes(self, query, Absolute=False):
+    def get_changes(self, query):
         """
         GET a list of ChangeInfo()s for all changes matching query.
 
@@ -291,18 +289,12 @@ class Reviewer(object):
             [ChangeInfo()...]
         """
         query = dict(query)
-        branches = ""
-        if not Absolute:
-            project = query.get("project", self.project)
-            query["project"] = urllib.parse.quote(project, safe="")
-            if isinstance(self.branch, list):
-                b2 = []
-                for tmp in self.branch:
-                    b2.append("branch:" + urllib.parse.quote(tmp, safe=""))
-                branches = "(" + "+OR+".join(b2) + ")+"
-            else:
-                branch = query.get("branch", self.branch)
-                query["branch"] = urllib.parse.quote(branch, safe="")
+        project = query.get("project", self.project)
+        query["project"] = urllib.parse.quote(project, safe="")
+        b2 = []
+        for tmp in self.branch:
+            b2.append("branch:" + urllib.parse.quote(tmp, safe=""))
+        branches = "(" + "+OR+".join(b2) + ")+"
 
         path = (
             "/changes/?q="
@@ -478,7 +470,6 @@ class Reviewer(object):
 
         self.git_commit_and_push()
         self.timestamp = new_timestamp
-        self.write_history("-", "-", 0)
 
     def run_branch_group(self, branch_name, git_hash, subject, group):
         """
@@ -681,8 +672,6 @@ def print_Status_to_HTML():
     command = "cd /home/ktest/ktest ; ./ci-lustre/generate-status"
 
     log_str, _, _ = Reviewer.run_script(command)
-    if not log_str:
-        log_str = ""
 
     status_path = os.path.join(OUTPUT_DIR, "status.txt")
 

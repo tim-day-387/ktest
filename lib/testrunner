@@ -7,8 +7,6 @@ set -o errexit
 set -o errtrace
 
 export PS4='+`basename ${BASH_SOURCE[0]}`:${LINENO}:${FUNCNAME[0]:+${FUNCNAME[0]}()}+ '
-KERNEL_ARCH=""
-
 export PATH=$PATH:/root/.cargo/bin
 
 . /host/$ktest_env

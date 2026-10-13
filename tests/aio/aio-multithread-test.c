@@ -22,23 +22,6 @@ uint64_t nr_blocks = 1024 * 1024 * 4;
 io_context_t ioctx;
 int fd, exiting;
 
-uint64_t getblocks(int fd)
-{
-	uint64_t ret;
-	struct stat statbuf;
-	if (fstat(fd, &statbuf)) {
-		perror("stat error\n");
-		exit(EXIT_FAILURE);
-	}
-	ret = statbuf.st_size / 512;
-	if (S_ISBLK(statbuf.st_mode))
-		if (ioctl(fd, BLKGETSIZE, &ret)) {
-			perror("ioctl error");
-			exit(EXIT_FAILURE);
-		}
-	return ret / 8;
-}
-
 static void *iothread(void *p)
 {
 	char __attribute__((aligned(4096))) buf[4096];
@@ -96,8 +79,6 @@ int main(int argc, char **argv)
 		perror("Open error");
 		exit(EXIT_FAILURE);
 	}
-
-	//nr_blocks = getblocks(fd);
 
 	if (io_setup(128, &ioctx)) {
 		perror("Error creating io context");

@@ -117,10 +117,6 @@ h2 {
     flex-direction: column;
     min-height: 0;
 }
-.center {
-    align-items: center;
-    justify-content: center;
-}
 
 #workspace-list {
     list-style: none;
@@ -215,14 +211,6 @@ button {
 }
 button:hover {
     background: var(--header-hover);
-}
-button.danger {
-    background: transparent;
-    border-color: var(--danger);
-    color: var(--danger);
-}
-button.danger:hover {
-    background: #ffe6e6;
 }
 #browser-bar button {
     background: transparent;
@@ -412,20 +400,6 @@ button.danger:hover {
 }
 #home-toggle {
     padding: 2px 8px;
-}
-.badge {
-    font-size: 11px;
-    padding: 1px 6px;
-    border-radius: 8px;
-    background: var(--border);
-}
-.badge.failed {
-    background: var(--danger);
-    color: #fff;
-}
-.badge.ready {
-    background: #cfe6cc;
-    color: #24552a;
 }
 
 /* ---- home: the two workspace spawners, one above the other ---- */

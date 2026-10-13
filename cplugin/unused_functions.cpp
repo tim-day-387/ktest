@@ -37,21 +37,11 @@ void discard_if(std::set<T, Comp, Alloc> &c, Predicate pred) {
   }
 }
 
-struct DeclLoc {
-  DeclLoc() = default;
-  DeclLoc(std::string Filename, unsigned Line)
-      : Filename(std::move(Filename)), Line(Line) {}
-  SmallString<128> Filename;
-  unsigned Line;
-};
-
 struct DefInfo {
   const FunctionDecl *Definition;
   size_t Uses;
   std::string Name;
   std::string Filename;
-  unsigned Line;
-  std::vector<DeclLoc> Declarations;
 };
 
 class UnusedFunctionsLint : public Lint {
@@ -64,21 +54,6 @@ public:
   std::mutex Mutex;
   std::map<std::string, DefInfo> AllDecls;
 };
-
-/// Returns all declarations that are not the definition of F
-std::vector<DeclLoc> getDeclarations(const FunctionDecl *F,
-                                     const SourceManager &SM) {
-  std::vector<DeclLoc> Decls;
-  for (const FunctionDecl *R : F->redecls()) {
-    if (R->doesThisDeclarationHaveABody())
-      continue;
-    auto Begin = R->getSourceRange().getBegin();
-    Decls.emplace_back(canonicalizePath(SM, SM.getFileID(Begin),
-                                        SM.getFilename(Begin)),
-                       SM.getSpellingLineNumber(Begin));
-  }
-  return Decls;
-}
 
 class FunctionDeclMatchHandler : public MatchFinder::MatchCallback {
 public:
@@ -106,9 +81,6 @@ public:
       auto Begin = F->getSourceRange().getBegin();
       it_inserted.first->second.Filename =
           canonicalizePath(SM, SM.getFileID(Begin), SM.getFilename(Begin));
-      it_inserted.first->second.Line = SM.getSpellingLineNumber(Begin);
-
-      it_inserted.first->second.Declarations = getDeclarations(F, SM);
     }
 
     // Weak functions are not the definitive definition. Remove it from
@@ -116,11 +88,6 @@ public:
     // so the functions overwritting the weak definition here are marked
     // as used.
     discard_if(Defs, [](const FunctionDecl *FD) { return FD->isWeak(); });
-
-    std::vector<const FunctionDecl *> ExternalUses;
-
-    std::set_difference(Uses.begin(), Uses.end(), Defs.begin(), Defs.end(),
-                        std::back_inserter(ExternalUses));
 
     for (auto *F : Uses) {
       std::string USR;

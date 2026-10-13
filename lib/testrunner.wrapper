@@ -11,6 +11,3 @@ done
 export ktest_dir="/host/$ktest_dir"
 $ktest_dir/lib/testrunner > /dev/console 2>&1 &
 disown
-
-#./rc > /dev/console 2>&1 &
-#disown

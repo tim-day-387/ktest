@@ -40,10 +40,8 @@ ktest_lustre_allow_warnings=0
 ktest_nvidia=0
 ktest_out="/tmp/ktest-out/"
 ktest_njobs=$(nproc)
-ktest_loop=false
 DEPMOD=depmod
 MAKEARGS=()
-COVERAGE=""
 
 if ! which depmod > /dev/null; then
     DEPMOD=/sbin/depmod
@@ -225,10 +223,6 @@ function cmd_run_native()
 
     ktest_testargs="$@"
     parse_test_deps "$ktest_test"
-
-    if [[ -n $COVERAGE ]]; then
-	ktest_kernel_config_require+=(GCOV_KERNEL)
-    fi
 
     start_vm
     generate_coverage
@@ -859,10 +853,6 @@ function cmd_generate_zfs_patch()
     ktest_testargs="$@"
     parse_test_deps "$ktest_test"
 
-    if [[ -n $COVERAGE ]]; then
-	ktest_kernel_config_require+=(GCOV_KERNEL)
-    fi
-
     maybe_build_llvm
     run_kernel_build
     run_quiet_with_status "ZFS BUILD [$(basename "$ktest_test")]" "DONE" build_zfs
@@ -997,10 +987,6 @@ function cmd_build()
     ktest_testargs="$@"
     parse_test_deps "$ktest_test"
 
-    if [[ -n $COVERAGE ]]; then
-	ktest_kernel_config_require+=(GCOV_KERNEL)
-    fi
-
     maybe_build_llvm
     run_kernel_build
 
@@ -1049,10 +1035,6 @@ function cmd_kbuild()
 
     ktest_testargs="$@"
     parse_test_deps "$ktest_test"
-
-    if [[ -n $COVERAGE ]]; then
-	ktest_kernel_config_require+=(GCOV_KERNEL)
-    fi
 
     maybe_build_llvm
 
@@ -1144,10 +1126,6 @@ function cmd_build_native()
     ktest_testargs="$@"
     parse_test_deps "$ktest_test"
 
-    if [[ -n $COVERAGE ]]; then
-	ktest_kernel_config_require+=(GCOV_KERNEL)
-    fi
-
     prepare_linux_source
     maybe_build_llvm
     run_kernel_build
@@ -1231,10 +1209,6 @@ function cmd_generate_lustre_patch()
 
     ktest_testargs="$@"
     parse_test_deps "$ktest_test"
-
-    if [[ -n $COVERAGE ]]; then
-	ktest_kernel_config_require+=(GCOV_KERNEL)
-    fi
 
 
     # Use cached lustre_config.h from the lustre tree if available,

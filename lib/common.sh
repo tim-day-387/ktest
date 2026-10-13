@@ -176,7 +176,7 @@ checkdep() {
     if find_command "$dep"; then
 	return
     else
-	echo "$dep not found! Please install it."
+	echo "$dep not found! Please install $package."
 	exit 1
     fi
 }

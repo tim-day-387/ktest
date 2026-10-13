@@ -3,8 +3,6 @@
 #ifndef KTEST_INIT_COMMON_H
 #define KTEST_INIT_COMMON_H
 
-#include <stddef.h>
-
 /* Kernel log levels for /dev/kmsg */
 #define KMSG_ERR	3
 #define KMSG_INFO	6

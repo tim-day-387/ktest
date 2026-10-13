@@ -11,14 +11,6 @@
 #include "lint.h"
 
 #include "clang/ASTMatchers/ASTMatchFinder.h"
-#include "clang/Basic/Version.h"
-// clang 22 moved the option tables out of clangDriver into a new clangOptions
-// library, relocating this header from clang/Driver/ to clang/Options/.
-#if CLANG_VERSION_MAJOR >= 22
-#include "clang/Options/Options.h"
-#else
-#include "clang/Driver/Options.h"
-#endif
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Tooling/AllTUsExecution.h"

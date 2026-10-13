@@ -14,7 +14,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List
 
 import podman
 
@@ -67,7 +67,6 @@ class ContainerJob:
 
     # State fields (managed internally)
     _started: bool = field(default=False, init=False)
-    _container: Any = field(default=None, init=False)
 
     def _execute(self, client, podman_socket=None) -> int:
         """Internal execution logic - runs container and manages lifecycle."""
@@ -219,15 +218,14 @@ class ContainerJob:
                         container = create_client.containers.create(**create_kwargs)
                         container_id = container.id
                 break
-            except Exception as e:
+            except Exception:
                 if attempt < max_retries - 1:
                     time.sleep(2**attempt)
                 else:
                     raise
         # Look up the container via the caller's client (which has no timeout)
         # so that long-running operations like wait() and logs() work normally
-        self._container = client.containers.get(container_id)
-        container = self._container
+        container = client.containers.get(container_id)
 
         try:
             # Only sync tarballs if using tarball input mode
@@ -286,39 +284,10 @@ class ContainerJob:
                 except:
                     pass
 
-            self._container = None
-
     def run(self, client, podman_socket=None) -> int:
         """Synchronous execution - runs container and returns exit code."""
         if self._started:
             raise RuntimeError("Job already started")
         self._started = True
 
-        try:
-            return_code = self._execute(client, podman_socket=podman_socket)
-            return return_code
-        except Exception as e:
-            raise
-
-    def cleanup(self) -> None:
-        """Stop and remove container if still running."""
-        container = self._container
-        if container is not None:
-            if self.no_cleanup:
-                print(f"Skipping container cleanup (--no-cleanup): {container.id}")
-                return
-            try:
-                container.stop(timeout=5)
-            except:
-                pass
-            try:
-                container.remove()
-            except:
-                pass
-
-    def __enter__(self) -> "ContainerJob":
-        return self
-
-    def __exit__(self, _exc_tb, _exc_type, _exc_val) -> bool:
-        self.cleanup()
-        return False
+        return self._execute(client, podman_socket=podman_socket)

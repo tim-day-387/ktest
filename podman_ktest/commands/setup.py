@@ -12,7 +12,7 @@
 from pathlib import Path
 
 
-def cmd_setup(args, dirs=None):
+def cmd_setup(args):
     """Interactive setup to create ~/.ktestrc configuration file."""
     ktestrc_path = Path.home() / ".ktestrc"
 

@@ -170,11 +170,6 @@ ktest_ssh()
 
 ktest_gdb()
 {
-    if [[ -z $ktest_kernel_binary ]]; then
-	echo "Required parameter -k missing: kernel"
-	exit 1
-    fi
-
     exec gdb -ex "set remote interrupt-on-connect"			\
 	     -ex "target remote | socat UNIX-CONNECT:$ktest_out/vm/gdb -"\
 	     "$ktest_kernel_binary/vmlinux"
@@ -182,11 +177,6 @@ ktest_gdb()
 
 ktest_kgdb()
 {
-    if [[ -z $ktest_kernel_binary ]]; then
-	echo "Required parameter -k missing: kernel"
-	exit 1
-    fi
-
     ktest_sysrq g
 
     exec gdb -ex "set remote interrupt-on-connect"			\
@@ -196,8 +186,7 @@ ktest_kgdb()
 
 ktest_mon()
 {
-    exec socat UNIX-CONNECT:"$ktest_out/vm/on" STDIO
-    exec nc "$ktest_out/vm/mon"
+    exec socat UNIX-CONNECT:"$ktest_out/vm/mon" STDIO
 }
 
 ktest_sysrq()

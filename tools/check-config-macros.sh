@@ -124,8 +124,6 @@ printf '%-24s %7s %7s %7s %7s   %s\n' \
 printf '%-24s %7s %7s %7s %7s   %s\n' \
 	------------------------ ------ ------- ------ ------- ------
 
-total_c=0
-total_h=0
 printf '%s\n' "$matches" | while IFS=$'\t' read -r file line macro; do
 	printf '%s\t%s\t%s\t%s\n' "$(subsys "$file")" "$file" "$macro" \
 		"$([ "${file##*.}" = h ] && echo H || echo C)"
