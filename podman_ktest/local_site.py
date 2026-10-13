@@ -15,7 +15,7 @@ import json
 import shutil
 from pathlib import Path
 
-SITE_FILES = ["index.html", "app.js", "styles.css", "favicon.ico"]
+SITE_FILES = ["index.html", "app.js", "gerrit-filter.js", "styles.css", "favicon.ico"]
 DATA_FILES = [
     "metadata_store.json",
     "status.txt",

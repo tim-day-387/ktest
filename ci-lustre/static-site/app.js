@@ -17,30 +17,6 @@ const app = {
   homeAuthors: [],
   currentView: "home",
 
-  // Profile presets: selecting one loads the filter controls,
-  // which can then be adjusted by hand. Author names must match
-  // the Gerrit display name exactly.
-  profileConfig: {
-    Patches: { kind: "run" },
-    Branches: { kind: "branch" },
-    TimNeedReview: {
-      authors: ["Timothy Day", "Tim Day"],
-      needReview: true,
-    },
-    GroupNeedReview: {
-      authors: [
-        "Timothy Day",
-        "Tim Day",
-        "Arshad Hussain",
-        "James Simmons",
-        "Neil Brown",
-        "Shaun Tancheff",
-      ],
-      needReview: true,
-    },
-    All: {},
-  },
-
   // Initialize the application
   async init() {
     try {
@@ -142,7 +118,7 @@ const app = {
     const kindFilter = selectValue("kindfilter");
     const enforcedFilter = selectValue("enforcedfilter");
     const optionalFilter = selectValue("optionalfilter");
-    const gerritFilter = selectValue("gerritfilter");
+    const testFilter = selectValue("gerritfilter");
     const readyFilter = selectValue("readyfilter");
 
     // No selection, or "All" among the selection, disables the
@@ -159,9 +135,6 @@ const app = {
     const table = document.querySelector(".home-table");
     if (!table) return;
 
-    const needsReview = (info) =>
-      info.reviews !== null && info.reviews < 2 && !info.blocked;
-
     const rows = table.querySelectorAll("tbody tr");
     for (let i = 0; i < rows.length; i++) {
       const info = this.homeRows[i] || {};
@@ -177,25 +150,18 @@ const app = {
         info.enforced === enforcedFilter;
       const optionalMatch =
         optionalFilter === "All" || info.optional === optionalFilter;
-      const gerritMatch =
-        gerritFilter === "All" || info.gerrit === gerritFilter;
 
-      // "Not ready" hides ready-to-land changes but keeps
-      // everything else, so they can be ignored wholesale. The
-      // sub-views split not-ready changes by cause: short on
-      // reviews (but not vetoed), or carrying a negative vote
-      const readyMatch =
-        readyFilter === "All" ||
-        (readyFilter === "Ready" && info.ready) ||
-        (readyFilter === "NotReady" && !info.ready) ||
-        (readyFilter === "NeedReview" && needsReview(info)) ||
-        (readyFilter === "Negative" && info.blocked);
-
-      const authorMatch = authors === null || authors.includes(info.author);
+      // The Gerrit columns are filtered by the code shared with
+      // workbench (gerrit-filter.js)
+      const changeMatch = GerritFilter.matches(info.change, {
+        ready: readyFilter,
+        test: testFilter,
+        authors: authors,
+      });
 
       rows[i].classList.toggle(
         "filtered",
-        !(kindMatch && enforcedMatch && optionalMatch && gerritMatch && readyMatch && authorMatch),
+        !(kindMatch && enforcedMatch && optionalMatch && changeMatch),
       );
     }
   },
@@ -203,7 +169,7 @@ const app = {
   // Apply a profile: load its preset into the filter controls,
   // then filter. Manual filter changes build on top from there.
   applyProfile(profile) {
-    const cfg = this.profileConfig[profile] || {};
+    const cfg = GerritFilter.profiles[profile] || {};
 
     const setValue = (id, value) => {
       const el = document.getElementById(id);
@@ -533,17 +499,31 @@ const app = {
       .map((a, i) => `<option value="${i}">${this.escapeHtml(a)}</option>`)
       .join("");
 
+    // The profiles and the choices of the Gerrit filters are shared
+    // with workbench (gerrit-filter.js); the first profile is the
+    // default
+    const profileRadios = Object.entries(GerritFilter.profiles)
+      .map(
+        ([name, cfg], i) =>
+          `<label title="${this.escapeHtml((cfg.authors || []).join(", "))}"><input type="radio" name="profile" onchange="app.applyProfile(this.value)" value="${this.escapeHtml(name)}"${i === 0 ? " checked" : ""}> ${this.escapeHtml(cfg.label)}</label>`,
+      )
+      .join("\n                ");
+
+    const options = (choices) =>
+      choices
+        .map(
+          ([value, label]) =>
+            `<option value="${this.escapeHtml(value)}">${this.escapeHtml(label)}</option>`,
+        )
+        .join("");
+
     let html = `
             <h1>Testing Status</h1>
             ${this.renderBranchSummary(testRuns, gerrit, project)}
             <h2>Test runs</h2>
             <div id="profiles">
                 Profile:
-                <label><input type="radio" name="profile" onchange="app.applyProfile(this.value)" value="Patches" checked> Tested patches</label>
-                <label><input type="radio" name="profile" onchange="app.applyProfile(this.value)" value="Branches"> Tested branches</label>
-                <label title="Timothy Day"><input type="radio" name="profile" onchange="app.applyProfile(this.value)" value="TimNeedReview"> Timothy Day - Need review</label>
-                <label title="Timothy Day, Arshad Hussain, James Simmons, Neil Brown, Shaun Tancheff"><input type="radio" name="profile" onchange="app.applyProfile(this.value)" value="GroupNeedReview"> Review group - Need review</label>
-                <label><input type="radio" name="profile" onchange="app.applyProfile(this.value)" value="All"> All</label>
+                ${profileRadios}
             </div>
             <table class="home-table">
                 <colgroup>
@@ -592,19 +572,13 @@ const app = {
                         </th>
                         <th></th>
                         <th>
-                            <select id="readyfilter" title="Ready to land: Jenkins + Maloo passed, 2+ reviews, no downvotes" onchange="app.updateHomeFilter()">
-                                <option value="All" selected>All</option>
-                                <option value="Ready">Ready</option>
-                                <option value="NotReady">Not ready</option>
-                                <option value="NeedReview">Not ready - Need review</option>
-                                <option value="Negative">Not ready - Negative review</option>
+                            <select id="readyfilter" title="${this.escapeHtml(GerritFilter.readyTitle)}" onchange="app.updateHomeFilter()">
+                                ${options(GerritFilter.readyOptions)}
                             </select>
                         </th>
                         <th>
                             <select id="gerritfilter" onchange="app.updateHomeFilter()">
-                                <option value="All" selected>All</option>
-                                <option value="PASS">Passed</option>
-                                <option value="FAIL">Failed</option>
+                                ${options(GerritFilter.testOptions)}
                             </select>
                         </th>
                         <th></th>
@@ -702,18 +676,7 @@ const app = {
         tested: Boolean(data),
         enforced: enforcedSummary.text,
         optional: data ? optionalSummary.text : "Untested",
-        gerrit: gerritTest,
-        reviews: change ? change.reviews : null,
-        blocked: change ? change.blocked : false,
-        // Ready to land: both bots +1 Verified, 2+ positive human
-        // reviews, and no negative vote anywhere
-        ready: Boolean(
-          change &&
-            change.test === "PASS" &&
-            change.reviews >= 2 &&
-            !change.blocked,
-        ),
-        author: change ? change.author : "-",
+        change: change,
       });
 
       html += `
