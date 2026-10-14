@@ -13,7 +13,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..config import IMAGES
-from ..utils import get_git_version_info, get_podman_client, get_zfs_version
+from ..utils import (
+    get_git_version_info,
+    get_nvidia_driver_version,
+    get_podman_client,
+    get_zfs_version,
+)
 
 
 def _build_image(dockerfile, tag, name, ktest_dir, podman_socket=None, buildargs=None):
@@ -56,6 +61,10 @@ def cmd_build(args, ktest_dir, podman_socket=None):
     # The coverity image pins the ZFS tag from the top-level META file
     zfs_buildargs = {"ZFS_VERSION": get_zfs_version(ktest_dir)}
 
+    # ktest-runner pins the NVIDIA driver (the open-gpu-kernel-modules tag,
+    # the userland payload and the GSP firmware) from the top-level META file
+    nvidia_buildargs = {"NVIDIA_DRIVER_VERSION": get_nvidia_driver_version(ktest_dir)}
+
     # Build ktest-runner first since ci-lustre depends on it
     base_images = [img for img in images_to_build if img["name"] == "ktest-runner"]
     dependent_images = [img for img in images_to_build if img["name"] != "ktest-runner"]
@@ -68,6 +77,7 @@ def cmd_build(args, ktest_dir, podman_socket=None):
             base_image["name"],
             ktest_dir,
             podman_socket,
+            nvidia_buildargs,
         )
 
     # Now build dependent images in parallel, in waves: images that

@@ -385,23 +385,39 @@ def get_git_version_info(repo_path):
     return tag, commit
 
 
-def get_zfs_version(ktest_dir):
-    """Get the ZFS version from the top-level META file.
+def get_meta_field(ktest_dir, field):
+    """Get a field from the top-level META file.
 
     Args:
         ktest_dir: Path to the ktest directory (where META lives)
+        field: Field name without the trailing colon (e.g. "ZFS-Maximum")
 
     Returns:
-        The ZFS version string (e.g. "2.4.2")
+        The field's value with surrounding whitespace stripped
 
     Raises:
-        RuntimeError: if the ZFS-Maximum field cannot be found
+        RuntimeError: if the field cannot be found
     """
     meta_path = Path(ktest_dir) / "META"
     for line in meta_path.read_text().splitlines():
-        if line.startswith("ZFS-Maximum:"):
+        if line.startswith(f"{field}:"):
             return line.split(":", 1)[1].strip()
-    raise RuntimeError(f"ZFS-Maximum not found in {meta_path}")
+    raise RuntimeError(f"{field} not found in {meta_path}")
+
+
+def get_zfs_version(ktest_dir):
+    """Get the ZFS version (ZFS-Maximum) from the top-level META file."""
+    return get_meta_field(ktest_dir, "ZFS-Maximum")
+
+
+def get_nvidia_driver_version(ktest_dir):
+    """Get the NVIDIA driver version (NVIDIA-Driver) from the top-level META file.
+
+    This pins both the open-gpu-kernel-modules tag qlkbuild builds against the
+    kernel and the .run installer whose userland rides along in the UKI; see
+    tools/nvidia-userland-payload.sh.
+    """
+    return get_meta_field(ktest_dir, "NVIDIA-Driver")
 
 
 class TeeWriter:

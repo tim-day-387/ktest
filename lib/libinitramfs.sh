@@ -20,7 +20,8 @@ INITRAMFS_IMAGE_BASE=${INITRAMFS_IMAGE_BASE:-docker.io/library/ubuntu:26.04}
 # mk_initramfs
 #
 # Bundles the modules from $ktest_kernel_binary/lib/modules, includes firmware
-# when ktest_uki_firmware is set, and writes $ktest_kernel_binary/initramfs.
+# when ktest_uki_firmware is set and the NVIDIA userland payload when
+# build_nvidia staged one, and writes $ktest_kernel_binary/initramfs.
 #
 # Runs in a subshell so set -euo pipefail and the cleanup trap stay scoped to
 # this build and don't leak into the caller.
@@ -99,6 +100,17 @@ function mk_initramfs() (
     echo "Copying modules from $MODULES_DIR..."
     mkdir -p "$INITRAMFS/lib/modules"
     cp -a "$MODULES_DIR/." "$INITRAMFS/lib/modules/"
+
+    # The NVIDIA userland matching the bundled NVIDIA modules, staged by
+    # build_nvidia (qlkbuild) from tools/nvidia-userland-payload.sh's squashfs.
+    # ktest-init loop-mounts it out of the preserved initramfs copy and
+    # overlays it onto the booted root (overlay_nvidia_userland in init.c).
+    if [[ -f "$ktest_kernel_binary/nvidia-userland.squashfs" ]]; then
+	echo "Copying NVIDIA userland payload..."
+	mkdir -p "$INITRAMFS/lib/nvidia"
+	cp "$ktest_kernel_binary/nvidia-userland.squashfs" \
+	   "$INITRAMFS/lib/nvidia/userland.squashfs"
+    fi
 
     # Populate firmware. Copy /lib/firmware first as a base so distro-packaged
     # firmware fills any gaps (e.g. GPU firmware not yet in linux-firmware upstream),

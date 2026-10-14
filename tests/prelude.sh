@@ -326,12 +326,17 @@ config-uki-firmware()
 }
 
 # Build the NVIDIA open-gpu-kernel-modules out-of-tree against the kernel under
-# test and bundle the resulting modules into the initramfs.  See build_nvidia in
-# qlkbuild.  The driver owns the GPU instead of nouveau, so a test opting into
-# this should disable DRM_NOUVEAU.
+# test and bundle the resulting modules, plus the matching driver userland,
+# into the initramfs.  See build_nvidia in qlkbuild.  The driver owns the GPU
+# instead of nouveau, so a test opting into this should disable DRM_NOUVEAU.
+#
+# ktest-init delivers the userland by loop-mounting a squashfs and overlaying
+# it onto the root before switch_root (overlay_nvidia_userland in init.c);
+# it has no modprobe, so those three must be built in.
 config-nvidia-modules()
 {
     ktest_nvidia=1
+    require-kernel-config BLK_DEV_LOOP=y,SQUASHFS=y,SQUASHFS_ZSTD=y,OVERLAY_FS=y
 }
 
 # Skip building Lustre (and applying its kernel patch) for tests that only need

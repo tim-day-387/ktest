@@ -8,6 +8,29 @@
 # Author: Timothy Day <timday@amazon.com>
 #
 
+# Stage: the NVIDIA driver userland that travels in the UKI next to the
+# kernel modules qlkbuild builds (the modules reject any other driver
+# release).  Built in its own throwaway image because
+# tools/nvidia-userland-payload.sh really installs the driver into the system
+# it runs in.  xserver-xorg-core lets nvidia-installer find the X module
+# path and libglvnd-dev the EGL vendor config path; the libgl*/libegl*
+# packages mirror the desktop image so the installer adds only its vendor
+# libraries rather than a second libglvnd.  The version comes from META's
+# NVIDIA-Driver, passed in by pk build.
+ARG NVIDIA_DRIVER_VERSION
+FROM ubuntu:26.04 AS nvidia-userland
+ARG NVIDIA_DRIVER_VERSION
+ENV DEBIAN_FRONTEND=noninteractive
+RUN test -n "$NVIDIA_DRIVER_VERSION" || { \
+        echo "NVIDIA_DRIVER_VERSION build arg unset (pk build takes it from META)"; \
+        exit 1; }
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates kmod xserver-xorg-core pkg-config squashfs-tools \
+        libglvnd-dev libgl1 libegl1 libgles2 libopengl0 libglx0 && \
+    rm -rf /var/lib/apt/lists/*
+COPY tools/nvidia-userland-payload.sh /usr/local/bin/
+RUN nvidia-userland-payload.sh "$NVIDIA_DRIVER_VERSION" /out
+
 # Distro
 FROM ubuntu:26.04
 
@@ -142,26 +165,30 @@ RUN for chip in ad102 ad103 ad104 ad106 ad107; do \
 
 # Clone NVIDIA's open-gpu-kernel-modules as a sibling of the kernel tree so
 # qlkbuild's build_nvidia finds it at $ktest_kernel_source/../open-gpu-kernel-modules
-# (config-nvidia-modules tests only).  Pinned to the release matching the host
-# driver / the decompressed AD-series firmware above; bump this tag in lockstep
-# when the host driver is upgraded.
-RUN git clone --depth=1 --branch 615.78.08 \
+# (config-nvidia-modules tests only).  The tag is META's NVIDIA-Driver, the
+# same version that pins the userland payload and GSP firmware below, so
+# there is nothing else to keep in lockstep; build_nvidia cross-checks the
+# checkout's version.mk against META at build time.
+ARG NVIDIA_DRIVER_VERSION
+RUN test -n "$NVIDIA_DRIVER_VERSION" && \
+    git clone --depth=1 --branch "$NVIDIA_DRIVER_VERSION" \
     https://github.com/NVIDIA/open-gpu-kernel-modules.git \
     /home/ktest/git/open-gpu-kernel-modules
+
+# The matching userland, packed by the nvidia-userland stage above.
+# build_nvidia bundles it into the initramfs and ktest-init overlays it onto
+# the booted root, so the root images carry no NVIDIA userland of their own.
+COPY --from=nvidia-userland --chown=ktest:ktest /out/nvidia-userland.squashfs \
+    /home/ktest/git/nvidia-userland/${NVIDIA_DRIVER_VERSION}.squashfs
 
 # Stage the GSP firmware matching the driver above.  The container's
 # linux-firmware deb only carries the nouveau-style per-chip GSP blobs
 # (nvidia/adXXX/gsp/); the open/proprietary NVIDIA driver instead loads
 # nvidia/<driver-version>/gsp_*.bin, which ships only in NVIDIA's .run
-# installer.  Extract it (no install/build) and drop firmware/*.bin into the
-# baked linux-firmware tree so mk-initramfs bundles it.  Keep this version in
-# lockstep with the open-gpu-kernel-modules tag above.
-RUN cd /tmp && \
-    wget -q https://us.download.nvidia.com/XFree86/Linux-x86_64/615.78.08/NVIDIA-Linux-x86_64-615.78.08.run && \
-    sh NVIDIA-Linux-x86_64-615.78.08.run --extract-only --target nvidia-run && \
-    mkdir -p /home/ktest/linux-firmware/nvidia/615.78.08 && \
-    cp nvidia-run/firmware/*.bin /home/ktest/linux-firmware/nvidia/615.78.08/ && \
-    rm -rf nvidia-run NVIDIA-Linux-x86_64-615.78.08.run
+# installer.  Drop the blobs the nvidia-userland stage extracted into the
+# baked linux-firmware tree so mk-initramfs bundles them.
+COPY --from=nvidia-userland --chown=ktest:ktest /out/firmware/ \
+    /home/ktest/linux-firmware/nvidia/${NVIDIA_DRIVER_VERSION}/
 
 # Copy the ktest repository into the container (kept late so repo changes
 # don't invalidate the layers above)

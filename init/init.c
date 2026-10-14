@@ -26,9 +26,12 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <linux/loop.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -45,6 +48,19 @@
 
 /* Path to the Lustre mount helper bundled alongside /init in the initramfs. */
 #define MOUNT_LUSTREROOT	"/sbin/mount.lustreroot"
+
+/*
+ * The NVIDIA userland payload mk_initramfs bundles next to the NVIDIA
+ * modules (tools/nvidia-userland-payload.sh via build_nvidia in qlkbuild),
+ * where it is loop-mounted, and where the overlay upper/work dirs go.  All
+ * relative to the new root, under the preserved initramfs copy so they
+ * survive switch_root.
+ */
+#define NVIDIA_PAYLOAD	INITRAMFS_SAVE "/lib/nvidia/userland.squashfs"
+#define NVIDIA_MNT	INITRAMFS_SAVE "/nvidia"
+#define NVIDIA_OVERLAY	INITRAMFS_SAVE "/nvidia-overlay"
+/* Manifest at the payload root: one directory per line, relative to /. */
+#define NVIDIA_MANIFEST	".ktest-overlay"
 
 /*
  * find_cmdline_arg - locate a named argument in a kernel cmdline string
@@ -433,6 +449,211 @@ static int copy_tree(const char *src, const char *dst, dev_t dev)
 }
 
 /*
+ * mkdir_p - create @path and any missing parents, mode 0755
+ */
+static int mkdir_p(const char *path)
+{
+	char buf[PATH_MAX];
+	char *p;
+
+	if (strlen(path) >= sizeof(buf)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	strcpy(buf, path);
+
+	for (p = buf + 1; *p; p++) {
+		if (*p != '/')
+			continue;
+		*p = '\0';
+		if (mkdir(buf, 0755) < 0 && errno != EEXIST)
+			return -1;
+		*p = '/';
+	}
+	if (mkdir(buf, 0755) < 0 && errno != EEXIST)
+		return -1;
+	return 0;
+}
+
+/*
+ * loop_attach - attach @file read-only to a free loop device
+ *
+ * Returns an open fd on the loop device, whose path is written to @dev, or
+ * -1 after logging.  The device autoclears, so it detaches once nothing
+ * holds it open any more: the caller must mount it before closing the fd.
+ */
+static int loop_attach(const char *file, char *dev, size_t devlen)
+{
+	struct loop_info64 info;
+	int ctl, ffd, lfd = -1, n, i;
+
+	ctl = open("/dev/loop-control", O_RDWR | O_CLOEXEC);
+	if (ctl < 0) {
+		kmsg_log(KMSG_ERR, "open /dev/loop-control: %s\n",
+			 strerror(errno));
+		return -1;
+	}
+	n = ioctl(ctl, LOOP_CTL_GET_FREE);
+	close(ctl);
+	if (n < 0) {
+		kmsg_log(KMSG_ERR, "LOOP_CTL_GET_FREE: %s\n", strerror(errno));
+		return -1;
+	}
+	snprintf(dev, devlen, "/dev/loop%d", n);
+
+	/* devtmpfs creates the node a moment after the device appears */
+	for (i = 0; i < 50; i++) {
+		lfd = open(dev, O_RDONLY | O_CLOEXEC);
+		if (lfd >= 0 || errno != ENOENT)
+			break;
+		usleep(100000);
+	}
+	if (lfd < 0) {
+		kmsg_log(KMSG_ERR, "open %s: %s\n", dev, strerror(errno));
+		return -1;
+	}
+
+	ffd = open(file, O_RDONLY | O_CLOEXEC);
+	if (ffd < 0) {
+		kmsg_log(KMSG_ERR, "open %s: %s\n", file, strerror(errno));
+		close(lfd);
+		return -1;
+	}
+
+	/* A read-only backing fd makes the loop device read-only. */
+	if (ioctl(lfd, LOOP_SET_FD, ffd) < 0) {
+		kmsg_log(KMSG_ERR, "LOOP_SET_FD %s: %s\n", dev, strerror(errno));
+		close(ffd);
+		close(lfd);
+		return -1;
+	}
+	close(ffd);
+
+	memset(&info, 0, sizeof(info));
+	info.lo_flags = LO_FLAGS_AUTOCLEAR;
+	strncpy((char *)info.lo_file_name, file, LO_NAME_SIZE - 1);
+	if (ioctl(lfd, LOOP_SET_STATUS64, &info) < 0) {
+		kmsg_log(KMSG_ERR, "LOOP_SET_STATUS64 %s: %s\n", dev,
+			 strerror(errno));
+		ioctl(lfd, LOOP_CLR_FD, 0);
+		close(lfd);
+		return -1;
+	}
+
+	return lfd;
+}
+
+/*
+ * overlay_nvidia_userland - lay the bundled NVIDIA userland over the new root
+ *
+ * The NVIDIA kernel modules only talk to userland of the exact same driver
+ * release, so instead of baking a userland into every root image,
+ * mk_initramfs bundles the one matching the modules it packed, as a
+ * squashfs (NVIDIA_PAYLOAD).  Loop-mount it out of the preserved initramfs
+ * copy and, for each directory its manifest names (the multiarch lib dir,
+ * /usr/bin, the Xorg module dirs, the glvnd/Vulkan/OpenCL vendor JSON
+ * dirs, ...), mount an overlay on the same path in the new root with the
+ * payload stacked on top of the root's own contents.  A tmpfs upperdir keeps
+ * the directories writable for the booted system (writes there don't
+ * persist, like /lib/modules).  Directories the root lacks get the payload
+ * alone as lower layer.  The mounts sit under /newroot and ride along with
+ * switch_root_and_exec()'s move.  A no-op when no payload was bundled, and
+ * a logged no-op for any directory whose overlay fails, so a broken payload
+ * costs the GPU, not the boot.
+ */
+static void overlay_nvidia_userland(void)
+{
+	char dev[32], line[PATH_MAX];
+	char lower[PATH_MAX], target[PATH_MAX];
+	char upper[PATH_MAX], work[PATH_MAX];
+	char opts[4 * PATH_MAX + 64];
+	struct stat st;
+	FILE *f;
+	int lfd, n = 0, done = 0;
+
+	if (access(MOUNTPOINT NVIDIA_PAYLOAD, F_OK) != 0)
+		return;
+
+	lfd = loop_attach(MOUNTPOINT NVIDIA_PAYLOAD, dev, sizeof(dev));
+	if (lfd < 0)
+		return;
+
+	mkdir(MOUNTPOINT NVIDIA_MNT, 0755);
+	if (mount(dev, MOUNTPOINT NVIDIA_MNT, "squashfs", MS_RDONLY, NULL) < 0) {
+		kmsg_log(KMSG_ERR, "mount NVIDIA userland payload: %s\n",
+			 strerror(errno));
+		ioctl(lfd, LOOP_CLR_FD, 0);
+		close(lfd);
+		return;
+	}
+	close(lfd);
+
+	f = fopen(MOUNTPOINT NVIDIA_MNT "/" NVIDIA_MANIFEST, "r");
+	if (!f) {
+		kmsg_log(KMSG_ERR, "NVIDIA userland payload has no %s: %s\n",
+			 NVIDIA_MANIFEST, strerror(errno));
+		return;
+	}
+
+	while (fgets(line, sizeof(line), f)) {
+		int len = (int)strcspn(line, "\n");
+		int r;
+
+		line[len] = '\0';
+		/* Relative, no traversal, nothing the overlay option parser
+		 * would need escaping. */
+		if (!len || line[0] == '/' || line[len - 1] == '/' ||
+		    strstr(line, "..") || strpbrk(line, ":,\\")) {
+			kmsg_log(KMSG_ERR, "NVIDIA overlay: bad manifest entry '%s'\n",
+				 line);
+			continue;
+		}
+
+		r = snprintf(lower, sizeof(lower), MOUNTPOINT NVIDIA_MNT "/%s", line);
+		if (r < 0 || r >= (int)sizeof(lower))
+			continue;
+		r = snprintf(target, sizeof(target), MOUNTPOINT "/%s", line);
+		if (r < 0 || r >= (int)sizeof(target))
+			continue;
+		snprintf(upper, sizeof(upper), MOUNTPOINT NVIDIA_OVERLAY "/%d/upper", n);
+		snprintf(work, sizeof(work), MOUNTPOINT NVIDIA_OVERLAY "/%d/work", n);
+		n++;
+
+		if (mkdir_p(upper) < 0 || mkdir_p(work) < 0) {
+			kmsg_log(KMSG_ERR, "NVIDIA overlay %s: mkdir upper/work: %s\n",
+				 line, strerror(errno));
+			continue;
+		}
+
+		if (stat(target, &st) == 0 && S_ISDIR(st.st_mode)) {
+			snprintf(opts, sizeof(opts),
+				 "lowerdir=%s:%s,upperdir=%s,workdir=%s",
+				 lower, target, upper, work);
+		} else {
+			if (mkdir_p(target) < 0) {
+				kmsg_log(KMSG_ERR, "NVIDIA overlay %s: mkdir: %s\n",
+					 line, strerror(errno));
+				continue;
+			}
+			snprintf(opts, sizeof(opts),
+				 "lowerdir=%s,upperdir=%s,workdir=%s",
+				 lower, upper, work);
+		}
+
+		if (mount("overlay", target, "overlay", 0, opts) < 0) {
+			kmsg_log(KMSG_ERR, "NVIDIA overlay %s: %s\n", line,
+				 strerror(errno));
+			continue;
+		}
+		done++;
+	}
+	fclose(f);
+
+	kmsg_log(KMSG_INFO, "overlaid NVIDIA userland on %d/%d directories\n",
+		 done, n);
+}
+
+/*
  * copy_initramfs_to_newroot - preserve the whole initramfs after switch_root
  *
  * switch_root discards the initramfs, but we want both its freshly built
@@ -444,10 +665,11 @@ static int copy_tree(const char *src, const char *dst, dev_t dev)
  * then bind /newroot/init.initramfs/lib/modules onto /newroot/lib/modules so
  * modprobe(8) finds the modules at the usual path, and likewise
  * /newroot/init.initramfs/lib/firmware onto /newroot/lib/firmware so the
- * kernel firmware loader finds the bundled blobs.  These submounts ride along
- * when switch_root_and_exec() moves /newroot onto /; the later /run remount
- * does not shadow /init.initramfs.  A no-op if the initramfs bundled no
- * modules.
+ * kernel firmware loader finds the bundled blobs.  A bundled NVIDIA userland
+ * is then overlaid from the same copy (overlay_nvidia_userland).  These
+ * submounts ride along when switch_root_and_exec() moves /newroot onto /;
+ * the later /run remount does not shadow /init.initramfs.  A no-op if the
+ * initramfs bundled no modules.
  *
  * The tmpfs has no explicit size, so it is capped at half of RAM.  If the
  * copy does not fit, copy_tree() logs the failing path and the copy is
@@ -505,6 +727,8 @@ static void copy_initramfs_to_newroot(void)
 			kmsg_log(KMSG_INFO,
 				 "bind-mounted /lib/firmware from initramfs\n");
 	}
+
+	overlay_nvidia_userland();
 }
 
 /*

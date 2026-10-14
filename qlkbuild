@@ -30,6 +30,9 @@ ktest_kernel_source="$(realpath -e ~/git/linux/ 2>/dev/null || true)"
 ktest_lustre_source="$ktest_kernel_source/../lustre-release/"
 ktest_zfs_source="$ktest_kernel_source/../zfs/"
 ktest_nvidia_source="$ktest_kernel_source/../open-gpu-kernel-modules/"
+# <driver-version>.squashfs payloads from tools/nvidia-userland-payload.sh
+# (the ktest-runner container build drops one there for META's NVIDIA-Driver).
+ktest_nvidia_userland="$ktest_kernel_source/../nvidia-userland/"
 ktest_llvm_source="$ktest_kernel_source/../llvm-project/"
 ktest_boot_test="$ktest_dir/tests/fs/lustre/boot.ktest"
 ktest_ccplugin="$ktest_dir/cplugin/build/xunused"
@@ -635,22 +638,59 @@ function validate_nvidia_build() {
     check_file "$ktest_nvidia_build/kernel-open/nvidia-modeset.ko"
 }
 
+# Stage the NVIDIA userland payload matching the open-gpu-kernel-modules
+# checkout for mk_initramfs.  The modules refuse any userland that isn't the
+# exact same driver release, so the userland is shipped in the UKI with them
+# (ktest-init overlays it onto the booted root; see init/init.c) instead of
+# being baked into the root images.  The version is read from the checkout
+# itself and cross-checked against META's NVIDIA-Driver, the single pin the
+# ktest-runner container build used for the checkout, the payload and the
+# GSP firmware.
+function stage_nvidia_userland()
+{
+    local ver meta_ver payload
+
+    ver=$(sed -n 's/^NVIDIA_VERSION[[:space:]]*=[[:space:]]*//p' \
+	      "$ktest_nvidia_source/version.mk")
+    meta_ver=$(awk '/^NVIDIA-Driver:/ {print $2}' "$ktest_dir/META")
+
+    if [[ -z "$ver" || "$ver" != "$meta_ver" ]]; then
+	echo "open-gpu-kernel-modules at $ktest_nvidia_source is version '$ver'"
+	echo "but META pins NVIDIA-Driver $meta_ver.  Rebuild the ktest-runner"
+	echo "container (pk build) after bumping META."
+	exit 1
+    fi
+
+    payload="$ktest_nvidia_userland/$ver.squashfs"
+    if [[ ! -f "$payload" ]]; then
+	echo "NVIDIA userland payload $payload not found."
+	echo "Rebuild the ktest-runner container (pk build), or generate it with"
+	echo "tools/nvidia-userland-payload.sh $ver (in a throwaway container)."
+	exit 1
+    fi
+
+    cp "$payload" "$ktest_kernel_binary/nvidia-userland.squashfs"
+}
+
 # Build the NVIDIA open-gpu-kernel-modules out-of-tree against the kernel under
 # test.  Mirrors build_zfs_full: rsync the sibling checkout into the build dir,
 # then build with the same compiler/arch the kernel used.  SYSSRC/SYSOUT point
 # the NVIDIA Kbuild at our out-of-tree kernel build (source + O= obj dir), the
 # same split as ZFS's --with-linux/--with-linux-obj.  Output .ko land in
-# kernel-open/; install_fs_modules copies them into the initramfs module tree.
+# kernel-open/; install_fs_modules copies them into the initramfs module tree,
+# and the matching userland payload goes alongside for mk_initramfs.
 function build_nvidia()
 {
     local old="$PWD"
 
     if [[ ! -d "$ktest_nvidia_source" ]]; then
 	echo "NVIDIA source not found at $ktest_nvidia_source"
-	echo "Clone github.com/NVIDIA/open-gpu-kernel-modules there (pinned to"
-	echo "the release matching the host driver) to build the NVIDIA modules."
+	echo "Clone github.com/NVIDIA/open-gpu-kernel-modules there (at the tag"
+	echo "META's NVIDIA-Driver names) to build the NVIDIA modules."
 	exit 1
     fi
+
+    stage_nvidia_userland
 
     # Create our own build dir rather than relying on the startup mkdir, which is
     # gated on the source dir and skipped on build paths (e.g. package_native)

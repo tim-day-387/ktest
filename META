@@ -1,3 +1,4 @@
 Name:          ktest
 Linux-Maximum: 7.0
 ZFS-Maximum:   2.4.2
+NVIDIA-Driver: 615.78.08
