@@ -550,16 +550,16 @@ static int loop_attach(const char *file, char *dev, size_t devlen)
  * release, so instead of baking a userland into every root image,
  * mk_initramfs bundles the one matching the modules it packed, as a
  * squashfs (NVIDIA_PAYLOAD).  Loop-mount it out of the preserved initramfs
- * copy and, for each directory its manifest names (the multiarch lib dir,
- * /usr/bin, the Xorg module dirs, the glvnd/Vulkan/OpenCL vendor JSON
- * dirs, ...), mount an overlay on the same path in the new root with the
- * payload stacked on top of the root's own contents.  A tmpfs upperdir keeps
- * the directories writable for the booted system (writes there don't
- * persist, like /lib/modules).  Directories the root lacks get the payload
- * alone as lower layer.  The mounts sit under /newroot and ride along with
- * switch_root_and_exec()'s move.  A no-op when no payload was bundled, and
- * a logged no-op for any directory whose overlay fails, so a broken payload
- * costs the GPU, not the boot.
+ * copy and, for each directory its manifest names (the 64- and 32-bit
+ * multiarch lib dirs and /usr/lib32, /usr/bin, the Xorg module dirs, the
+ * glvnd/Vulkan/OpenCL vendor JSON dirs, ...), mount an overlay on the same
+ * path in the new root with the payload stacked on top of the root's own
+ * contents.  A tmpfs upperdir keeps the directories writable for the booted
+ * system (writes there don't persist, like /lib/modules).  Directories the
+ * root lacks get the payload alone as lower layer.  The mounts sit under
+ * /newroot and ride along with switch_root_and_exec()'s move.  A no-op when
+ * no payload was bundled, and a logged no-op for any directory whose
+ * overlay fails, so a broken payload costs the GPU, not the boot.
  */
 static void overlay_nvidia_userland(void)
 {

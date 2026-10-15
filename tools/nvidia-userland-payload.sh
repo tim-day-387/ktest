@@ -17,7 +17,10 @@
 #       vendor JSONs, ...) laid out as it would appear under /, plus a
 #       .ktest-overlay manifest at the root naming the directories
 #       ktest-init overlays onto the booted root filesystem (see
-#       overlay_nvidia_userland in init/init.c).
+#       overlay_nvidia_userland in init/init.c).  The 32-bit vendor
+#       libraries are included, under /usr/lib/i386-linux-gnu with a
+#       /usr/lib32 symlink mirror (see below), so 32-bit GL clients such as
+#       Steam's bootstrapper pass the modules' version check too.
 #   <output-dir>/firmware/
 #       The GSP firmware blobs the modules load.  Delivered separately:
 #       mk_initramfs puts them under /lib/firmware/nvidia/<version>, which
@@ -72,11 +75,17 @@ snapshot > before
 # --no-systemd: the suspend/hibernate units are useless in the VM and would
 #   drag the systemd unit directories into the overlay set.
 # --no-x-check / --no-nouveau-check: no X server or GPU in a build container.
+# --install-compat32-libs / --compat32-libdir: the 32-bit vendor libraries
+#   as well, for 32-bit GL clients.  The installer only installs them into
+#   a 32-bit library directory it finds already populated, and the build
+#   container has none, so name the directory outright: Ubuntu's i386
+#   multiarch dir, which the 32-bit ld.so searches by default.
 (cd nvidia-run && ./nvidia-installer --silent \
     --no-kernel-modules --no-nouveau-check --no-x-check \
     --no-install-libglvnd --no-systemd --no-wine-files \
     --no-check-for-alternate-installs --no-backup \
-    --no-rebuild-initramfs --no-distro-scripts)
+    --no-rebuild-initramfs --no-distro-scripts \
+    --install-compat32-libs --compat32-libdir=lib/i386-linux-gnu)
 
 snapshot > after
 
@@ -93,11 +102,31 @@ LC_ALL=C comm -13 before after \
 
 [[ -s files ]] || { echo "nvidia-installer installed nothing?" >&2; exit 1; }
 
+lib32=/usr/lib/i386-linux-gnu
+if ! grep -qx "$lib32/libGLX_nvidia\.so\.$ver" files; then
+    echo "nvidia-installer did not install the 32-bit libraries into $lib32" >&2
+    exit 1
+fi
+
 mkdir -p payload "$out/firmware"
 
 # tar preserves symlinks, modes (the setuid bit on nvidia-modprobe) and
 # strips the leading / for us.
 tar --no-recursion --files-from=files -cf - 2>/dev/null | tar -C payload -xpf -
+
+# Mirror the 32-bit libraries under /usr/lib32 as symlinks.  On a desktop
+# Ubuntu (libc6-i386 lists /usr/lib32 in ld.so.conf) NVIDIA's installer
+# picks that directory, so a host that ever had the driver installed
+# natively carries an ld.so.cache resolving libGLX_nvidia.so.0 and friends
+# to /lib32/, and the cache takes precedence over the default search path.
+# With both directories overlaid, those entries land on this payload rather
+# than on the stale native copy.
+mkdir -p payload/usr/lib32
+for f in payload$lib32/*; do
+    f=${f##*/}
+    ln -s "../lib/i386-linux-gnu/$f" "payload/usr/lib32/$f"
+    echo "/usr/lib32/$f" >> files
+done
 
 cp nvidia-run/firmware/*.bin "$out/firmware/"
 
