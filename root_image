@@ -197,10 +197,29 @@ _umount_lustre_client()
     return 1
 }
 
+# The pool lives on a loop device over the image file rather than on the
+# file itself, so its labels record a disk vdev: at boot the same bytes are
+# a block device and a stock `zpool import` (init/init.c) can take them.  A
+# pool created straight on the file would be labelled type=file, which stock
+# zpool cannot import from a block device.
+_attach_lustre_image()
+{
+    losetup --find --show "$ktest_image".new
+}
+
+_detach_lustre_image()
+{
+    local dev
+    for dev in $(losetup -n -O NAME -j "$ktest_image".new 2>/dev/null); do
+	losetup -d "$dev"
+    done
+}
+
 _export_lustre()
 {
     set +e
     zpool export "$LUSTRE_POOL" 2>/dev/null
+    _detach_lustre_image
     set -e
 }
 
@@ -250,7 +269,8 @@ mount_lustre_image()
 
     cp "$ktest_image" "$ktest_image".new
 
-    zpool import -d "$(dirname "$ktest_image".new)" "$LUSTRE_POOL"
+    # -f: a VM that booted this image never exports the pool on shutdown.
+    zpool import -N -f -d "$(_attach_lustre_image)" "$LUSTRE_POOL"
 
     mkdir -p /mnt/lustre-mgs /mnt/lustre-ost0 /mnt/lustre-ost1
     mount -t lustre "$LUSTRE_POOL/$LUSTRE_MGS_DS"  /mnt/lustre-mgs
@@ -318,7 +338,7 @@ _create_lustre_image()
     fallocate -l "$IMAGE_SIZE" "$ktest_image".new
     chmod 644 "$ktest_image".new
 
-    zpool create -f "$LUSTRE_POOL" "$ktest_image".new
+    zpool create -f "$LUSTRE_POOL" "$(_attach_lustre_image)"
 
     zfs create -o mountpoint=none "$LUSTRE_POOL/$LUSTRE_MGS_DS"
     zfs create -o mountpoint=none "$LUSTRE_POOL/$LUSTRE_OST0_DS"

@@ -12,7 +12,6 @@ lib/supervisor
 
 init/ktest-init
 init/mount.lustreroot
-init/zimport
 
 tests/fs/bcachefs/linuxquota
 tests/fs/xfstests

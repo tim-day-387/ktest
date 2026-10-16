@@ -258,7 +258,6 @@ start_vm()
 	# Lustre root filesystem - boot from Lustre mounted via loopback
 	kernelargs+=(root=/dev/lustre rw log_buf_len=8M)
 	kernelargs+=("lustreroot=$ktest_lustre_root_pool,device=$ktest_root_dev,fsname=$ktest_lustre_root_fsname")
-	kernelargs+=("osd_zfs.root_device=$ktest_root_dev")
     else
 	# Standard block device root filesystem
 	kernelargs+=(root=$ktest_root_dev rw log_buf_len=8M)

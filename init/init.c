@@ -12,16 +12,15 @@
  *   device on /newroot, switch_root into it.
  *
  *   Lustre root: when lustreroot=<pool>,device=<path>[,fsname=<name>] is
- *   present, import the ZFS pool from the boot device, hand off to
- *   mount.lustreroot to bring up the local servers
- *   (MGS/MDT + OSTs) and mount the client on /newroot, then switch_root.
+ *   present, import the ZFS pool from the boot device with zpool(8), hand
+ *   off to mount.lustreroot to bring up the local servers (MGS/MDT + OSTs)
+ *   and mount the client on /newroot, then switch_root.
  *
  * Build (standalone, outside kernel tree):
- *   cc -Wall -static -o init init.c init-common.c zfs-import.c
+ *   cc -Wall -static -o init init.c init-common.c
  */
 
 #include "init-common.h"
-#include "zfs-import.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -48,6 +47,8 @@
 
 /* Path to the Lustre mount helper bundled alongside /init in the initramfs. */
 #define MOUNT_LUSTREROOT	"/sbin/mount.lustreroot"
+/* zpool(8) from the initramfs image's zfsutils-linux. */
+#define ZPOOL			"/sbin/zpool"
 
 /*
  * The NVIDIA userland payload mk_initramfs bundles next to the NVIDIA
@@ -160,6 +161,63 @@ static int parse_lustreroot(const char *value,
 }
 
 /*
+ * run_cmd - fork, exec @argv[0] (an absolute path) and wait for it
+ *
+ * Returns 0 if the child exited successfully, -1 otherwise.
+ */
+static int run_cmd(char *const argv[])
+{
+	pid_t pid;
+	int status;
+
+	pid = fork();
+	if (pid < 0) {
+		kmsg_log(KMSG_ERR, "fork for %s: %s\n", argv[0],
+			 strerror(errno));
+		return -1;
+	}
+
+	if (pid == 0) {
+		execv(argv[0], argv);
+		kmsg_log(KMSG_ERR, "exec %s: %s\n", argv[0], strerror(errno));
+		_exit(127);
+	}
+
+	if (waitpid(pid, &status, 0) < 0) {
+		kmsg_log(KMSG_ERR, "waitpid %s: %s\n", argv[0],
+			 strerror(errno));
+		return -1;
+	}
+
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		kmsg_log(KMSG_ERR, "%s failed (status %d)\n", argv[0],
+			 status);
+		return -1;
+	}
+
+	return 0;
+}
+
+/*
+ * zpool_import - import the ZFS pool backing the Lustre root
+ *
+ * Runs `zpool import -N -f -d @device @pool`.  -d points zpool at the
+ * boot device alone (no /dev scan), -N skips mounting datasets (the
+ * Lustre targets have mountpoint=none anyway), and -f covers the pool
+ * having last been imported by the host or a VM that never exported it.
+ * Returns 0 on success, -1 otherwise.
+ */
+static int zpool_import(const char *pool, const char *device)
+{
+	char *const argv[] = {
+		ZPOOL, "import", "-N", "-f", "-d", (char *)device,
+		(char *)pool, NULL,
+	};
+
+	return run_cmd(argv);
+}
+
+/*
  * run_mount_lustreroot - exec the mount.lustreroot helper and wait for it
  *
  * Brings up the local Lustre servers and mounts the client on @path by
@@ -169,40 +227,15 @@ static int parse_lustreroot(const char *value,
 static int run_mount_lustreroot(const char *fsname, const char *pool,
 				const char *path)
 {
-	pid_t pid;
-	int status;
+	char *const argv[] = {
+		MOUNT_LUSTREROOT, (char *)fsname, (char *)pool, (char *)path,
+		NULL,
+	};
 
-	pid = fork();
-	if (pid < 0) {
-		kmsg_log(KMSG_ERR, "fork for mount.lustreroot: %s\n",
-			 strerror(errno));
-		return -1;
-	}
-
-	if (pid == 0) {
-		/* Tell the helper it was launched by /init so it logs to
-		 * /dev/kmsg rather than stdout. */
-		setenv("MOUNT_LUSTREROOT_FROM_INIT", "1", 1);
-		execl(MOUNT_LUSTREROOT, "mount.lustreroot",
-		      fsname, pool, path, (char *)NULL);
-		kmsg_log(KMSG_ERR, "exec %s: %s\n",
-			 MOUNT_LUSTREROOT, strerror(errno));
-		_exit(127);
-	}
-
-	if (waitpid(pid, &status, 0) < 0) {
-		kmsg_log(KMSG_ERR, "waitpid mount.lustreroot: %s\n",
-			 strerror(errno));
-		return -1;
-	}
-
-	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-		kmsg_log(KMSG_ERR, "mount.lustreroot failed (status %d)\n",
-			 status);
-		return -1;
-	}
-
-	return 0;
+	/* Tell the helper it was launched by /init so it logs to /dev/kmsg
+	 * rather than stdout. */
+	setenv("MOUNT_LUSTREROOT_FROM_INIT", "1", 1);
+	return run_cmd(argv);
 }
 
 static int copy_file(const char *src, const char *dst, mode_t mode)
@@ -1000,12 +1033,13 @@ static int lustre_main(char *cmdline)
 		 pool, device, fsname);
 
 	/*
-	 * Import the ZFS pool from the device before mounting any targets.
-	 * The pool was created against an image file on the host, so its label
-	 * still names that file; zfs_import_pool() rewrites the leaf vdev to
-	 * the runtime device.  Without this the OSD can't open the datasets.
+	 * Import the ZFS pool from the device before mounting any targets;
+	 * without this the OSD can't open the datasets.  root_image creates
+	 * the pool on a loop device over the image, so the label's leaf vdev
+	 * is already type=disk and zpool resolves the stale /dev/loopN path
+	 * by GUID on its own.
 	 */
-	if (zfs_import_pool(pool, device) < 0)
+	if (zpool_import(pool, device) < 0)
 		kmsg_log(KMSG_INFO, "zfs pool import failed, continuing anyway\n");
 
 	/*
