@@ -5,9 +5,8 @@
 # kernel's modules (and optionally firmware), and packs the tree into a
 # zstd-compressed cpio.  /init is a bash script that mounts the kernel
 # filesystems and always drops into an interactive bash shell; running
-# `boot` there hands off to /sbin/ktest-init (the compiled boot binary,
-# installed by mk_initramfs), which mounts the root named on the kernel
-# cmdline and starts real init.
+# `boot` there makes /init mount the root named on the kernel cmdline
+# (through /sbin/mount.lustreroot for a Lustre root) and start real init.
 
 ARG BASE=docker.io/library/ubuntu:26.04
 FROM ${BASE}
@@ -35,15 +34,13 @@ RUN rm -rf /usr/share/doc /usr/share/man /usr/share/info /usr/share/locale \
 RUN install -m 0644 /etc/skel/.bashrc  /root/.bashrc \
  && install -m 0644 /etc/skel/.profile /root/.profile
 
-# Module parameters for the bundled kernel modules, installed twice:
-# modprobe.d for modprobe(8), which the initramfs scripts load all modules
-# with, and /etc/modparams.conf for ktest-init to install into the new
-# root's modprobe.d.  setparams.conf holds the Lustre tunables
+# Module parameters for the bundled kernel modules (/init copies the file
+# into the new root's modprobe.d too) and the Lustre tunables
 # mount.lustreroot applies after each mount step.
 COPY conf/modparams.conf /etc/modprobe.d/ktest.conf
-COPY conf/modparams.conf /etc/modparams.conf
 COPY conf/setparams.conf /etc/setparams.conf
 
 COPY init/init /init
 COPY init/boot /usr/local/sbin/boot
-RUN chmod +x /init /usr/local/sbin/boot
+COPY init/mount.lustreroot /sbin/mount.lustreroot
+RUN chmod +x /init /usr/local/sbin/boot /sbin/mount.lustreroot

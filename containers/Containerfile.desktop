@@ -44,8 +44,8 @@ COPY --chown=${DESKTOP_UID}:${DESKTOP_UID} tools/timbashrc /home/${DESKTOP_USER}
 # userland (the GL/Vulkan vendor libraries, the X driver, nvidia-smi, the
 # setuid nvidia-modprobe, ...) all travel in the UKI, pinned together by
 # META's NVIDIA-Driver: qlkbuild's build_nvidia bundles the squashfs from
-# tools/nvidia-userland-payload.sh into the initramfs and ktest-init overlays
-# it onto this root at boot (overlay_nvidia_userland in init/init.c).  The
+# tools/nvidia-userland-payload.sh into the initramfs and /init overlays
+# it onto this root at boot (overlay_nvidia_userland in init/init).  The
 # kernel modules accept only their exact release's userland, so shipping
 # them together is what lets any UKI boot any build of this image.  All the
 # image needs is the distro libglvnd, Vulkan loader and Xorg from

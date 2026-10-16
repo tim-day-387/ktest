@@ -10,9 +10,6 @@ cross.conf
 lib/lwip-connect
 lib/supervisor
 
-init/ktest-init
-init/mount.lustreroot
-
 tests/fs/bcachefs/linuxquota
 tests/fs/xfstests
 

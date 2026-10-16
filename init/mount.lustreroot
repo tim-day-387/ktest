@@ -1,0 +1,99 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# mount.lustreroot [--no-mgs] <fsname> <pool> <path>
+#
+# Bring up the local server targets of an already imported ZFS pool
+# (pool/<fsname>-mgs_mdt, pool/<fsname>-ost0, pool/<fsname>-ost1) under
+# /mnt/<svname> and mount the client 0@lo:/<fsname> on <path>.  The caller has loaded the zfs/lustre
+# modules and disabled LNet peer discovery.
+#
+# --no-mgs leaves the mgs_mdt target's embedded MGS dormant so the targets
+# register with an MGS already running on this node (there can be only one),
+# e.g. from an earlier mount.lustreroot for another filesystem.
+#
+# Lustre tunables from /etc/setparams.conf (lctl set_param syntax) are
+# applied after every mount step, so each takes effect as soon as its obd
+# device exists; lines matching nothing by the end are reported.
+#
+# Logs to /dev/kmsg when run by /init (MOUNT_LUSTREROOT_FROM_INIT set), else
+# to stdout.
+
+SETPARAMS=/etc/setparams.conf
+
+function log() {
+    if [[ -n $MOUNT_LUSTREROOT_FROM_INIT ]]; then
+	printf '<%d>mount.lustreroot: %s\n' "$1" "${*:2}" >/dev/kmsg
+    else
+	printf 'mount.lustreroot: %s\n' "${*:2}"
+    fi
+}
+function info() { log 6 "$@"; }
+function err()  { log 3 "$@"; }
+
+# setparams_apply [final] - write every <param>=<value> in $SETPARAMS whose
+# parameter file exists.  '.' separates path components, as in lctl.
+function setparams_apply() {
+    local final=${1:-false} param value path hit
+
+    [[ -r $SETPARAMS ]] || return 0
+    while read -r param _; do
+	[[ -n $param && $param != \#* ]] || continue
+	value=${param#*=} param=${param%%=*}
+	hit=false
+	# Unquoted on purpose: the pattern globs here.
+	for path in /sys/fs/lustre/${param//./\/} /proc/fs/lustre/${param//./\/}; do
+	    [[ -e $path ]] || continue
+	    hit=true
+	    if printf '%s' "$value" > "$path"; then
+		info "set_param $param=$value ($path)"
+	    else
+		err "write $value to $path failed"
+	    fi
+	done
+	if $final && ! $hit; then
+	    err "$SETPARAMS: $param=$value matched no parameter file"
+	fi
+    done < "$SETPARAMS"
+    return 0
+}
+
+# lustre_mount <device> <mntpt> <options> - mount -t lustre with -i, so the
+# svname=/device= options mount.lustre would derive are passed explicitly.
+function lustre_mount() {
+    local out
+
+    mkdir -p "$2"
+    info "mount -o $3 $1 $2"
+    out=$(mount -i --no-canonicalize -t lustre -o "$3" "$1" "$2" 2>&1) && return 0
+    err "mount $1 on $2 failed: ${out//$'\n'/; }"
+    return 1
+}
+
+# mount_target <dataset> <svname> <mgs|mgsnode=...> - one server target
+function mount_target() {
+    lustre_mount "$1" "/mnt/$2" "svname=$2,$3,update,network=lo,osd=osd-zfs,device=$1" || return 1
+    setparams_apply
+}
+
+mgs=mgs
+while [[ $1 == -* ]]; do
+    case $1 in
+	--no-mgs) mgs=mgsnode=0@lo ;;
+	*) err "unknown option: $1"; exit 1 ;;
+    esac
+    shift
+done
+[[ $# -eq 3 ]] || { err "usage: mount.lustreroot [--no-mgs] <fsname> <pool> <path>"; exit 1; }
+fsname=$1 pool=$2 path=$3
+
+info "mounting lustre fsname=$fsname pool=$pool path=$path ($mgs)"
+
+# The MGS/MDT first: the OSTs register with it.
+mount_target "$pool/$fsname-mgs_mdt" "$fsname-MDT0000" "$mgs" &&
+mount_target "$pool/$fsname-ost0" "$fsname-OST0000" mgsnode=0@lo &&
+mount_target "$pool/$fsname-ost1" "$fsname-OST0001" mgsnode=0@lo &&
+lustre_mount "0@lo:/$fsname" "$path" "network=lo,user_xattr,device=0@lo:/$fsname" || exit 1
+
+setparams_apply true
+info "lustre $fsname mounted on $path"

@@ -8,11 +8,10 @@
 # derives the VM root filesystems.  /init is a bash script baked into the
 # image that mounts the kernel filesystems and drops into an interactive
 # bash shell (or boots straight through when ktest.bootnow is on the kernel
-# cmdline, as the ktest VMs pass by default); `boot` hands off to /sbin/ktest-init
-# (compiled from init/init.c), which mounts the root named on the kernel
-# cmdline (root= or lustreroot=) and switch_roots into it.  The host-side
-# additions are kernel build artifacts (modules, optionally firmware) and
-# the static init/ binaries.
+# cmdline, as the ktest VMs pass by default); `boot` makes /init mount the
+# root named on the kernel cmdline (root= or lustreroot=) and switch_root
+# into it.  The host-side additions are kernel build artifacts (modules,
+# optionally firmware, the NVIDIA userland payload).
 
 INITRAMFS_IMAGE_TAG=${INITRAMFS_IMAGE_TAG:-localhost/ktest-initramfs:latest}
 INITRAMFS_IMAGE_BASE=${INITRAMFS_IMAGE_BASE:-docker.io/library/ubuntu:26.04}
@@ -70,8 +69,8 @@ function mk_initramfs() (
     cp "$ktest_dir/conf/modparams.conf" \
        "$ktest_dir/conf/setparams.conf" "$CTX/conf/"
     cp "$ktest_dir/containers/Containerfile.initramfs" "$CTX/containers/"
-    cp "$ktest_dir/init/init" \
-       "$ktest_dir/init/boot" "$CTX/init/"
+    cp "$ktest_dir/init/init" "$ktest_dir/init/boot" \
+       "$ktest_dir/init/mount.lustreroot" "$CTX/init/"
     podman build \
 	--build-arg "BASE=$INITRAMFS_IMAGE_BASE" \
 	-f "$CTX/containers/Containerfile.initramfs" \
@@ -87,23 +86,14 @@ function mk_initramfs() (
     podman export "$cid" | tar -C "$INITRAMFS" -xf -
     podman rm "$cid" >/dev/null
 
-    # Build and install the boot binaries.  /init execs /sbin/ktest-init
-    # when the shell user runs `boot`; ktest-init hands lustreroot= mounts
-    # off to /sbin/mount.lustreroot (the path is hardcoded in init.c).
-    echo "Building init binaries..."
-    make -C "$ktest_dir/init"
-    echo "Installing ktest-init + mount.lustreroot..."
-    cp "$ktest_dir/init/ktest-init" "$INITRAMFS/sbin/ktest-init"
-    cp "$ktest_dir/init/mount.lustreroot" "$INITRAMFS/sbin/mount.lustreroot"
-
     echo "Copying modules from $MODULES_DIR..."
     mkdir -p "$INITRAMFS/lib/modules"
     cp -a "$MODULES_DIR/." "$INITRAMFS/lib/modules/"
 
     # The NVIDIA userland matching the bundled NVIDIA modules, staged by
     # build_nvidia (qlkbuild) from tools/nvidia-userland-payload.sh's squashfs.
-    # ktest-init loop-mounts it out of the preserved initramfs copy and
-    # overlays it onto the booted root (overlay_nvidia_userland in init.c).
+    # /init loop-mounts it out of the preserved initramfs and overlays it
+    # onto the booted root (overlay_nvidia_userland in init/init).
     if [[ -f "$ktest_kernel_binary/nvidia-userland.squashfs" ]]; then
 	echo "Copying NVIDIA userland payload..."
 	mkdir -p "$INITRAMFS/lib/nvidia"

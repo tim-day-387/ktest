@@ -32,12 +32,10 @@ CONTAINERFILE_BASE="$ktest_dir/containers/Containerfile.root_image"
 CONTAINERFILE_KTEST="$ktest_dir/containers/Containerfile.ktest"
 CONTAINERFILE_DESKTOP="$ktest_dir/containers/Containerfile.desktop"
 
-# ZFS pool and dataset names for Lustre (unchanged from the old script;
-# mount_lustre / umount_lustre still operate on these names).
+# ZFS pool and Lustre filesystem name.  The targets live in datasets named
+# <pool>/<fsname>-{mgs_mdt,ost0,ost1}, the layout mount.lustreroot expects,
+# so several filesystems can share a pool once deployed.
 LUSTRE_POOL="lustre_pool"
-LUSTRE_MGS_DS="mgs_mdt"
-LUSTRE_OST0_DS="ost0"
-LUSTRE_OST1_DS="ost1"
 LUSTRE_FSNAME="lustre"
 LUSTRE_CLIENT_MNT="/mnt/lustre"
 
@@ -199,7 +197,7 @@ _umount_lustre_client()
 
 # The pool lives on a loop device over the image file rather than on the
 # file itself, so its labels record a disk vdev: at boot the same bytes are
-# a block device and a stock `zpool import` (init/init.c) can take them.  A
+# a block device and a stock `zpool import` (init/init) can take them.  A
 # pool created straight on the file would be labelled type=file, which stock
 # zpool cannot import from a block device.
 _attach_lustre_image()
@@ -272,17 +270,19 @@ mount_lustre_image()
     # -f: a VM that booted this image never exports the pool on shutdown.
     zpool import -N -f -d "$(_attach_lustre_image)" "$LUSTRE_POOL"
 
-    mkdir -p /mnt/lustre-mgs /mnt/lustre-ost0 /mnt/lustre-ost1
-    mount -t lustre "$LUSTRE_POOL/$LUSTRE_MGS_DS"  /mnt/lustre-mgs
-    mount -t lustre "$LUSTRE_POOL/$LUSTRE_OST0_DS" /mnt/lustre-ost0
-    mount -t lustre "$LUSTRE_POOL/$LUSTRE_OST1_DS" /mnt/lustre-ost1
+    # The fsname is whatever prefixes the MGS/MDT dataset.
+    LUSTRE_FSNAME=$(zfs list -H -o name -r "$LUSTRE_POOL" |
+	sed -n "s|^$LUSTRE_POOL/\(.*\)-mgs_mdt\$|\1|p")
+    [[ -n $LUSTRE_FSNAME ]] || { echo "no <fsname>-mgs_mdt dataset in $LUSTRE_POOL"; exit 1; }
 
-    local fsname=$(zfs get -H -o value lustre:fsname "$LUSTRE_POOL/$LUSTRE_MGS_DS")
-    [[ -z $fsname || $fsname = - ]] && fsname=$LUSTRE_FSNAME
+    mkdir -p /mnt/lustre-mgs /mnt/lustre-ost0 /mnt/lustre-ost1
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_FSNAME-mgs_mdt"  /mnt/lustre-mgs
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_FSNAME-ost0" /mnt/lustre-ost0
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_FSNAME-ost1" /mnt/lustre-ost1
 
     local mgs_nid=$(lnetctl net show | grep 'nid:.*@tcp' | head -1 | awk '{print $NF}')
     mkdir -p "$LUSTRE_CLIENT_MNT"
-    mount -t lustre "$mgs_nid:/$fsname" "$LUSTRE_CLIENT_MNT"
+    mount -t lustre "$mgs_nid:/$LUSTRE_FSNAME" "$LUSTRE_CLIENT_MNT"
 }
 
 cmd_mount_lustre()
@@ -340,23 +340,23 @@ _create_lustre_image()
 
     zpool create -f "$LUSTRE_POOL" "$(_attach_lustre_image)"
 
-    zfs create -o mountpoint=none "$LUSTRE_POOL/$LUSTRE_MGS_DS"
-    zfs create -o mountpoint=none "$LUSTRE_POOL/$LUSTRE_OST0_DS"
-    zfs create -o mountpoint=none "$LUSTRE_POOL/$LUSTRE_OST1_DS"
+    zfs create -o mountpoint=none "$LUSTRE_POOL/$LUSTRE_FSNAME-mgs_mdt"
+    zfs create -o mountpoint=none "$LUSTRE_POOL/$LUSTRE_FSNAME-ost0"
+    zfs create -o mountpoint=none "$LUSTRE_POOL/$LUSTRE_FSNAME-ost1"
 
     mkfs.lustre --mgs --mdt --reformat --fsname="$LUSTRE_FSNAME" --index=0 \
-	"$LUSTRE_POOL/$LUSTRE_MGS_DS"
+	"$LUSTRE_POOL/$LUSTRE_FSNAME-mgs_mdt"
 
     local mgs_nid=$(lnetctl net show | grep 'nid:.*@tcp' | head -1 | awk '{print $NF}')
     mkfs.lustre --ost --reformat --fsname="$LUSTRE_FSNAME" --index=0 \
-	--mgsnode="$mgs_nid" "$LUSTRE_POOL/$LUSTRE_OST0_DS"
+	--mgsnode="$mgs_nid" "$LUSTRE_POOL/$LUSTRE_FSNAME-ost0"
     mkfs.lustre --ost --reformat --fsname="$LUSTRE_FSNAME" --index=1 \
-	--mgsnode="$mgs_nid" "$LUSTRE_POOL/$LUSTRE_OST1_DS"
+	--mgsnode="$mgs_nid" "$LUSTRE_POOL/$LUSTRE_FSNAME-ost1"
 
     mkdir -p /mnt/lustre-mgs /mnt/lustre-ost0 /mnt/lustre-ost1
-    mount -t lustre "$LUSTRE_POOL/$LUSTRE_MGS_DS"  /mnt/lustre-mgs
-    mount -t lustre "$LUSTRE_POOL/$LUSTRE_OST0_DS" /mnt/lustre-ost0
-    mount -t lustre "$LUSTRE_POOL/$LUSTRE_OST1_DS" /mnt/lustre-ost1
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_FSNAME-mgs_mdt"  /mnt/lustre-mgs
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_FSNAME-ost0" /mnt/lustre-ost0
+    mount -t lustre "$LUSTRE_POOL/$LUSTRE_FSNAME-ost1" /mnt/lustre-ost1
 
     # MDT must be tuned before MDC, otherwise MDC rejects the higher cap.
     lctl set_param mdt.*.max_mod_rpcs_in_flight=128
@@ -385,7 +385,7 @@ _create_lustre_image()
     _clean_lustre
     trap '' EXIT
     mv "$ktest_image".new "$ktest_image"
-    echo "Created $ktest_image"
+    echo "Created $ktest_image (fsname $LUSTRE_FSNAME)"
     echo "To deploy this image to a bootable USB stick, see" \
 	"$ktest_dir/Documentation/usb-boot.md"
 }

@@ -11,7 +11,6 @@ BIN    := lustre-ktest
 FILTER := tools/cargo-quiet
 SANITY_DIR  := tests/fs/lustre/sanity
 CPLUGIN_DIR := cplugin
-INIT_DIR    := init
 WORKBENCH_DIR := workbench
 JOBS := $(shell echo $$(( $$(nproc) / 2 > 1 ? $$(nproc) / 2 : 1 )))
 MAKEFLAGS += -j$(JOBS)
@@ -34,19 +33,16 @@ endif
 quiet_cmd = printf '  %-8s %s\n' '[$(1)]' '$(2)'
 
 
-.PHONY: all build release check test clippy fmt clean help gen-tests cplugin init-bins supervisor \
+.PHONY: all build release check test clippy fmt clean help gen-tests cplugin supervisor \
 	workbench workbench-install workbench-dist
 
-all: release cplugin init-bins supervisor
+all: release cplugin supervisor
 
 gen-tests:
 	$(Q)$(MAKE) --no-print-directory -C $(SANITY_DIR) Q=$(Q)
 
 cplugin:
 	$(Q)$(MAKE) --no-print-directory -C $(CPLUGIN_DIR) Q=$(Q) V=$(V) JOBS=$(JOBS)
-
-init-bins:
-	$(Q)$(MAKE) --no-print-directory -C $(INIT_DIR) Q=$(Q)
 
 supervisor:
 	@$(call quiet_cmd,CC,lib/supervisor)
@@ -88,7 +84,6 @@ clean:
 	$(Q)$(CARGO) clean $(if $(V),,--quiet)
 	$(Q)$(MAKE) --no-print-directory -C $(SANITY_DIR) clean Q=$(Q)
 	$(Q)$(MAKE) --no-print-directory -C $(CPLUGIN_DIR) clean Q=$(Q)
-	$(Q)$(MAKE) --no-print-directory -C $(INIT_DIR) clean Q=$(Q)
 	$(Q)$(MAKE) --no-print-directory -C $(WORKBENCH_DIR) clean Q=$(Q)
 	$(Q)rm -f lib/supervisor
 
@@ -97,7 +92,6 @@ help:
 	@echo '  build     - debug build'
 	@echo '  release   - optimized build'
 	@echo '  cplugin   - build the xunused C++ tool'
-	@echo '  init-bins - build the initramfs init + mount.lustreroot'
 	@echo '  supervisor - build the VM supervisor (lib/supervisor)'
 	@echo '  gen-tests - generate Lustre sanity test runners'
 	@echo '  workbench - build the Workbench desktop app (needs node/npm)'

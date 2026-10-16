@@ -330,9 +330,9 @@ config-uki-firmware()
 # into the initramfs.  See build_nvidia in qlkbuild.  The driver owns the GPU
 # instead of nouveau, so a test opting into this should disable DRM_NOUVEAU.
 #
-# ktest-init delivers the userland by loop-mounting a squashfs and overlaying
-# it onto the root before switch_root (overlay_nvidia_userland in init.c);
-# it has no modprobe, so those three must be built in.
+# /init delivers the userland by loop-mounting a squashfs and overlaying
+# it onto the root before switch_root (overlay_nvidia_userland in init/init);
+# requiring them built in keeps that mount independent of module loading.
 config-nvidia-modules()
 {
     ktest_nvidia=1

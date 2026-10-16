@@ -1,58 +1,243 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# ktest initramfs /init - boots to an interactive bash shell, unless
-# ktest.bootnow on the kernel cmdline says to boot straight through.
+# ktest initramfs /init.  Mounts the kernel filesystems, loads the bundled
+# modules and drops into a bash shell.  `boot` in that shell (or
+# ktest.bootnow on the kernel cmdline) mounts the root named on the cmdline
+# and execs the real init inside it:
 #
+#   root=<dev> [rootfstype=<fs>]                     block device root
+#   lustreroot=<pool>,device=<path>[,fsname=<name>]  local ZFS-backed Lustre
+#
+# A failed boot returns to the shell; dmesg has the log.
 
-# Setup environment
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export HOME=/root
 export TERM=linux
 
-# Mount important virtual filesystems
-mountpoint -q /proc    || mount -t proc     -o nosuid,nodev,noexec proc     /proc
-mountpoint -q /sys     || mount -t sysfs    -o nosuid,nodev,noexec sysfs    /sys
-mountpoint -q /dev     || mount -t devtmpfs -o nosuid              devtmpfs /dev
+mount -t proc     -o nosuid,nodev,noexec proc     /proc
+mount -t sysfs    -o nosuid,nodev,noexec sysfs    /sys
+mount -t devtmpfs -o nosuid              devtmpfs /dev
 mkdir -p /dev/pts /dev/shm
-mountpoint -q /dev/pts || mount -t devpts   -o nosuid,noexec,gid=5,mode=620 devpts /dev/pts
-mountpoint -q /dev/shm || mount -t tmpfs    -o nosuid,nodev                 tmpfs  /dev/shm
-mountpoint -q /run     || mount -t tmpfs    -o nosuid,nodev                 tmpfs  /run
-mountpoint -q /tmp     || mount -t tmpfs                                    tmpfs  /tmp
+mount -t devpts   -o nosuid,noexec,gid=5,mode=620 devpts /dev/pts
+mount -t tmpfs    -o nosuid,nodev                 tmpfs  /dev/shm
+mount -t tmpfs    -o nosuid,nodev                 tmpfs  /run
+mount -t tmpfs                                    tmpfs  /tmp
 
-# Silence boot spam
 dmesg -n 4
 
-# Load critical modules
-MODULES=(
-    xhci_pci ehci_pci ohci_pci uhci_hcd
-    usbhid hid_generic atkbd nvme zfs
-    lnet ksocklnd lustre osd_zfs iwlwifi
-    iwlmvm mt7921e
-)
-modprobe -a -q "${MODULES[@]}"
+modprobe -a -q \
+    xhci_pci ehci_pci ohci_pci uhci_hcd usbhid hid_generic atkbd nvme \
+    loop squashfs overlay \
+    zfs lnet ksocklnd lustre osd_zfs \
+    iwlwifi iwlmvm mt7921e
 
-# Instant boot: hand off without ever spawning a shell
-if [[ ${1-} != ktest-boot-failed ]] && grep -qw 'ktest\.bootnow' /proc/cmdline; then
-    if [[ -x /sbin/ktest-init ]]; then
-	exec /sbin/ktest-init
+################################################################################
+# Boot: mount the root and hand off to its init
+################################################################################
+
+NEWROOT=/newroot
+# Where the initramfs stays reachable after the switch.
+SAVE=$NEWROOT/init.initramfs
+
+CMDLINE_TOKS=()
+
+function log()  { printf '<%d>init: %s\n' "$1" "${*:2}" >/dev/kmsg; }
+function info() { log 6 "$@"; }
+function err()  { log 3 "$@"; }
+
+# run <command>... - run a command, logging its output if it fails
+function run() {
+    local out
+    out=$("$@" 2>&1) && return 0
+    err "$*: ${out//$'\n'/; }"
+    return 1
+}
+
+# cmdline_arg <name> - print the value of the first <name>= cmdline token
+function cmdline_arg() {
+    local tok
+    for tok in "${CMDLINE_TOKS[@]}"; do
+	[[ $tok == "$1="* ]] || continue
+	printf '%s' "${tok#*=}"
+	return 0
+    done
+    return 1
+}
+
+# wait_for <path> - give devtmpfs a few seconds to create a device node
+function wait_for() {
+    local i
+    for ((i = 0; i < 50; i++)); do
+	[[ -e $1 ]] && return
+	sleep 0.1
+    done
+}
+
+function standard_root() {
+    local root fstype opts=()
+
+    root=$(cmdline_arg root) || { err "root= not found on cmdline"; return 1; }
+    fstype=$(cmdline_arg rootfstype) && opts=(-t "$fstype")
+
+    [[ $root != /* ]] || wait_for "$root"
+    run mount "${opts[@]}" "$root" $NEWROOT || return 1
+    info "mounted $root on $NEWROOT"
+}
+
+function lustre_root() {
+    local spec parts part pool device= fsname=lustre
+
+    # Discovery rejects the network= mount option; all targets are local.
+    echo 1 > /sys/module/lnet/parameters/lnet_peer_discovery_disabled
+
+    spec=$(cmdline_arg lustreroot)
+    IFS=, read -ra parts <<<"$spec"
+    pool=${parts[0]}
+    for part in "${parts[@]:1}"; do
+	case $part in
+	    device=*) device=${part#*=} ;;
+	    fsname=*) fsname=${part#*=} ;;
+	esac
+    done
+    [[ -n $pool && -n $device && -n $fsname ]] ||
+	{ err "lustreroot=<pool>,device=<path>[,fsname=<name>]: empty field"; return 1; }
+
+    info "pool=$pool device=$device fsname=$fsname"
+
+    # -d: look at the boot device only.  -N: don't mount datasets.  -f: the
+    # pool was likely last imported by the host.  Failure is fine on a retry
+    # from the shell, where the pool is already imported.
+    run zpool import -N -f -d "$device" "$pool"
+
+    MOUNT_LUSTREROOT_FROM_INIT=1 mount.lustreroot "$fsname" "$pool" $NEWROOT
+}
+
+# The NVIDIA modules only talk to userland of the same driver release, so
+# mk_initramfs bundles the matching userland as a squashfs.  Overlay each
+# directory its .ktest-overlay manifest names onto the new root, payload on
+# top, with a tmpfs upperdir so the directories stay writable.
+function overlay_nvidia_userland() {
+    local payload=$SAVE/lib/nvidia/userland.squashfs
+    local mnt=$SAVE/nvidia overlay=$SAVE/nvidia-overlay
+    local dir target upper work n=0
+
+    [[ -e $payload ]] || return
+
+    mkdir -p "$mnt" "$overlay"
+    run mount -t squashfs -o loop,ro "$payload" "$mnt" || return
+    run mount -t tmpfs -o mode=0755 tmpfs "$overlay" || return
+
+    while read -r dir; do
+	[[ -n $dir ]] || continue
+	target=$NEWROOT/$dir upper=$overlay/$n/upper work=$overlay/$n/work
+	n=$((n + 1))
+	mkdir -p "$target" "$upper" "$work"
+	run mount -t overlay -o "lowerdir=$mnt/$dir:$target,upperdir=$upper,workdir=$work" \
+	    overlay "$target"
+    done < "$mnt/.ktest-overlay"
+
+    info "overlaid NVIDIA userland"
+}
+
+# The initramfs carries the built modules, firmware and the NVIDIA payload,
+# all wanted after the switch.  Bind-mount it on $SAVE (switch_root leaves
+# the rootfs in RAM but unreachable), then bind the module and firmware
+# trees where the booted system looks.  All of it rides along with the move.
+function preserve_initramfs() {
+    local dir
+
+    mkdir -p "$SAVE"
+    run mount --bind / "$SAVE" || return
+    info "bind-mounted the initramfs on $SAVE"
+
+    for dir in /lib/modules /lib/firmware; do
+	[[ -d $dir ]] || continue
+	mkdir -p $NEWROOT$dir
+	run mount --bind $dir $NEWROOT$dir
+    done
+
+    overlay_nvidia_userland
+}
+
+# Give modules loaded after the switch the same parameters, and standalone
+# mount.lustreroot runs the same tunables.
+function install_conf() {
+    mkdir -p $NEWROOT/etc/modprobe.d
+    run install -m 0644 /etc/modprobe.d/ktest.conf $NEWROOT/etc/modprobe.d/ktest.conf
+    run install -m 0644 /etc/setparams.conf $NEWROOT/etc/setparams.conf
+}
+
+# systemd keeps an already-mounted /run, so udev rules staged here ship with
+# the UKI.  The kvm rule undoes Ubuntu's MODE=0660; static_node applies it to
+# the existing node since built-in KVM has no module-load uevent.
+function prepare_run() {
+    mkdir -p $NEWROOT/run
+    run mount -t tmpfs -o nosuid,nodev,strictatime,mode=0755 tmpfs $NEWROOT/run || return 1
+
+    mkdir -p $NEWROOT/run/udev/rules.d
+    echo 'KERNEL=="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+	> $NEWROOT/run/udev/rules.d/99-ktest-kvm.rules
+}
+
+# switch_root(8) by hand: Ubuntu's util-linux doesn't ship it.  Returns only
+# on failure before the move; once / is the new root an exec failure panics.
+function switch_root() {
+    local init
+
+    # -L as well as -x: /sbin/init is an absolute symlink into the new root.
+    for init in /sbin/init /init; do
+	[[ -x $NEWROOT$init || -L $NEWROOT$init ]] && break
+	init=
+    done
+    [[ -n $init ]] || { err "no /sbin/init or /init in $NEWROOT"; return 1; }
+
+    cd $NEWROOT || return 1
+    run mount --move . / || { cd /; return 1; }
+    info "switch_root done"
+
+    exec chroot . "$init"
+}
+
+# ktest_boot <cmdline> - mount the root it names and exec its init.
+# Returns only on failure.
+function ktest_boot() {
+    # The boot path logs in bursts the kmsg ratelimiter would drop.
+    echo on > /proc/sys/kernel/printk_devkmsg
+
+    info "cmdline: $1"
+    read -ra CMDLINE_TOKS <<<"$1"
+
+    mkdir -p $NEWROOT
+    if cmdline_arg lustreroot >/dev/null; then
+	lustre_root || return 1
+    else
+	standard_root || return 1
     fi
-    echo "ktest.bootnow: handoff failed, dropping to the initramfs shell"
+    info "root mounted, switching"
+
+    preserve_initramfs
+    install_conf
+    prepare_run || return 1
+    switch_root
+}
+
+################################################################################
+# Shell loop
+################################################################################
+
+if grep -qw ktest.bootnow /proc/cmdline; then
+    ktest_boot "$(</proc/cmdline)"
+    echo "boot failed, dmesg has the log"
 fi
 
-# PID 1 must never exit or the kernel panics
+# PID 1 must never exit.  `boot` stages its cmdline in /run/ktest-boot and
+# HUPs the shell; the boot runs once the shell exits.
 while true; do
-    clear 2>/dev/null || printf '\033[H\033[2J'
-    echo "ktest initramfs: bash shell ('boot' mounts the root and starts init)"
-    if [[ ${1-} == ktest-boot-failed ]]; then
-	echo "boot failed - back in the initramfs shell, dmesg has the log"
-	shift
-    fi
+    echo "ktest initramfs: 'boot' mounts the root and starts init"
     setsid --ctty --wait bash -l
-    if [[ -e /run/ktest-boot && -x /sbin/ktest-init ]]; then
-	# Consume the flag: if ktest-init fails and execs back into this
-	# script, a stale flag would re-run it instead of holding the shell.
-	rm -f /run/ktest-boot
-	exec /sbin/ktest-init
-    fi
+    [[ -e /run/ktest-boot ]] || continue
+    ktest_boot "$(</run/ktest-boot)"
+    rm -f /run/ktest-boot
+    echo "boot failed, dmesg has the log"
 done

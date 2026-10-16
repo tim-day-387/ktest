@@ -16,15 +16,15 @@
 #       nvidia-smi, the setuid nvidia-modprobe, the glvnd/Vulkan/OpenCL
 #       vendor JSONs, ...) laid out as it would appear under /, plus a
 #       .ktest-overlay manifest at the root naming the directories
-#       ktest-init overlays onto the booted root filesystem (see
-#       overlay_nvidia_userland in init/init.c).  The 32-bit vendor
+#       /init overlays onto the booted root filesystem (see
+#       overlay_nvidia_userland in init/init).  The 32-bit vendor
 #       libraries are included, under /usr/lib/i386-linux-gnu with a
 #       /usr/lib32 symlink mirror (see below), so 32-bit GL clients such as
 #       Steam's bootstrapper pass the modules' version check too.
 #   <output-dir>/firmware/
 #       The GSP firmware blobs the modules load.  Delivered separately:
 #       mk_initramfs puts them under /lib/firmware/nvidia/<version>, which
-#       ktest-init bind-mounts over the root along with /lib/modules.
+#       /init bind-mounts over the root along with /lib/modules.
 #
 # The payload is built by really installing the driver into this system
 # (--no-kernel-modules) and diffing the file list before and after.  That

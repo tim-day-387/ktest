@@ -176,7 +176,7 @@ RUN test -n "$NVIDIA_DRIVER_VERSION" && \
     /home/ktest/git/open-gpu-kernel-modules
 
 # The matching userland, packed by the nvidia-userland stage above.
-# build_nvidia bundles it into the initramfs and ktest-init overlays it onto
+# build_nvidia bundles it into the initramfs and /init overlays it onto
 # the booted root, so the root images carry no NVIDIA userland of their own.
 COPY --from=nvidia-userland --chown=ktest:ktest /out/nvidia-userland.squashfs \
     /home/ktest/git/nvidia-userland/${NVIDIA_DRIVER_VERSION}.squashfs
