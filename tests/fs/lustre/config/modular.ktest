@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# Everything modular: LNet, Lustre client, server and the wbcfs OSD all built as modules.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/config-libs.sh"
+
+require-config-modular-kernel-config
+
+main "$@"

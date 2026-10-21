@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# Kernel without procfs. Lustre must build without it.
+#
+# This is a build-only test: the ktest VM cannot boot without /proc, so
+# the job runs the kernel build and nothing else. PROC_FS only gets a
+# prompt under EXPERT, which is why the EXPERT base config comes first;
+# everything in ktest's base that hangs off procfs is then dropped before
+# turning it off.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/config-libs.sh"
+
+require-config-modular-kernel-config
+require-expert-kernel-config
+
+unrequire-kernel-config PROC_FS PROC_SYSCTL PROC_PAGE_MONITOR PROC_KCORE \
+    SYSCTL SYSVIPC_SYSCTL IKCONFIG_PROC MEM_ALLOC_PROFILING
+require-kernel-config PROC_FS=n
+
+main "$@"

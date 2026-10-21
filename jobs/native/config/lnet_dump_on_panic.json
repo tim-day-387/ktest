@@ -3,21 +3,18 @@
     {
       "name": "lustre_patch",
       "platform": "native_1",
-      "build": "tests/fs/lustre/config/lnet_dump_on_panic.ktest",
-      "backing_storage": "zfs"
+      "build": "tests/fs/lustre/config/lnet_dump_on_panic.ktest"
     },
     {
       "name": "lustre_native",
       "platform": "native_2",
       "build": "tests/fs/lustre/config/lnet_dump_on_panic.ktest",
-      "backing_storage": "zfs",
       "depends_on": ["lustre_patch"]
     },
     {
-      "name": "lustre_native_lnet_dump_on_panic",
+      "name": "lnet_dump_on_panic",
       "platform": "native_2",
       "run": "tests/fs/lustre/config/lnet_dump_on_panic.ktest",
-      "backing_storage": "zfs",
       "depends_on": ["lustre_native"]
     }
   ]

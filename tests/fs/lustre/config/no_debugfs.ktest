@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# Kernel without debugfs. Lustre must build, load and mount without it.
+#
+# ktest's base config asks for debugfs (and fault injection through it),
+# so drop those before turning it off.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/config-libs.sh"
+
+require-config-modular-kernel-config
+
+unrequire-kernel-config DEBUG_FS FAULT_INJECTION_DEBUG_FS
+require-kernel-config DEBUG_FS=n
+
+main "$@"

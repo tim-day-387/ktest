@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# Everything built in: LNet, Lustre client, server and the wbcfs OSD all built into the kernel.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/config-libs.sh"
+
+require-config-base-kernel-config
+require-lustre-builtin-kernel-config
+
+main "$@"

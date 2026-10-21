@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# Lustre in-kernel unit test modules.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/config-libs.sh"
+
+require-config-modular-kernel-config
+require-kernel-config LUSTRE_FS_TESTS=m
+
+main "$@"

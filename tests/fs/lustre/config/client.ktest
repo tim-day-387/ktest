@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# Client only: no server support, so the test stops after loading the modules.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/config-libs.sh"
+
+require-config-base-kernel-config
+require-kernel-config LIBCFS=m
+require-kernel-config LNET=m
+require-kernel-config LUSTRE_FS=m
+require-kernel-config LUSTRE_FS_SERVER=n
+
+main "$@"

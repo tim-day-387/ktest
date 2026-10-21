@@ -1,0 +1,21 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_patch",
+      "platform": "native_1",
+      "build": "tests/fs/lustre/config/no_posix_acl.ktest"
+    },
+    {
+      "name": "lustre_native",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/config/no_posix_acl.ktest",
+      "depends_on": ["lustre_patch"]
+    },
+    {
+      "name": "no_posix_acl",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/config/no_posix_acl.ktest",
+      "depends_on": ["lustre_native"]
+    }
+  ]
+}

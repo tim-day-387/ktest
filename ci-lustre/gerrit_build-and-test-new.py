@@ -66,20 +66,93 @@ def load_branch_config(config_path=BRANCH_CONFIG_PATH):
       - "branch":  name of the branch to watch (e.g. "master")
       - "repo":    git repository URL to fetch the branch from
       - "subject": human-readable description shown on the status site
-      - "groups":  list of job group names to run when the branch updates
+      - "groups":  list of job groups to run when the branch updates
+
+    A group is either a bare group name, or an object with:
+      - "group":    the group name
+      - "requires": a path, relative to the Lustre checkout, that must
+                    exist on the branch for the group to run; when it
+                    is missing the group is recorded as SKIP instead
 
     Every time a branch's head advances, each of its groups is run as a
-    separate pk invocation (and shows up as a separate row).
+    separate pk invocation (and shows up as a separate row). Groups are
+    normalized to the object form here.
 
     Returns a list of branch dicts, or an empty list if the config is
     missing or malformed.
     """
     try:
         with open(config_path, "r") as f:
-            return json.load(f)
+            branches = json.load(f)
     except (IOError, json.JSONDecodeError) as e:
         logging.error(f"Failed to load branch config {config_path}: {e}")
         return []
+
+    for branch in branches:
+        branch["groups"] = [
+            normalize_group(group) for group in branch.get("groups", [])
+        ]
+
+    return branches
+
+
+def normalize_group(group):
+    """
+    Return a branch group entry as {"group": name, "requires": path},
+    with "requires" None when the group is unconditional.
+    """
+    if isinstance(group, str):
+        return {"group": group, "requires": None}
+
+    return {"group": group["group"], "requires": group.get("requires")}
+
+
+def group_requirement_met(group, repo_path=LUSTRE_SOURCE):
+    """
+    True if the group's "requires" path exists in the checked-out Lustre
+    tree, or the group has no requirement.
+    """
+    requires = group.get("requires")
+
+    if not requires:
+        return True
+
+    return os.path.exists(os.path.join(repo_path, requires))
+
+
+def write_skipped_run(storage_key, change_id, subject, reason):
+    """
+    Record a branch group that was not run as a SKIP entry in
+    metadata_store.json, under the same key pk would have used.
+
+    The entry carries no result* keys, so the status site shows SKIP
+    rather than PASS or FAIL, and its change_id is the branch name so
+    load_history() treats the group as reviewed at this commit.
+    """
+    store_path = os.path.join(OUTPUT_DIR, "metadata_store.json")
+
+    try:
+        with open(store_path, "r") as f:
+            store = json.load(f)
+    except (IOError, json.JSONDecodeError):
+        store = {}
+
+    store[storage_key] = {
+        "patch_revision": storage_key,
+        "time_stamp": str(_now()),
+        "total_runtime": "0",
+        "change_id": change_id,
+        "subject": subject,
+        "skipped": "True",
+        "skip_reason": reason,
+    }
+
+    temp_path = store_path + ".tmp"
+
+    with open(temp_path, "w") as f:
+        json.dump(store, f, indent=2)
+    os.chmod(temp_path, 0o644)  # Make readable by nginx
+    os.replace(temp_path, store_path)
 
 
 def get_branch_head(repo_url, branch_name, repo_path=LUSTRE_SOURCE):
@@ -149,7 +222,7 @@ def write_branch_status(heads):
                 "branch": b["branch"],
                 "repo": b["repo"],
                 "subject": b.get("subject", ""),
-                "groups": b.get("groups", []),
+                "groups": [g["group"] for g in b.get("groups", [])],
                 **b["head"],
             }
             for b in heads
@@ -463,6 +536,18 @@ class Reviewer(object):
         self.podman_reset()
         self.run_tests(group, change_id, storage_key, group_subject)
 
+    def skip_branch_group(self, branch_name, git_hash, subject, group, requires):
+        """
+        Record a SKIP row for a group whose required file is missing on
+        the branch, keyed exactly as run_branch_group() would key a run.
+        """
+        storage_key = f"{git_hash}_{group}"
+        group_subject = f"[{group}] {subject}"[:90]
+        reason = f"{requires} not present on branch {branch_name}"
+
+        self._debug(f"SKIP branch {branch_name} group {group}: {reason}")
+        write_skipped_run(storage_key, branch_name, group_subject, reason)
+
     def poll_branch_heads(self, force=False):
         """
         Fetch every watched branch head and publish branch_status.json.
@@ -528,9 +613,9 @@ class Reviewer(object):
 
             # Only run the groups we haven't already tested at this commit.
             pending = [
-                group
-                for group in groups
-                if not self.in_history(branch_name, f"{git_hash}_{group}")
+                entry
+                for entry in groups
+                if not self.in_history(branch_name, f"{git_hash}_{entry['group']}")
             ]
 
             if not pending:
@@ -540,11 +625,22 @@ class Reviewer(object):
             # Check out the branch head once, then run each group separately.
             self.checkout_branch(repo_url, branch_name)
 
-            for group in pending:
-                self._debug(
-                    f"Reviewing branch {branch_name} group {group} at commit {git_hash}"
-                )
-                self.run_branch_group(branch_name, git_hash, subject, group)
+            for entry in pending:
+                group = entry["group"]
+
+                # A gated group only runs when the branch carries the
+                # file it needs (e.g. copy-builtin for the config
+                # group); otherwise it gets a SKIP row for this commit.
+                if not group_requirement_met(entry):
+                    self.skip_branch_group(
+                        branch_name, git_hash, subject, group, entry["requires"]
+                    )
+                else:
+                    self._debug(
+                        f"Reviewing branch {branch_name} group {group} at commit {git_hash}"
+                    )
+                    self.run_branch_group(branch_name, git_hash, subject, group)
+
                 self.write_history(branch_name, f"{git_hash}_{group}")
                 copy_static_site()
                 self.git_commit_and_push()

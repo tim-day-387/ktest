@@ -3,18 +3,36 @@
     "branch": "master",
     "repo": "https://review.whamcloud.com/fs/lustre-release",
     "subject": "Main development branch",
-    "groups": ["lustre-ci-branch", "distro", "mainline-lockdep", "mainline-zfs"]
+    "groups": [
+      "lustre-ci-branch",
+      "distro",
+      "mainline-lockdep",
+      "mainline-zfs",
+      {"group": "config", "requires": "copy-builtin"}
+    ]
   },
   {
     "branch": "master-next",
     "repo": "https://review.whamcloud.com/fs/lustre-release",
     "subject": "Staging branch for new changes",
-    "groups": ["lustre-ci-branch", "distro", "mainline-lockdep", "mainline-zfs"]
+    "groups": [
+      "lustre-ci-branch",
+      "distro",
+      "mainline-lockdep",
+      "mainline-zfs",
+      {"group": "config", "requires": "copy-builtin"}
+    ]
   },
   {
     "branch": "kernel-ci",
     "repo": "https://github.com/lustre/lustre-release",
     "subject": "Kernel upstreaming staging branch",
-    "groups": ["lustre-ci-branch", "distro", "mainline-lockdep", "mainline-zfs"]
+    "groups": [
+      "lustre-ci-branch",
+      "distro",
+      "mainline-lockdep",
+      "mainline-zfs",
+      {"group": "config", "requires": "copy-builtin"}
+    ]
   }
 ]

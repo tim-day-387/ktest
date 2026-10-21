@@ -100,6 +100,29 @@ require-kernel-config()
     IFS=$OLDIFS
 }
 
+# Drop options from the kernel config requirements, so a test can turn
+# off something the shared base config asks for (e.g. DEBUG_FS=n). Takes
+# bare option names; a CONFIG_ prefix or =value on the recorded entry is
+# ignored when matching.
+unrequire-kernel-config()
+{
+    local keep=()
+    local entry opt name
+
+    for entry in "${ktest_kernel_config_require[@]}"; do
+	name="${entry%%=*}"
+	name="${name#CONFIG_}"
+
+	for opt in "$@"; do
+	    [[ $name == "$opt" ]] && continue 2
+	done
+
+	keep+=("$entry")
+    done
+
+    ktest_kernel_config_require=("${keep[@]}")
+}
+
 # Enable CONFIG_EXPERT along with the pile of core options it unhides.
 #
 # CONFIG_EXPERT gives a Kconfig prompt to a large set of infrastructure

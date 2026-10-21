@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 #
-# LGTM coverage for CONFIG_LNET_SELFTEST.
+# LNet self-test module.
 #
 
-. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/lgtm.sh"
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/config-libs.sh"
 
-require-lgtm-kernel-config
+require-config-modular-kernel-config
 require-kernel-config LNET_SELFTEST=m
 
 main "$@"

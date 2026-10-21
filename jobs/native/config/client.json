@@ -1,0 +1,21 @@
+{
+  "jobs": [
+    {
+      "name": "lustre_patch",
+      "platform": "native_1",
+      "build": "tests/fs/lustre/config/client.ktest"
+    },
+    {
+      "name": "lustre_native",
+      "platform": "native_2",
+      "build": "tests/fs/lustre/config/client.ktest",
+      "depends_on": ["lustre_patch"]
+    },
+    {
+      "name": "client",
+      "platform": "native_2",
+      "run": "tests/fs/lustre/config/client.ktest",
+      "depends_on": ["lustre_native"]
+    }
+  ]
+}

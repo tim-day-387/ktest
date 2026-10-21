@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# GSS security with both the shared-secret key and kernel keyring mechanisms.
+#
+
+. "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")/config-libs.sh"
+
+require-config-modular-kernel-config
+require-kernel-config LUSTRE_FS_GSS=m
+require-kernel-config LUSTRE_FS_GSS_SSK=y
+require-kernel-config LUSTRE_FS_GSS_KEYRING=y
+
+main "$@"

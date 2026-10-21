@@ -301,9 +301,20 @@ const app = {
     return results;
   },
 
-  // Roll a list of job results up into one PASS/FAIL cell
-  summarizeResults(results) {
-    if (results.length === 0) return { text: "-", color: "gray" };
+  // A branch-group run the daemon recorded without running it, e.g.
+  // because the branch lacks a file the group needs (skip_reason)
+  isSkipped(data) {
+    return data.skipped === "True" || data.skipped === true;
+  },
+
+  // Roll a list of job results up into one PASS/FAIL cell; a run with
+  // no results that was skipped reads SKIP rather than "-"
+  summarizeResults(results, skipped = false) {
+    if (results.length === 0) {
+      return skipped
+        ? { text: "SKIP", color: "gray" }
+        : { text: "-", color: "gray" };
+    }
     if (results.every((r) => r.rc === 0)) return { text: "PASS", color: "green" };
     return { text: "FAIL", color: "red" };
   },
@@ -388,11 +399,18 @@ const app = {
         if (head && head.hash !== testedHash) {
           tested += ` (${commitLink(testedHash)}, head untested)`;
         }
-        const results = runs
-          .filter((r) => r.gitHash.split("_")[0] === testedHash)
+        // Skipped groups neither pass nor fail the branch; the
+        // branch only reads SKIP when every group at that commit
+        // was skipped
+        const atHead = runs.filter(
+          (r) => r.gitHash.split("_")[0] === testedHash,
+        );
+        const results = atHead
+          .filter((r) => !this.isSkipped(r.data))
           .flatMap((r) => this.collectResults(r.data))
           .filter((x) => x.enforced);
-        summary = this.summarizeResults(results);
+        const skipped = atHead.some((r) => this.isSkipped(r.data));
+        summary = this.summarizeResults(results, skipped);
       }
 
       html += `
@@ -588,6 +606,7 @@ const app = {
                                 <option value="All" selected>All</option>
                                 <option value="PASS">Passed</option>
                                 <option value="FAIL">Failed</option>
+                                <option value="SKIP">Skipped</option>
                                 <option value="Tested">Tested</option>
                                 <option value="Untested">Untested</option>
                             </select>
@@ -624,9 +643,11 @@ const app = {
 
       if (data) {
         const results = this.collectResults(data);
+        const skipped = this.isSkipped(data);
 
         enforcedSummary = this.summarizeResults(
           results.filter((x) => x.enforced),
+          skipped,
         );
         optionalSummary = this.summarizeResults(
           results.filter((x) => !x.enforced),
@@ -773,8 +794,14 @@ const app = {
             </div>
         `;
 
-    // Combine all results into one table (no separate sections)
-    leftHtml += this.renderResultsTable("", results);
+    // A skipped run has no results to tabulate; say why instead
+    if (this.isSkipped(data)) {
+      const reason = data.skip_reason || "group not run on this branch";
+      leftHtml += `<p style="color:gray;">SKIP: ${this.escapeHtml(reason)}</p>`;
+    } else {
+      // Combine all results into one table (no separate sections)
+      leftHtml += this.renderResultsTable("", results);
+    }
 
     const rightHtml = `<div class="right-panel empty" id="logPanel">Select a test to view logs</div>`;
 
