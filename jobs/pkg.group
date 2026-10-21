@@ -1,5 +1,4 @@
 # PKG: build the lustre binary packages across supported distributions.
-distro/al2-pkg
 distro/al2023-pkg
 distro/rocky8-pkg
 distro/rocky9-pkg

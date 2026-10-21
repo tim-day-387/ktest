@@ -34,11 +34,6 @@ IMAGES = [
         "name": "lustre-al2023",
     },
     {
-        "dockerfile": "containers/Containerfile.lustre.al2",
-        "tag": "lustre-al2:latest",
-        "name": "lustre-al2",
-    },
-    {
         "dockerfile": "containers/Containerfile.lustre.rocky8",
         "tag": "lustre-rocky8:latest",
         "name": "lustre-rocky8",
@@ -176,28 +171,6 @@ make --quiet -j$(nproc) rpms
         "dkms_script": """
 ./autogen.sh
 ./configure --enable-efa
-make --quiet -j$(nproc) dkms-rpms
-""",
-        "working_dir": "/home/ktest/git/lustre-release/",
-        "distro_platform": True,
-    },
-    "al2": {
-        "image": "lustre-al2:latest",
-        # The default gcc 7.3 cannot build against the amzn2 kernel, which
-        # was configured with a newer compiler (CONFIG_CC_HAS_ASM_INLINE).
-        "build_script": """
-./autogen.sh
-CC=gcc10-gcc ./configure
-make --quiet -j$(nproc)
-""",
-        "package_script": """
-./autogen.sh
-CC=gcc10-gcc ./configure
-make --quiet -j$(nproc) rpms
-""",
-        "dkms_script": """
-./autogen.sh
-CC=gcc10-gcc ./configure
 make --quiet -j$(nproc) dkms-rpms
 """,
         "working_dir": "/home/ktest/git/lustre-release/",

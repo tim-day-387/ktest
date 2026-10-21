@@ -1,7 +1,4 @@
 # Distro: build/boot tests across supported distributions.
-distro/al2
-distro/al2-pkg
-distro/al2-dkms
 distro/al2023
 distro/al2023-pkg
 distro/al2023-dkms

@@ -1,5 +1,4 @@
 # DKMS: build the lustre-dkms source packages across supported distributions.
-distro/al2-dkms
 distro/al2023-dkms
 distro/rocky8-dkms
 distro/rocky9-dkms
