@@ -10,5 +10,11 @@
     "repo": "https://review.whamcloud.com/fs/lustre-release",
     "subject": "Staging branch for new changes",
     "groups": ["lustre-ci-branch", "distro", "mainline-lockdep", "mainline-zfs"]
+  },
+  {
+    "branch": "kernel-ci",
+    "repo": "https://github.com/lustre/lustre-release",
+    "subject": "Kernel upstreaming staging branch",
+    "groups": ["lustre-ci-branch", "distro", "mainline-lockdep", "mainline-zfs"]
   }
 ]
