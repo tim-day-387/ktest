@@ -264,6 +264,11 @@ class Reviewer(object):
         self.branch_poll_interval = 60 * 10
         self.last_branch_poll = 0
         self.branch_heads = []
+        # A patch review runs one job group; a branch review runs each
+        # of its groups in turn, and a group like config builds a dozen
+        # kernels in parallel, so it needs much longer than a patch.
+        self.patch_timeout = 60 * 20
+        self.branch_group_timeout = 60 * 90
 
     def _debug(self, msg, *args):
         """_"""
@@ -396,7 +401,7 @@ class Reviewer(object):
 
         return out, returncode, elapsed_time
 
-    def run_tests(self, job_name, change_id, git_hash, subject):
+    def run_tests(self, job_name, change_id, git_hash, subject, timeout_seconds):
         # Build pk command with socket parameter and output flags
         # pk writes directly to OUTPUT_DIR with metadata_store.json
         # Note: change_id already contains git_hash (format: {raw_change_id}_{git_hash})
@@ -406,7 +411,7 @@ class Reviewer(object):
         output_args = f"--output {OUTPUT_DIR} --git-hash {git_hash} --change-id {change_id} --subject '{escaped_subject}'"
         command = f"cd {KTEST_DIR} && ./pk {socket_arg} --shared-filesystem /tmp --tarball-input job {job_name} {output_args}"
 
-        Reviewer.run_script(command, timeout_seconds=1200)
+        Reviewer.run_script(command, timeout_seconds=timeout_seconds)
 
     def checkout_patch(self, change):
         revision = change.get("current_revision")
@@ -447,7 +452,7 @@ class Reviewer(object):
         subject = subject[:90]
 
         self.checkout_patch(change)
-        self.run_tests("lustre-ci", change_id, revision, subject)
+        self.run_tests("lustre-ci", change_id, revision, subject, self.patch_timeout)
 
         copy_static_site()
 
@@ -534,7 +539,9 @@ class Reviewer(object):
         group_subject = f"[{group}] {subject}"[:90]
 
         self.podman_reset()
-        self.run_tests(group, change_id, storage_key, group_subject)
+        self.run_tests(
+            group, change_id, storage_key, group_subject, self.branch_group_timeout
+        )
 
     def skip_branch_group(self, branch_name, git_hash, subject, group, requires):
         """
